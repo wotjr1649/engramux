@@ -1948,3 +1948,1116 @@ git commit -m "feat: Codex parser와 formatter — Claude 와 serializer 분리"
 ```
 
 ---
+
+## Task 9: 프로젝트 식별
+
+upstream `claude-mem`의 실 DB는 `project` 키가 basename 이라 127개 중 `off`, `on`, `empty`,
+`cwd`, `run`, `work` 같은 쓰레기 값이 섞여 있다. basename 을 쓰지 않는다. spec §13.
+
+**Files:**
+- Create: `internal/session/project_identity.go`
+- Test: `internal/session/project_identity_test.go`
+
+**Interfaces:**
+- Consumes: 없음
+- Produces:
+  - `session.ProjectIdentity{RepositoryKey, WorkspaceKey, CanonicalRoot, DisplayName, RemoteHash string}`
+  - `session.Identify(cwd string) (ProjectIdentity, error)`
+  - `session.ProjectID(p ProjectIdentity) string` — `projects.id` 용 결정적 해시
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/session/project_identity_test.go`:
+
+```go
+package session
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestIdentifyNonGitUsesCanonicalPathHash(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Identify(dir)
+	if err != nil {
+		t.Fatalf("Identify: %v", err)
+	}
+	if p.RepositoryKey == "" || p.WorkspaceKey == "" {
+		t.Fatalf("empty keys: %+v", p)
+	}
+	if p.CanonicalRoot == "" {
+		t.Fatal("CanonicalRoot is empty")
+	}
+	// basename 을 키로 쓰면 안 된다. upstream 이 이걸로 off/on/empty 같은
+	// 쓰레기 프로젝트를 127개 만들었다.
+	if p.RepositoryKey == filepath.Base(dir) {
+		t.Fatal("RepositoryKey is the bare basename")
+	}
+}
+
+func TestIdentifyIsStableForSameDir(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := Identify(dir)
+	b, _ := Identify(dir)
+	if a != b {
+		t.Fatalf("unstable identity:\n a=%+v\n b=%+v", a, b)
+	}
+}
+
+func TestIdentifyDiffersForDifferentDirs(t *testing.T) {
+	a, _ := Identify(t.TempDir())
+	b, _ := Identify(t.TempDir())
+	if a.WorkspaceKey == b.WorkspaceKey {
+		t.Fatal("two different dirs produced the same WorkspaceKey")
+	}
+}
+
+// Windows 는 드라이브 문자 대소문자와 경로 구분자가 흔들린다.
+// 같은 디렉터리를 다르게 쓴 두 경로가 같은 신원을 내야 한다.
+func TestIdentifyNormalizesWindowsPath(t *testing.T) {
+	dir := t.TempDir()
+	if len(dir) < 2 || dir[1] != ':' {
+		t.Skip("not a drive-letter path")
+	}
+	lower := strings.ToLower(dir[:1]) + dir[1:]
+	upper := strings.ToUpper(dir[:1]) + dir[1:]
+	slash := strings.ReplaceAll(upper, string(os.PathSeparator), "/")
+
+	a, _ := Identify(lower)
+	b, _ := Identify(upper)
+	c, _ := Identify(slash)
+	if a.WorkspaceKey != b.WorkspaceKey || a.WorkspaceKey != c.WorkspaceKey {
+		t.Fatalf("path spellings diverged:\n %q -> %s\n %q -> %s\n %q -> %s",
+			lower, a.WorkspaceKey, upper, b.WorkspaceKey, slash, c.WorkspaceKey)
+	}
+}
+
+func TestProjectIDIsDeterministic(t *testing.T) {
+	p := ProjectIdentity{RepositoryKey: "r1", WorkspaceKey: "w1"}
+	if ProjectID(p) != ProjectID(p) {
+		t.Fatal("ProjectID is not deterministic")
+	}
+	q := ProjectIdentity{RepositoryKey: "r1", WorkspaceKey: "w2"}
+	if ProjectID(p) == ProjectID(q) {
+		t.Fatal("different workspaces collided")
+	}
+}
+
+func TestIdentifyRejectsEmptyCWD(t *testing.T) {
+	if _, err := Identify(""); err == nil {
+		t.Fatal("Identify accepted an empty cwd")
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/session/ -v`
+Expected: FAIL — `undefined: Identify`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/session/project_identity.go`:
+
+```go
+// Package session 은 cwd 를 안정적인 프로젝트 신원으로 바꾼다.
+// basename 을 키로 쓰지 않는다 — upstream 이 그걸로 off/on/empty 같은
+// 쓰레기 프로젝트 127개를 만들었다(spec §13).
+package session
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+type ProjectIdentity struct {
+	RepositoryKey string
+	WorkspaceKey  string
+	CanonicalRoot string
+	DisplayName   string
+	RemoteHash    string
+}
+
+// normalize 는 Windows 경로 표기 흔들림을 없앤다:
+// 드라이브 문자 대문자화, 구분자 통일, 심볼릭 링크 해소, 후행 구분자 제거.
+func normalize(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	}
+	p = filepath.Clean(p)
+	if len(p) >= 2 && p[1] == ':' {
+		p = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return p
+}
+
+func hash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:16]) // 128비트면 로컬 충돌에 충분하다
+}
+
+// Identify 는 git 저장소면 common dir 와 remote 로, 아니면 canonical path 로
+// 신원을 만든다. git 이 없거나 실패해도 에러가 아니다 — fallback 이 정상 경로다.
+func Identify(cwd string) (ProjectIdentity, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return ProjectIdentity{}, errors.New("session: empty cwd")
+	}
+	root := normalize(cwd)
+
+	p := ProjectIdentity{
+		CanonicalRoot: root,
+		DisplayName:   filepath.Base(root),
+		WorkspaceKey:  hash(root),
+		RepositoryKey: hash(root), // git 이 아니면 workspace 와 같다
+	}
+
+	commonDir, err := gitOutput(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return p, nil
+	}
+	p.RepositoryKey = hash(normalize(commonDir))
+
+	if remote, err := gitOutput(root, "config", "--get", "remote.origin.url"); err == nil {
+		// remote URL 에는 credential 이 섞일 수 있으므로 원문을 저장하지 않는다.
+		p.RemoteHash = hash(strings.TrimSuffix(strings.ToLower(remote), ".git"))
+	}
+	return p, nil
+}
+
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// ProjectID 는 projects.id 다. uuid 를 쓰면 upsert 에서 진 쪽 id 로
+// events 를 쓰게 되므로 반드시 파생 가능해야 한다(spec §3.7).
+func ProjectID(p ProjectIdentity) string {
+	return "proj_" + hash(p.RepositoryKey+"\x00"+p.WorkspaceKey)
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/session/ -v`
+Expected: PASS — 6개 테스트 ok
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/session
+git commit -m "feat: 프로젝트 식별 — basename 대신 canonical path/git common dir"
+```
+
+---
+
+## Task 10: SQLite 연결과 스키마 마이그레이션
+
+pragma 는 **커넥션별**이다. `db.Exec("PRAGMA foreign_keys=ON")` 은 풀 4개 중 1개만 켠다(실측).
+반드시 DSN 에 넣는다. spec §3.3.
+
+**Files:**
+- Create: `internal/storage/sqlite/database.go`
+- Create: `internal/storage/sqlite/migrations/00001_init.sql`
+- Create: `internal/storage/sqlite/migrations/embed.go`
+- Test: `internal/storage/sqlite/database_test.go`
+
+**Interfaces:**
+- Consumes: 없음
+- Produces:
+  - `sqlite.DSN(path string) string`
+  - `sqlite.DB{Writer *sql.DB; Reader *sql.DB}`
+  - `sqlite.Open(path string) (*DB, error)` — 마이그레이션까지 적용하고 돌아온다
+  - `(*DB).Close() error`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/storage/sqlite/database_test.go`:
+
+```go
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
+
+func openTemp(t *testing.T) *DB {
+	t.Helper()
+	db, err := Open(filepath.Join(t.TempDir(), "engramux.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// pragma 는 커넥션별이다. 풀의 모든 커넥션에서 같은 값이 나와야 한다.
+func TestPragmasApplyToEveryPooledConnection(t *testing.T) {
+	db := openTemp(t)
+	want := map[string]string{
+		"foreign_keys":        "1",
+		"recursive_triggers":  "1",
+		"synchronous":         "2", // FULL
+		"journal_mode":        "wal",
+		"secure_delete":       "1",
+	}
+	// 커넥션 4개를 동시에 붙잡은 채 각각에서 pragma 를 읽는다.
+	const n = 4
+	db.Reader.SetMaxOpenConns(n)
+	conns := make([]*sql.Conn, n)
+	for i := range conns {
+		c, err := db.Reader.Conn(context.Background())
+		if err != nil {
+			t.Fatalf("Conn %d: %v", i, err)
+		}
+		conns[i] = c
+		defer c.Close()
+	}
+	for i, c := range conns {
+		for pragma, exp := range want {
+			var got string
+			if err := c.QueryRowContext(context.Background(), "PRAGMA "+pragma).Scan(&got); err != nil {
+				t.Fatalf("conn %d PRAGMA %s: %v", i, pragma, err)
+			}
+			if got != exp {
+				t.Errorf("conn %d: %s = %q, want %q", i, pragma, got, exp)
+			}
+		}
+	}
+}
+
+func TestWriterIsSingleConnection(t *testing.T) {
+	db := openTemp(t)
+	// MaxOpenConns(1) 이면 두 번째 Conn 요청이 첫 번째가 풀릴 때까지 막힌다.
+	c1, err := db.Writer.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("first Conn: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := db.Writer.Conn(ctx); err == nil {
+		t.Fatal("second writer Conn succeeded; writer pool must be MaxOpenConns(1)")
+	}
+	c1.Close()
+}
+
+func TestMigrationCreatesExpectedTables(t *testing.T) {
+	db := openTemp(t)
+	want := []string{
+		"projects", "sessions", "events", "observations",
+		"memory_items", "memory_items_fts", "projector_cursors",
+	}
+	for _, name := range want {
+		var n int
+		err := db.Reader.QueryRow(
+			`SELECT count(*) FROM sqlite_master WHERE name = ?`, name).Scan(&n)
+		if err != nil {
+			t.Fatalf("query %s: %v", name, err)
+		}
+		if n != 1 {
+			t.Errorf("table %s: count = %d, want 1", name, n)
+		}
+	}
+}
+
+// jobs 와 session_summaries 는 1.0 에 없다(spec §3.4).
+// 소비자가 없는 테이블을 만들면 plan 이 쓰지 않는 코드를 낳는다.
+func TestMigrationOmitsDeferredTables(t *testing.T) {
+	db := openTemp(t)
+	for _, name := range []string{"jobs", "session_summaries", "dead_letters", "embeddings"} {
+		var n int
+		db.Reader.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = ?`, name).Scan(&n)
+		if n != 0 {
+			t.Errorf("table %s exists but is out of 1.0 scope", name)
+		}
+	}
+}
+
+func TestMigrationIsIdempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engramux.db")
+	db1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	db1.Close()
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	db2.Close()
+}
+
+// 여러 goroutine 이 동시에 써도 SQLITE_BUSY 가 나오면 안 된다.
+// writer 가 1커넥션이라 직렬화된다.
+func TestConcurrentWritesDoNotFail(t *testing.T) {
+	db := openTemp(t)
+	db.Writer.Exec(`INSERT INTO projects
+		(id,repository_key,workspace_key,canonical_root,display_name,created_at_ms,last_seen_at_ms)
+		VALUES ('p','r','w','D:/x','x',1,1)`)
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := db.Writer.Exec(
+				`UPDATE projects SET last_seen_at_ms = last_seen_at_ms + 1 WHERE id = 'p'`)
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent write failed: %v", err)
+	}
+	var n int64
+	db.Reader.QueryRow(`SELECT last_seen_at_ms FROM projects WHERE id='p'`).Scan(&n)
+	if n != 33 {
+		t.Fatalf("last_seen_at_ms = %d, want 33 (1 + 32 increments)", n)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/storage/sqlite/ -v`
+Expected: FAIL — `undefined: Open`, `undefined: DB`
+
+- [ ] **Step 3: 의존성을 추가하고 마이그레이션을 쓴다**
+
+```bash
+go get modernc.org/sqlite@v1.57.0
+go get github.com/pressly/goose/v3@v3.27.3
+```
+
+`internal/storage/sqlite/migrations/embed.go`:
+
+```go
+// Package migrations 는 goose 가 읽는 SQL 파일을 embed 한다.
+package migrations
+
+import "embed"
+
+//go:embed *.sql
+var FS embed.FS
+```
+
+`internal/storage/sqlite/migrations/00001_init.sql` — spec §3.4 스키마 그대로다:
+
+```sql
+-- +goose Up
+CREATE TABLE projects (
+    id                TEXT PRIMARY KEY,
+    repository_key    TEXT NOT NULL,
+    workspace_key     TEXT NOT NULL,
+    canonical_root    TEXT NOT NULL,
+    display_name      TEXT NOT NULL,
+    git_remote_hash   TEXT,
+    created_at_ms     INTEGER NOT NULL,
+    last_seen_at_ms   INTEGER NOT NULL,
+    UNIQUE(repository_key, workspace_key)
+) STRICT;
+
+CREATE TABLE sessions (
+    id                   TEXT PRIMARY KEY,
+    host                 TEXT NOT NULL,
+    host_session_id      TEXT NOT NULL,
+    parent_session_id    TEXT REFERENCES sessions(id),
+    project_id           TEXT NOT NULL REFERENCES projects(id),
+    status               TEXT NOT NULL DEFAULT 'active',
+    started_at_ms        INTEGER NOT NULL,
+    last_activity_at_ms  INTEGER NOT NULL,
+    completed_at_ms      INTEGER,
+    last_ingest_order    INTEGER NOT NULL DEFAULT 0,
+    metadata_json        TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(host, host_session_id),
+    CHECK (id = host || ':' || host_session_id)
+) STRICT;
+
+CREATE TABLE events (
+    id                  TEXT PRIMARY KEY,
+    host                TEXT NOT NULL,
+    event_type          TEXT NOT NULL,
+    session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    project_id          TEXT NOT NULL REFERENCES projects(id),
+    ingest_order        INTEGER NOT NULL,
+    idempotency_key     TEXT NOT NULL CHECK (length(idempotency_key) > 0),
+    turn_key            TEXT,
+    tool_use_id         TEXT,
+    payload_json        TEXT NOT NULL,
+    payload_sha256      TEXT NOT NULL,
+    payload_truncated   INTEGER NOT NULL DEFAULT 0,
+    payload_orig_bytes  INTEGER NOT NULL,
+    privacy_class       TEXT NOT NULL,
+    redaction_version   INTEGER NOT NULL,
+    host_timestamp_ms   INTEGER,
+    received_at_ms      INTEGER NOT NULL,
+    schema_version      INTEGER NOT NULL,
+    relay_version       TEXT NOT NULL,
+    UNIQUE(host, idempotency_key),
+    UNIQUE(session_id, ingest_order)
+) STRICT;
+CREATE INDEX idx_events_session_order ON events(session_id, ingest_order);
+CREATE INDEX idx_events_project_time  ON events(project_id, received_at_ms DESC);
+CREATE INDEX idx_events_tool_use      ON events(session_id, tool_use_id)
+                                        WHERE tool_use_id IS NOT NULL;
+
+CREATE TABLE observations (
+    id                 TEXT PRIMARY KEY,
+    source_event_id    TEXT NOT NULL REFERENCES events(id)   ON DELETE CASCADE,
+    session_id         TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    project_id         TEXT NOT NULL REFERENCES projects(id),
+    type               TEXT,
+    title              TEXT,
+    narrative          TEXT,
+    facts_json         TEXT NOT NULL DEFAULT '[]',
+    concepts_json      TEXT NOT NULL DEFAULT '[]',
+    files_read_json    TEXT NOT NULL DEFAULT '[]',
+    files_changed_json TEXT NOT NULL DEFAULT '[]',
+    confidence         REAL,
+    processor_id       TEXT NOT NULL DEFAULT 'deterministic@v1'
+                         CHECK (length(processor_id) > 0),
+    created_at_ms      INTEGER NOT NULL,
+    UNIQUE(source_event_id, processor_id)
+) STRICT;
+
+CREATE TABLE memory_items (
+    id               TEXT PRIMARY KEY,
+    project_id       TEXT NOT NULL REFERENCES projects(id),
+    session_id       TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    source_type      TEXT NOT NULL,
+    source_id        TEXT NOT NULL,
+    processor_id     TEXT NOT NULL DEFAULT 'deterministic@v1'
+                       CHECK (length(processor_id) > 0),
+    memory_type      TEXT NOT NULL,
+    title            TEXT,
+    body             TEXT NOT NULL,
+    body_norm        TEXT NOT NULL DEFAULT '',
+    facts_json       TEXT NOT NULL DEFAULT '[]',
+    concepts_json    TEXT NOT NULL DEFAULT '[]',
+    file_refs_json   TEXT NOT NULL DEFAULT '[]',
+    importance       REAL NOT NULL DEFAULT 0.5,
+    confidence       REAL NOT NULL DEFAULT 0.5,
+    valid_from_ms    INTEGER,
+    valid_to_ms      INTEGER,
+    superseded_by    TEXT REFERENCES memory_items(id),
+    created_at_ms    INTEGER NOT NULL,
+    updated_at_ms    INTEGER NOT NULL,
+    UNIQUE(source_type, source_id, processor_id)
+) STRICT;
+
+CREATE VIRTUAL TABLE memory_items_fts USING fts5(
+    title, body, body_norm, facts_json, concepts_json, file_refs_json,
+    content       = 'memory_items',
+    content_rowid = 'rowid',
+    tokenize      = 'porter unicode61 remove_diacritics 2',
+    prefix        = '2 3 4'
+);
+
+CREATE TRIGGER memory_items_ai AFTER INSERT ON memory_items BEGIN
+  INSERT INTO memory_items_fts(rowid,title,body,body_norm,facts_json,concepts_json,file_refs_json)
+  VALUES (new.rowid,new.title,new.body,new.body_norm,new.facts_json,new.concepts_json,new.file_refs_json);
+END;
+
+CREATE TRIGGER memory_items_ad AFTER DELETE ON memory_items BEGIN
+  INSERT INTO memory_items_fts(memory_items_fts,rowid,title,body,body_norm,facts_json,concepts_json,file_refs_json)
+  VALUES ('delete',old.rowid,old.title,old.body,old.body_norm,old.facts_json,old.concepts_json,old.file_refs_json);
+END;
+
+CREATE TRIGGER memory_items_au AFTER UPDATE ON memory_items BEGIN
+  INSERT INTO memory_items_fts(memory_items_fts,rowid,title,body,body_norm,facts_json,concepts_json,file_refs_json)
+  VALUES ('delete',old.rowid,old.title,old.body,old.body_norm,old.facts_json,old.concepts_json,old.file_refs_json);
+  INSERT INTO memory_items_fts(rowid,title,body,body_norm,facts_json,concepts_json,file_refs_json)
+  VALUES (new.rowid,new.title,new.body,new.body_norm,new.facts_json,new.concepts_json,new.file_refs_json);
+END;
+
+CREATE TABLE projector_cursors (
+    name            TEXT NOT NULL,
+    version         INTEGER NOT NULL,
+    last_event_id   TEXT,
+    updated_at_ms   INTEGER NOT NULL,
+    PRIMARY KEY(name, version)
+) STRICT;
+
+-- +goose Down
+DROP TABLE IF EXISTS projector_cursors;
+DROP TRIGGER IF EXISTS memory_items_au;
+DROP TRIGGER IF EXISTS memory_items_ad;
+DROP TRIGGER IF EXISTS memory_items_ai;
+DROP TABLE IF EXISTS memory_items_fts;
+DROP TABLE IF EXISTS memory_items;
+DROP TABLE IF EXISTS observations;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS projects;
+```
+
+`internal/storage/sqlite/database.go`:
+
+```go
+// Package sqlite 는 연결과 스키마만 담당한다. 질의는 각 store 파일에 있다.
+package sqlite
+
+import (
+	"database/sql"
+	"fmt"
+	"io/fs"
+
+	"github.com/pressly/goose/v3"
+	_ "modernc.org/sqlite"
+
+	"github.com/wotjr1649/engramux/internal/storage/sqlite/migrations"
+)
+
+// DSN 은 모든 pragma 를 연결 문자열에 넣는다.
+// db.Exec("PRAGMA ...") 는 풀의 커넥션 하나에만 적용된다 — 실측으로 4개 중 1개였다.
+func DSN(path string) string {
+	return "file:" + path +
+		"?_pragma=journal_mode(wal)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=recursive_triggers(1)" +
+		"&_pragma=synchronous(3)" +
+		"&_pragma=busy_timeout(10000)" +
+		"&_pragma=journal_size_limit(67108864)" +
+		"&_pragma=secure_delete(1)"
+}
+
+// DB 는 writer 와 reader 풀을 분리해 갖는다.
+// writer 를 1커넥션으로 묶으면 tail latency 가 882ms -> 40.5ms 로 줄고
+// 처리량은 오히려 2배가 된다(실측).
+type DB struct {
+	Writer *sql.DB
+	Reader *sql.DB
+}
+
+func Open(path string) (*DB, error) {
+	dsn := DSN(path)
+
+	w, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open writer: %w", err)
+	}
+	w.SetMaxOpenConns(1)
+	w.SetMaxIdleConns(1)
+
+	if err := migrate(w); err != nil {
+		w.Close()
+		return nil, err
+	}
+
+	r, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		w.Close()
+		return nil, fmt.Errorf("open reader: %w", err)
+	}
+	r.SetMaxOpenConns(4)
+
+	return &DB{Writer: w, Reader: r}, nil
+}
+
+func migrate(db *sql.DB) error {
+	// goose 의 NewProvider 는 FS 루트를 훑는다. embed.FS 를 그대로 주면
+	// "no migrations found" 가 나오므로 fs.Sub 로 잘라 준다.
+	sub, err := fs.Sub(migrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("fs.Sub: %w", err)
+	}
+	goose.SetBaseFS(sub)
+	if err := goose.SetDialect("sqlite"); err != nil {
+		return fmt.Errorf("dialect: %w", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) Close() error {
+	e1 := d.Writer.Close()
+	e2 := d.Reader.Close()
+	if e1 != nil {
+		return e1
+	}
+	return e2
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/storage/sqlite/ -v`
+Expected: PASS — 6개 테스트 ok. `TestPragmasApplyToEveryPooledConnection`이 커넥션 4개
+전부에서 같은 값을 봐야 한다.
+
+- [ ] **Step 5: CGO 없이 빌드되는지 확인한다**
+
+Run: `CGO_ENABLED=0 go build ./...`
+Expected: 에러 없음. Global Constraints의 `CGO_ENABLED=0`은 예외가 없다.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add internal/storage go.mod go.sum
+git commit -m "feat: SQLite 연결과 스키마 — pragma 는 DSN 에, writer 는 1커넥션"
+```
+
+---
+
+## Task 11: 인제스트 트랜잭션
+
+Phase 1의 심장이다. spec §3.7을 그대로 구현한다. 순서가 중요하다 —
+idempotency 확인이 순번 발급보다 **앞**에 와야 재전송이 `ingest_order`를 소모하지 않는다.
+소모하면 유령 gap 이 생기고 gap 기반 유실 탐지가 거짓 경보를 낸다.
+
+실측 근거 세 가지가 이 설계를 강제한다:
+- `DEFERRED` 트랜잭션의 read-modify-write 는 `SQLITE_BUSY` 로 **640건 중 309건을 잃는다**.
+- autocommit 은 640건 중 **393건에 중복 순번을 무오류로** 부여한다.
+- 캡처 784건 중 **689건(88%)이 자기 `SessionStart` 보다 먼저 도착**한다. upsert-before-insert 는
+  예외가 아니라 정상 경로다.
+
+**Files:**
+- Create: `internal/storage/sqlite/event_store.go`
+- Test: `internal/storage/sqlite/event_store_test.go`
+
+**Interfaces:**
+- Consumes: `sqlite.DB` (Task 10), `event.Envelope` (Task 3), `session.ProjectIdentity`·`session.ProjectID` (Task 9)
+- Produces:
+  - `sqlite.IngestResult{IngestOrder int64; Duplicate bool}`
+  - `(*DB).Ingest(ctx context.Context, env event.Envelope, pid session.ProjectIdentity, nowMS int64) (IngestResult, error)`
+  - `sqlite.SchemaVersion = 1` (상수)
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/storage/sqlite/event_store_test.go`:
+
+```go
+package sqlite
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"sync"
+	"testing"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/session"
+)
+
+func testDB(t *testing.T) *DB {
+	t.Helper()
+	db, err := Open(filepath.Join(t.TempDir(), "e.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func env(ingestID, sessionID string, typ event.Type) event.Envelope {
+	return event.Envelope{
+		Version:          1,
+		IngestID:         ingestID,
+		Host:             event.HostCodex,
+		EventType:        typ,
+		HostSessionID:    sessionID,
+		CWD:              "D:/AI_DEV/engramux",
+		Payload:          json.RawMessage(`{"a":1}`),
+		PayloadSHA256:    "sha-" + ingestID,
+		PayloadOrigBytes: 7,
+		PrivacyClass:     event.Sensitive,
+		RedactionVersion: 1,
+		RelayVersion:     "0.1.0-dev",
+	}
+}
+
+var pid = session.ProjectIdentity{
+	RepositoryKey: "r1", WorkspaceKey: "w1",
+	CanonicalRoot: "D:/AI_DEV/engramux", DisplayName: "engramux",
+}
+
+func TestIngestAssignsSequentialOrder(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	for i := 1; i <= 3; i++ {
+		r, err := db.Ingest(ctx, env(fmt.Sprintf("id-%d", i), "s1", event.PostToolUse), pid, int64(i))
+		if err != nil {
+			t.Fatalf("Ingest %d: %v", i, err)
+		}
+		if r.Duplicate {
+			t.Fatalf("Ingest %d reported Duplicate on first delivery", i)
+		}
+		if r.IngestOrder != int64(i) {
+			t.Fatalf("IngestOrder = %d, want %d", r.IngestOrder, i)
+		}
+	}
+}
+
+// 재전송은 에러가 아니라 committed 다. 에러를 돌려주면 relay 가 실패로 보고
+// 무한 re-spool 한다.
+func TestIngestRedeliveryIsDuplicateNotError(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	e := env("id-1", "s1", event.PostToolUse)
+	first, err := db.Ingest(ctx, e, pid, 1)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	again, err := db.Ingest(ctx, e, pid, 2)
+	if err != nil {
+		t.Fatalf("redelivery returned error %v; must return Duplicate=true", err)
+	}
+	if !again.Duplicate {
+		t.Fatal("redelivery not flagged as duplicate")
+	}
+	if again.IngestOrder != first.IngestOrder {
+		t.Fatalf("redelivery order = %d, want %d", again.IngestOrder, first.IngestOrder)
+	}
+	var n int
+	db.Reader.QueryRow(`SELECT count(*) FROM events`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("events = %d, want 1", n)
+	}
+}
+
+// dedup 을 INSERT 의 ON CONFLICT DO NOTHING 으로 하면 순번이 소모돼
+// 유령 gap 이 생긴다. 재전송 뒤 다음 이벤트가 연속 번호를 받아야 한다.
+func TestRedeliveryDoesNotBurnIngestOrder(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	db.Ingest(ctx, env("id-1", "s1", event.PostToolUse), pid, 1)
+	for i := 0; i < 5; i++ {
+		db.Ingest(ctx, env("id-1", "s1", event.PostToolUse), pid, 2)
+	}
+	r, err := db.Ingest(ctx, env("id-2", "s1", event.Stop), pid, 3)
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if r.IngestOrder != 2 {
+		t.Fatalf("IngestOrder = %d, want 2 (no gap from 5 redeliveries)", r.IngestOrder)
+	}
+}
+
+// 캡처 784건 중 689건(88%)이 SessionStart 보다 먼저 온다.
+// 이게 정상 경로이므로 반드시 커밋돼야 한다.
+func TestIngestBeforeSessionStart(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	if _, err := db.Ingest(ctx, env("id-1", "s1", event.PostToolUse), pid, 1); err != nil {
+		t.Fatalf("PostToolUse before SessionStart failed: %v", err)
+	}
+	if _, err := db.Ingest(ctx, env("id-2", "s1", event.SessionStart), pid, 2); err != nil {
+		t.Fatalf("late SessionStart failed: %v", err)
+	}
+}
+
+// 늦게 온 SessionStart 가 last_ingest_order 를 리셋하면 중복 순번이 생긴다.
+func TestLateSessionStartDoesNotResetOrder(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	for i := 1; i <= 3; i++ {
+		db.Ingest(ctx, env(fmt.Sprintf("pre-%d", i), "s1", event.PostToolUse), pid, int64(i))
+	}
+	db.Ingest(ctx, env("start", "s1", event.SessionStart), pid, 4)
+	r, _ := db.Ingest(ctx, env("post", "s1", event.Stop), pid, 5)
+	if r.IngestOrder != 5 {
+		t.Fatalf("IngestOrder = %d, want 5; SessionStart reset the counter", r.IngestOrder)
+	}
+	var dup int
+	db.Reader.QueryRow(`SELECT count(*) FROM (
+		SELECT ingest_order FROM events WHERE session_id='codex:s1'
+		GROUP BY ingest_order HAVING count(*) > 1)`).Scan(&dup)
+	if dup != 0 {
+		t.Fatalf("%d duplicate ingest_order values in one session", dup)
+	}
+}
+
+// --resume 은 다른 worktree 에서 같은 세션을 이어받는다. project_id 를
+// 갱신하면 그 세션의 과거 이벤트가 전부 엉뚱한 프로젝트로 재배치된다.
+func TestResumeDoesNotReparentSession(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	db.Ingest(ctx, env("id-1", "s1", event.SessionStart), pid, 1000)
+
+	other := session.ProjectIdentity{
+		RepositoryKey: "r2", WorkspaceKey: "w2",
+		CanonicalRoot: "D:/other", DisplayName: "other",
+	}
+	db.Ingest(ctx, env("id-2", "s1", event.SessionStart), other, 5000)
+
+	var projectID string
+	var startedAt int64
+	db.Reader.QueryRow(
+		`SELECT project_id, started_at_ms FROM sessions WHERE id='codex:s1'`).Scan(&projectID, &startedAt)
+	if projectID != session.ProjectID(pid) {
+		t.Fatalf("project_id = %q, want the original %q", projectID, session.ProjectID(pid))
+	}
+	if startedAt != 1000 {
+		t.Fatalf("started_at_ms = %d, want 1000 (min, not overwritten)", startedAt)
+	}
+}
+
+// 동시 writer 에서 중복 순번도 유실도 없어야 한다.
+func TestConcurrentIngestHasNoDuplicateOrderAndNoLoss(t *testing.T) {
+	db := testDB(t)
+	const n = 200
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := db.Ingest(context.Background(),
+				env(fmt.Sprintf("id-%d", i), "s1", event.PostToolUse), pid, int64(i))
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent ingest failed: %v", err)
+	}
+	var stored, distinct int
+	db.Reader.QueryRow(`SELECT count(*), count(DISTINCT ingest_order) FROM events`).Scan(&stored, &distinct)
+	if stored != n {
+		t.Fatalf("stored = %d, want %d", stored, n)
+	}
+	if distinct != n {
+		t.Fatalf("distinct ingest_order = %d, want %d", distinct, n)
+	}
+}
+
+func TestIngestLeavesNoForeignKeyViolations(t *testing.T) {
+	db := testDB(t)
+	db.Ingest(context.Background(), env("id-1", "s1", event.PostToolUse), pid, 1)
+	rows, err := db.Reader.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("foreign_key_check: %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("foreign_key_check reported a violation")
+	}
+}
+
+// 같은 host_session_id 라도 host 가 다르면 다른 세션이다.
+func TestSameSessionIDAcrossHostsDoesNotCollide(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	a := env("id-a", "shared", event.PostToolUse)
+	b := env("id-b", "shared", event.PostToolUse)
+	b.Host = event.HostClaudeCode
+	if _, err := db.Ingest(ctx, a, pid, 1); err != nil {
+		t.Fatalf("codex: %v", err)
+	}
+	if _, err := db.Ingest(ctx, b, pid, 2); err != nil {
+		t.Fatalf("claude: %v", err)
+	}
+	var n int
+	db.Reader.QueryRow(`SELECT count(*) FROM sessions`).Scan(&n)
+	if n != 2 {
+		t.Fatalf("sessions = %d, want 2 (one per host)", n)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/storage/sqlite/ -run TestIngest -v`
+Expected: FAIL — `db.Ingest undefined`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/storage/sqlite/event_store.go`:
+
+```go
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/session"
+)
+
+// SchemaVersion 은 events.schema_version 에 그대로 들어간다.
+// 마이그레이션 번호를 올릴 때 함께 올린다.
+const SchemaVersion = 1
+
+type IngestResult struct {
+	IngestOrder int64
+	// Duplicate 가 true 여도 호출자는 committed ACK 를 보낸다.
+	// 에러를 돌려주면 relay 가 무한 re-spool 한다.
+	Duplicate bool
+}
+
+// Ingest 는 spec §3.7 트랜잭션 전체를 BEGIN IMMEDIATE 하나에서 수행한다.
+// DEFERRED 로 두면 read-modify-write 가 SQLITE_BUSY 로 48% 를 잃는다(실측).
+func (d *DB) Ingest(
+	ctx context.Context,
+	env event.Envelope,
+	pid session.ProjectIdentity,
+	nowMS int64,
+) (IngestResult, error) {
+	sessionID := string(env.Host) + ":" + env.HostSessionID
+	projectID := session.ProjectID(pid)
+
+	conn, err := d.Writer.Conn(ctx)
+	if err != nil {
+		return IngestResult{}, fmt.Errorf("conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return IngestResult{}, fmt.Errorf("begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	// 1. idempotency 먼저. 재전송이 순번을 소모하면 유령 gap 이 생긴다.
+	var existing int64
+	err = conn.QueryRowContext(ctx,
+		`SELECT ingest_order FROM events WHERE host = ? AND idempotency_key = ?`,
+		string(env.Host), env.IngestID,
+	).Scan(&existing)
+	if err == nil {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return IngestResult{}, fmt.Errorf("commit dup: %w", err)
+		}
+		committed = true
+		return IngestResult{IngestOrder: existing, Duplicate: true}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return IngestResult{}, fmt.Errorf("idempotency probe: %w", err)
+	}
+
+	// 2. project upsert. DO NOTHING 은 RETURNING 에서 행을 내지 않으므로 쓰지 않는다.
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO projects
+			(id, repository_key, workspace_key, canonical_root, display_name,
+			 git_remote_hash, created_at_ms, last_seen_at_ms)
+		VALUES (?,?,?,?,?,?,?,?)
+		ON CONFLICT(repository_key, workspace_key) DO UPDATE SET
+			last_seen_at_ms = max(projects.last_seen_at_ms, excluded.last_seen_at_ms)`,
+		projectID, pid.RepositoryKey, pid.WorkspaceKey, pid.CanonicalRoot,
+		pid.DisplayName, pid.RemoteHash, nowMS, nowMS,
+	); err != nil {
+		return IngestResult{}, fmt.Errorf("upsert project: %w", err)
+	}
+
+	// 3. session upsert. project_id / last_ingest_order / status 는 절대 갱신하지 않는다.
+	//    project_id 를 갱신하면 --resume 이 과거 이벤트를 재배치하고,
+	//    last_ingest_order 를 갱신하면 늦게 온 SessionStart 가 순번을 리셋한다.
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO sessions
+			(id, host, host_session_id, project_id, status, started_at_ms, last_activity_at_ms)
+		VALUES (?,?,?,?, 'active', ?, ?)
+		ON CONFLICT(host, host_session_id) DO UPDATE SET
+			started_at_ms       = min(sessions.started_at_ms,       excluded.started_at_ms),
+			last_activity_at_ms = max(sessions.last_activity_at_ms, excluded.last_activity_at_ms)`,
+		sessionID, string(env.Host), env.HostSessionID, projectID, nowMS, nowMS,
+	); err != nil {
+		return IngestResult{}, fmt.Errorf("upsert session: %w", err)
+	}
+
+	// 4. 순번 발급. UPDATE ... RETURNING 은 행 잠금으로 직렬화되므로
+	//    SELECT-then-UPDATE 처럼 lost update 가 나지 않는다.
+	var order int64
+	if err := conn.QueryRowContext(ctx, `
+		UPDATE sessions SET last_ingest_order = last_ingest_order + 1
+		WHERE id = ? RETURNING last_ingest_order`, sessionID,
+	).Scan(&order); err != nil {
+		return IngestResult{}, fmt.Errorf("issue order: %w", err)
+	}
+
+	// 5. 평범한 INSERT. UNIQUE 는 backstop 이고 dedup 은 1단계가 한다.
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO events
+			(id, host, event_type, session_id, project_id, ingest_order, idempotency_key,
+			 turn_key, tool_use_id, payload_json, payload_sha256, payload_truncated,
+			 payload_orig_bytes, privacy_class, redaction_version, host_timestamp_ms,
+			 received_at_ms, schema_version, relay_version)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		env.IngestID, string(env.Host), string(env.EventType), sessionID, projectID,
+		order, env.IngestID,
+		nullStr(env.TurnKey), nullStr(env.ToolUseID),
+		string(env.Payload), env.PayloadSHA256, boolInt(env.PayloadTruncated),
+		env.PayloadOrigBytes, string(env.PrivacyClass), env.RedactionVersion,
+		nullInt(env.HostTimestampMS), nowMS, SchemaVersion, env.RelayVersion,
+	); err != nil {
+		return IngestResult{}, fmt.Errorf("insert event: %w", err)
+	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return IngestResult{}, fmt.Errorf("commit: %w", err)
+	}
+	committed = true
+	return IngestResult{IngestOrder: order}, nil
+}
+
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullInt(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/storage/sqlite/ -v`
+Expected: PASS — 15개 테스트 전부 ok. 특히
+`TestConcurrentIngestHasNoDuplicateOrderAndNoLoss`가 200건 전부를 고유 순번으로 저장해야 한다.
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/storage/sqlite
+git commit -m "feat: 인제스트 트랜잭션 — idempotency 먼저, 순번은 UPDATE RETURNING"
+```
+
+---
