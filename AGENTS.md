@@ -23,12 +23,19 @@ subsystem binary; without `-H=windowsgui` it pops a console window every time it
 CGO_ENABLED=0 go build -ldflags "-s -w"               -o dist/engramux.exe         ./cmd/engramux
 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service
 go test -p 1 ./...
-golangci-lint run
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
 ./scripts/race.sh            # test suite under the race detector
 ```
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.
+
+The linter is invoked through `go run` at a pinned version rather than as whatever
+`golangci-lint` is on `PATH`, and that is not fussiness. A golangci-lint **built with Go 1.26**
+cannot typecheck Go 1.27's `math/rand/v2` — it uses generic methods — so every package that
+imports `crypto/rand`, directly or transitively, makes it print `0 issues.` **and exit 7**.
+`go run` builds it with the local toolchain, so the linter and the standard library it is
+reading always agree. The first run downloads and builds; after that it is cached.
 
 Run `go test` with `-p 1`. Parallel test binaries collide on the single database file and on fixed
 pipe names — both are consequences of 1.0 decisions, not laws. If the tests ever move to per-test
@@ -89,6 +96,7 @@ row on its own, delete the row — the test is the better owner.
 | `go build` passes but `go test` fails to build | The `go` directive in `go.mod` is below the symbol you used. `go vet`'s `stdversion` catches it; `go build` does not |
 | `golangci-lint` refuses every config: *"the Go language version (go1.26) used to build golangci-lint is lower than the targeted Go version"* | The `go` directive is a hard ceiling set by the Go version golangci-lint was *built with*, not by the toolchain you run. `go.mod` says `1.26.0` while the toolchain is 1.27.0 for exactly this reason. Raising the directive requires a golangci-lint built on the newer Go first — check `golangci-lint --version` before you touch `go mod edit -go` |
 | `go test ./...` or `golangci-lint run` fails on a tree with no packages | Not a config bug. `go test` exits 1 with *"no packages to test"* and golangci-lint exits 5 with *"no go files to analyze"*. Both need at least one package to be meaningful |
+| `golangci-lint` prints `0 issues.` and exits **7** | It typechecked nothing. A linter built with Go 1.26 cannot read Go 1.27's `math/rand/v2` (`method must have no type parameters`), so any package importing `crypto/rand` — `github.com/google/uuid` does, for UUIDv7 — fails to load while still printing a clean summary. **Check the exit code, never the summary line.** The pinned `go run` invocation in Commands avoids it by building the linter with the local toolchain |
 | An unchecked `fmt.Fprintln` is not flagged, and you conclude errcheck is off | errcheck's own `DefaultExcludedSymbols` is a **separate** mechanism from golangci-lint's exclusion presets — declining the `std-error-handling` preset does not disable it. Measured boundary: writes to literal `os.Stdout`/`os.Stderr` and to `*bytes.Buffer` are excluded; `fmt.Fprintln` to any other `*os.File` or `io.Writer`, plus bare `w.Write` and `f.Close`, are all caught. The exclusions cover exactly the targets whose error is not actionable — do not "fix" it |
 | A concurrency test passes and proves nothing | `testing/synctest` does not report data races — two goroutines doing `x++` inside a bubble pass silently. It also cannot see syscalls or real I/O, so it is useless for pipe tests. Use it for timeouts, backoff, and drain logic only |
 | `-race` will not run | It requires `CGO_ENABLED=1` *and* a C compiler, and there is no CGO-free route on windows/amd64. `scripts/race.sh` finds a compiler and checks it is new enough; it prints what to do when it cannot. Verify the claim yourself with `CGO_ENABLED=0 go test -race` — if that ever succeeds, delete this row |
