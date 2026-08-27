@@ -1,0 +1,12 @@
+# Phase 1 원시 캡처 — 절대 커밋 금지.
+# 프롬프트 원문, 파일 내용, 도구 출력, 경로가 그대로 들어 있다.
+# fixture 로 승격하려면 redaction 을 통과한 사본만 tests/fixtures/ 로 옮긴다.
+.capture/
+
+# Go
+*.exe
+*.test
+/dist/
+
+# superpowers using-git-worktrees
+.worktrees/
