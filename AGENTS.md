@@ -24,6 +24,7 @@ CGO_ENABLED=0 go build -ldflags "-s -w"               -o dist/engramux.exe      
 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service
 go test -p 1 ./...
 golangci-lint run
+./scripts/race.sh            # test suite under the race detector
 ```
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
@@ -87,7 +88,8 @@ row on its own, delete the row — the test is the better owner.
 | A console window flashes | A console-less parent spawning a console child with default flags creates a real, visible console. Every child the service spawns needs the no-window creation flag (spec §5.1) |
 | `go build` passes but `go test` fails to build | The `go` directive in `go.mod` is below the symbol you used. `go vet`'s `stdversion` catches it; `go build` does not |
 | A concurrency test passes and proves nothing | `testing/synctest` does not report data races — two goroutines doing `x++` inside a bubble pass silently. It also cannot see syscalls or real I/O, so it is useless for pipe tests. Use it for timeouts, backoff, and drain logic only |
-| `-race` will not run | It requires `CGO_ENABLED=1` *and* a C compiler, and there is no CGO-free route on windows/amd64. Verify for yourself with `CGO_ENABLED=0 go test -race`; if that ever succeeds, delete this row |
+| `-race` will not run | It requires `CGO_ENABLED=1` *and* a C compiler, and there is no CGO-free route on windows/amd64. `scripts/race.sh` finds a compiler and checks it is new enough; it prints what to do when it cannot. Verify the claim yourself with `CGO_ENABLED=0 go test -race` — if that ever succeeds, delete this row |
+| The race detector is green and you are not sure it is looking | It is not enough that `-race` links. Write a deliberate unsynchronised `x++` across goroutines and confirm it fails, then confirm the mutex-guarded version stays quiet. A detector that reports nothing and a detector that is not running look identical |
 | A tool-output parser works for one host and silently misreads the other | In the captured corpus `tool_response` is an object from Claude Code but a string or an array from Codex (spec §4.4). Those are the shapes observed, not a contract the hosts promise — preserve a shape you do not recognise instead of assuming it away |
 | `t.TempDir()` cleanup fails on Windows | An open handle. Close the database and every listener before the test ends, including the WAL sidecar files |
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
