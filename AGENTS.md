@@ -69,6 +69,8 @@ None of these are derivable from the code or from general Go knowledge.
 | A tool-output parser works for one host and silently misreads the other | `tool_response` has different shapes per host: an object from Claude Code, a string or an array from Codex. An object-assuming parser is wrong for every Codex event |
 | `t.TempDir()` cleanup fails on Windows | An open handle. Close the `*sql.DB` and every listener before the test ends, and make sure `-wal` / `-shm` are released |
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
+| A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
+| Redaction produces JSON that no longer parses | A `\S+` token pattern swallows the closing quote and brace. Bound it to `[^\s"',}\]]+`, and keep the redacted payload valid JSON — an unmarshalable payload gets dropped without being sent or spooled |
 
 ## Boundaries
 
