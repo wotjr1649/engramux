@@ -10,3 +10,6 @@
 
 # superpowers using-git-worktrees
 .worktrees/
+
+# superpowers subagent-driven-development 작업 공간
+.superpowers/
