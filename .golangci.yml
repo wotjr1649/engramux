@@ -7,7 +7,7 @@ linters:
   enable:
     - errorlint      # %w and errors.Is/As, not == on wrapped errors
     - gosec
-    - noctx          # every outbound call carries a context
+    - noctx          # context on net/http, database/sql, os/exec - a fixed list, not "all I/O"
     - rowserrcheck   # sql.Rows.Err() after the loop
     - sqlclosecheck  # Rows and Stmt are closed
 
