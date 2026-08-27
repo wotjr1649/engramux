@@ -6,7 +6,9 @@ through FTS5 and MCP. One service per Windows user multiplexes every concurrent 
 It exists because `thedotmack/claude-mem` does this job but breaks constantly on Windows.
 Engramux is a reference reimplementation in Go — not a fork.
 
-**Behavior parity with claude-mem is not a goal.** Do not copy its process, I/O, or installation
+**Full behavior parity with claude-mem is not a 1.0 goal**, and its architecture is never a model.
+Adopting an individual compatible behavior is fine when an active spec asks for it — migration and
+interoperability are legitimate later goals. Do not copy its process, I/O, or installation
 architecture: that is the part that fails on Windows, and mirroring it reproduces the failure. Its
 data model, tool surface, and search UX are Windows-neutral — read those freely, but treat what you
 find as a candidate, never as a justification. Decisions are justified by the Windows constraint and
@@ -18,11 +20,14 @@ Build targets are the directories under `cmd/`. The service binary must be linke
 subsystem binary; without `-H=windowsgui` it pops a console window every time it spawns a child.
 
 ```bash
-go build -ldflags "-s -w"               -o dist/engramux.exe          ./cmd/engramux
-go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe  ./cmd/engramux-service
+CGO_ENABLED=0 go build -ldflags "-s -w"               -o dist/engramux.exe         ./cmd/engramux
+CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service
 go test -p 1 ./...
 golangci-lint run
 ```
+
+`CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
+machine this was written on, which means a build that violates the boundary would look fine here.
 
 Run `go test` with `-p 1`. Parallel test binaries collide on the single database file and on fixed
 pipe names — both are consequences of 1.0 decisions, not laws. If the tests ever move to per-test
@@ -31,10 +36,15 @@ a contributor's machine may or may not have a guard.
 
 ## How we work
 
-**Code first for facts.** A document may decide things before the code exists — that is exactly what
-a spec is for. What it may not do is *assert* things before the code exists. An unmeasured number,
-an unrun command, an ungated claim: mark it `[unverified]` and write down what rests on it. Once the
-code runs, the code is right and the document gets corrected — never the other way round.
+**Code first for facts, and only for facts.** A document may decide things before the code exists —
+that is exactly what a spec is for. What it may not do is *assert* things before the code exists. An
+unmeasured number, an unrun command, an ungated claim: mark it `[unverified]` and write down what
+rests on it.
+
+Once the code runs it settles **facts** — timings, sizes, what a dependency actually does — and the
+document gets corrected to match. It settles nothing about **intent**. Code that violates an
+invariant is a bug; editing the spec to match it is how a bug becomes permanent. Changing an
+invariant is a design change, made deliberately, not a side effect of an implementation.
 
 **No code blocks in documents.** Signatures, DDL, and package layout belong to code. The one
 exception is a reproduction command you actually ran and whose output you saw. Three spec revisions
@@ -61,6 +71,10 @@ evidence.
 
 ## What will bite you
 
+Most of these are observations against pinned dependency and toolchain versions, not laws. On a
+dependency or Go upgrade, re-verify the rows that name one. When a test or linter starts catching a
+row on its own, delete the row — the test is the better owner.
+
 | Symptom | What is actually happening |
 |---|---|
 | `database is locked` during tests, doctor, or migrations | A development service is running and holds the database exclusively. This is almost never a DSN or pragma bug |
@@ -74,7 +88,7 @@ evidence.
 | `go build` passes but `go test` fails to build | The `go` directive in `go.mod` is below the symbol you used. `go vet`'s `stdversion` catches it; `go build` does not |
 | A concurrency test passes and proves nothing | `testing/synctest` does not report data races — two goroutines doing `x++` inside a bubble pass silently. It also cannot see syscalls or real I/O, so it is useless for pipe tests. Use it for timeouts, backoff, and drain logic only |
 | `-race` will not run | It requires `CGO_ENABLED=1` *and* a C compiler, and there is no CGO-free route on windows/amd64. Verify for yourself with `CGO_ENABLED=0 go test -race`; if that ever succeeds, delete this row |
-| A tool-output parser works for one host and silently misreads the other | `tool_response` is an object from Claude Code but a string or an array from Codex (spec §4.4) |
+| A tool-output parser works for one host and silently misreads the other | In the captured corpus `tool_response` is an object from Claude Code but a string or an array from Codex (spec §4.4). Those are the shapes observed, not a contract the hosts promise — preserve a shape you do not recognise instead of assuming it away |
 | `t.TempDir()` cleanup fails on Windows | An open handle. Close the database and every listener before the test ends, including the WAL sidecar files |
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
 | A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
@@ -102,9 +116,11 @@ Heredocs collapse `\\` to `\`, which corrupts Windows path literals and Go rune 
 
 ## Documents
 
-- `docs/superpowers/specs/` — decisions and measurements. **Owns the values**: versions, schema,
-  repository layout, invariants, budgets. This file does not restate them. When more than one spec
-  exists, the newest date is current and superseded ones say so on their first line.
+- `docs/superpowers/specs/` — **owns decisions, invariants, budgets, and measurements**, and the
+  intended behavior behind them. It does not own implementation facts: `go.mod` owns resolved
+  versions, the migrations own the DDL, and the tree owns package layout. This file restates none of
+  it. When more than one spec exists, each declares its scope and what it supersedes; read the ones
+  covering your task.
 - `docs/superpowers/plans/` — execution order only. Cites the spec, owns no values, restates no
   rules. If a plan and the spec disagree, the spec wins. A plan that proves unexecutable is deleted
   rather than repaired (precedent: `3e5fe8d`).
