@@ -4306,3 +4306,1428 @@ git commit -m "feat: spool — 이벤트당 파일 하나, atomic rename"
 ```
 
 ---
+
+## Task 16: service 수명과 싱글턴
+
+**순서가 정확성이다.** `service run` 의 첫 문장은 `ListenPipe` 여야 한다. 실패하면 DB·spool·
+로그 파일을 **한 번도 열지 않고** 종료한다.
+
+실측 근거: 구버전 S1 이 살아 있는 상태에서 신버전 S2 가 DB 를 먼저 열고 `ALTER TABLE` 을
+커밋한 뒤 `ListenPipe` 에서 지면, S1 의 다음 INSERT 가 `no column named legacy_col` 로 죽고
+**다음 로그온까지 캡처가 전손**된다. Task Scheduler 는 S1 을 재시작하지 않는다 — S1 은
+여전히 실행 중이기 때문이다.
+
+그리고 `ListenPipe` 독점은 listener 하나를 보장하지 **worker 프로세스 하나를 보장하지 않는다.**
+listener 를 잃은 프로세스가 DB 핸들과 백그라운드 goroutine 을 쥔 채 살아남으면 새 서비스와
+동시에 파생 상태를 쓴다. 파이프 소유권을 프로세스 수명 lease 로 만든다.
+
+**Files:**
+- Create: `internal/service/service.go`
+- Modify: `cmd/engramux/main.go` — `service run` 배선
+- Test: `internal/service/service_test.go`
+
+**Interfaces:**
+- Consumes: `namedpipe.*` (Task 12·13), `sqlite.DB`·`(*DB).Ingest` (Task 10·11), `spool.Drain` (Task 15), `session.Identify` (Task 9), `event.Envelope`·`event.Ack` (Task 3), `framing` (Task 2)
+- Produces:
+  - `service.Options{DBPath string; SpoolDir string; BootID string}`
+  - `service.Acquire(opts Options) (*Service, error)` — **파이프를 먼저 잡고**, 성공한 뒤에만 DB 를 연다
+  - `(*Service).Serve(ctx context.Context) error`
+  - `(*Service).PipeName() string`, `(*Service).Close() error`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/service/service_test.go`:
+
+```go
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/transport/namedpipe"
+)
+
+func opts(t *testing.T) Options {
+	t.Helper()
+	dir := t.TempDir()
+	return Options{
+		DBPath:   filepath.Join(dir, "engramux.db"),
+		SpoolDir: filepath.Join(dir, "spool"),
+		BootID:   "boot-test",
+	}
+}
+
+func TestAcquireOpensPipeThenDB(t *testing.T) {
+	o := opts(t)
+	s, err := Acquire(o)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer s.Close()
+	if _, err := os.Stat(o.DBPath); err != nil {
+		t.Fatalf("DB was not created after a successful Acquire: %v", err)
+	}
+}
+
+// 파이프를 못 잡으면 DB 파일을 만들지도 열지도 않아야 한다.
+// 이걸 어기면 진 쪽 인스턴스가 마이그레이션을 돌려 이긴 쪽을 영구히 깨뜨린다.
+func TestLosingSingletonRaceNeverTouchesDB(t *testing.T) {
+	first := opts(t)
+	s1, err := Acquire(first)
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	defer s1.Close()
+
+	// 두 번째 인스턴스가 같은 파이프 이름과 **다른** DB 경로를 노린다.
+	second := first
+	second.DBPath = filepath.Join(t.TempDir(), "second.db")
+	second.PipeNameOverride = s1.PipeName()
+
+	if s2, err := Acquire(second); err == nil {
+		s2.Close()
+		t.Fatal("second Acquire succeeded; pipe name must be exclusive")
+	}
+	if _, err := os.Stat(second.DBPath); !os.IsNotExist(err) {
+		t.Fatalf("losing instance created %s; it must not touch storage at all", second.DBPath)
+	}
+}
+
+// listener 를 닫으면 Serve 가 즉시 끝나야 한다. 백그라운드 goroutine 이
+// 살아남으면 새 서비스와 동시에 파생 상태를 쓴다.
+func TestClosingListenerEndsServe(t *testing.T) {
+	s, err := Acquire(opts(t))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	s.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return within 2s of Close")
+	}
+}
+
+func TestServeIngestsAndAcks(t *testing.T) {
+	s, err := Acquire(opts(t))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer s.Close()
+	go s.Serve(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	env := event.Envelope{
+		Version: 1, IngestID: "ing-1",
+		Host: event.HostCodex, EventType: event.PostToolUse,
+		HostSessionID: "s1", CWD: t.TempDir(),
+		Payload: json.RawMessage(`{"a":1}`), PayloadSHA256: "sha",
+		PayloadOrigBytes: 7, PrivacyClass: event.Sensitive,
+		RedactionVersion: 1, RelayVersion: "0.1.0-dev",
+	}
+	body, _ := json.Marshal(env)
+	raw, err := namedpipe.RoundTrip(s.PipeName(), body)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	var ack event.Ack
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		t.Fatalf("ack unmarshal: %v", err)
+	}
+	if ack.Status != event.Committed {
+		t.Fatalf("ack.Status = %q, want committed", ack.Status)
+	}
+	if ack.IngestID != "ing-1" {
+		t.Fatalf("ack.IngestID = %q, want ing-1", ack.IngestID)
+	}
+	if ack.BootID != "boot-test" {
+		t.Fatalf("ack.BootID = %q, want boot-test", ack.BootID)
+	}
+}
+
+// 재전송도 committed 다. 에러를 돌려주면 relay 가 무한 re-spool 한다.
+func TestServeAcksRedeliveryAsCommitted(t *testing.T) {
+	s, err := Acquire(opts(t))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer s.Close()
+	go s.Serve(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	env := event.Envelope{
+		Version: 1, IngestID: "dup-1",
+		Host: event.HostCodex, EventType: event.Stop,
+		HostSessionID: "s1", CWD: t.TempDir(),
+		Payload: json.RawMessage(`{}`), PayloadSHA256: "sha",
+		PrivacyClass: event.Sensitive, RedactionVersion: 1, RelayVersion: "0.1.0-dev",
+	}
+	body, _ := json.Marshal(env)
+	for i := 0; i < 3; i++ {
+		raw, err := namedpipe.RoundTrip(s.PipeName(), body)
+		if err != nil {
+			t.Fatalf("RoundTrip %d: %v", i, err)
+		}
+		var ack event.Ack
+		json.Unmarshal(raw, &ack)
+		if ack.Status != event.Committed {
+			t.Fatalf("delivery %d: status = %q, want committed", i, ack.Status)
+		}
+	}
+}
+
+// 깨진 프레임이 서비스를 죽이면 안 된다.
+func TestServeSurvivesGarbageFrame(t *testing.T) {
+	s, err := Acquire(opts(t))
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer s.Close()
+	go s.Serve(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	_, _ = namedpipe.RoundTrip(s.PipeName(), []byte("not an envelope"))
+
+	// 그 뒤에도 정상 요청이 받아져야 한다.
+	env := event.Envelope{
+		Version: 1, IngestID: "after-garbage",
+		Host: event.HostCodex, EventType: event.Stop, HostSessionID: "s1",
+		CWD: t.TempDir(), Payload: json.RawMessage(`{}`), PayloadSHA256: "s",
+		PrivacyClass: event.Sensitive, RedactionVersion: 1, RelayVersion: "0.1.0-dev",
+	}
+	body, _ := json.Marshal(env)
+	if _, err := namedpipe.RoundTrip(s.PipeName(), body); err != nil {
+		t.Fatalf("service died after a garbage frame: %v", err)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/service/ -v`
+Expected: FAIL — `undefined: Acquire`, `undefined: Options`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/service/service.go`:
+
+```go
+// Package service 는 사용자당 하나뿐인 상주 프로세스다.
+//
+// 순서 규칙: ListenPipe 가 첫 문장이다. 실패하면 DB·spool·로그를 한 번도
+// 열지 않고 종료한다 — 진 인스턴스가 마이그레이션을 돌리면 이긴 인스턴스가
+// 영구히 깨진다(spec §5.3).
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"time"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/session"
+	"github.com/wotjr1649/engramux/internal/spool"
+	"github.com/wotjr1649/engramux/internal/storage/sqlite"
+	"github.com/wotjr1649/engramux/internal/transport/framing"
+	"github.com/wotjr1649/engramux/internal/transport/namedpipe"
+)
+
+type Options struct {
+	DBPath   string
+	SpoolDir string
+	BootID   string
+	// PipeNameOverride 는 테스트에서 싱글턴 경합을 재현할 때만 쓴다.
+	PipeNameOverride string
+}
+
+type Service struct {
+	opts     Options
+	listener *namedpipe.Listener
+	db       *sqlite.DB
+}
+
+// Acquire 는 파이프를 먼저 잡고, 성공한 뒤에만 DB 를 연다.
+func Acquire(o Options) (*Service, error) {
+	sid, hash, err := namedpipe.CurrentUserSID()
+	if err != nil {
+		return nil, fmt.Errorf("sid: %w", err)
+	}
+	name := o.PipeNameOverride
+	if name == "" {
+		nonce, err := namedpipe.NewNonce()
+		if err != nil {
+			return nil, fmt.Errorf("nonce: %w", err)
+		}
+		name = namedpipe.Name(hash, nonce)
+	}
+
+	// ---- 여기서 실패하면 아무것도 열지 않고 돌아간다 ----
+	l, err := namedpipe.Listen(name, namedpipe.SDDL(sid))
+	if err != nil {
+		return nil, fmt.Errorf("another service owns the pipe: %w", err)
+	}
+
+	db, err := sqlite.Open(o.DBPath)
+	if err != nil {
+		l.Close()
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	return &Service{opts: o, listener: l, db: db}, nil
+}
+
+func (s *Service) PipeName() string { return s.listener.Name() }
+
+// Serve 는 listener 가 닫히면 돌아온다. 파이프 소유권이 프로세스 수명 lease 다 —
+// listener 를 잃은 프로세스는 백그라운드 작업도 함께 멈춰야 한다.
+func (s *Service) Serve(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go s.drainSpool(ctx)
+	go s.checkpointLoop(ctx)
+
+	for {
+		c, _, err := s.listener.Accept()
+		if err != nil {
+			return err // listener 종료 -> ctx 취소 -> 백그라운드도 함께 죽는다
+		}
+		go s.handle(ctx, c)
+	}
+}
+
+func (s *Service) handle(ctx context.Context, c net.Conn) {
+	defer c.Close()
+	defer func() { _ = recover() }() // 한 커넥션의 사고가 서비스를 죽이지 않는다
+
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	req, err := framing.Read(c)
+	if err != nil {
+		return
+	}
+	var env event.Envelope
+	if err := json.Unmarshal(req, &env); err != nil {
+		return // 깨진 프레임은 조용히 버린다
+	}
+	ack := s.ingest(ctx, env)
+	if b, err := json.Marshal(ack); err == nil {
+		_ = framing.Write(c, b)
+	}
+}
+
+func (s *Service) ingest(ctx context.Context, env event.Envelope) event.Ack {
+	ack := event.Ack{Version: 1, IngestID: env.IngestID, BootID: s.opts.BootID}
+	pid, err := session.Identify(env.CWD)
+	if err != nil {
+		ack.Status = event.Rejected
+		return ack
+	}
+	if _, err := s.db.Ingest(ctx, env, pid, time.Now().UnixMilli()); err != nil {
+		ack.Status = event.Rejected
+		return ack
+	}
+	// 재전송도 committed 다. 에러를 돌려주면 relay 가 무한 re-spool 한다.
+	ack.Status = event.Committed
+	return ack
+}
+
+func (s *Service) drainSpool(ctx context.Context) {
+	if s.opts.SpoolDir == "" {
+		return
+	}
+	spool.Drain(s.opts.SpoolDir, func(b []byte) error {
+		var env event.Envelope
+		if err := json.Unmarshal(b, &env); err != nil {
+			return err
+		}
+		if a := s.ingest(ctx, env); a.Status != event.Committed {
+			return fmt.Errorf("ingest rejected")
+		}
+		return nil
+	})
+}
+
+// checkpointLoop 은 WAL 이 무한 증식하는 것을 막는다.
+// reader 하나가 고정되면 23MB 데이터가 491MB WAL 이 된다(실측).
+func (s *Service) checkpointLoop(ctx context.Context) {
+	t := time.NewTicker(60 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.db.Writer.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+		}
+	}
+}
+
+func (s *Service) Close() error {
+	err := s.listener.Close()
+	if s.db != nil {
+		s.db.Close()
+	}
+	return err
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/service/ -v`
+Expected: PASS — 6개 테스트 ok. 특히 `TestLosingSingletonRaceNeverTouchesDB` 가
+진 인스턴스의 DB 파일이 **생성조차 되지 않았음**을 확인해야 한다.
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/service
+git commit -m "feat: service — 파이프를 먼저 잡고, 진 인스턴스는 DB 를 열지 않는다"
+```
+
+---
+
+## Task 17: Phase 1 통합 게이트
+
+relay → pipe → service → SQLite → ACK 를 실제 프로세스 없이 한 테스트 안에서 관통시키고,
+Phase 1 exit gate 를 전부 어서션한다.
+
+**Files:**
+- Create: `tests/integration/capture_core_test.go`
+- Test: 위와 동일
+
+**Interfaces:**
+- Consumes: `service.Acquire`·`(*Service).Serve` (Task 16), `relay.Run`·`relay.Config` (Task 14), `namedpipe.RoundTrip` (Task 13), `spool.Writer`·`spool.Drain` (Task 15)
+- Produces: 없음 (게이트 테스트)
+
+- [ ] **Step 1: 게이트 테스트를 쓴다**
+
+`tests/integration/capture_core_test.go`:
+
+```go
+package integration
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/wotjr1649/engramux/internal/relay"
+	"github.com/wotjr1649/engramux/internal/service"
+	"github.com/wotjr1649/engramux/internal/spool"
+	"github.com/wotjr1649/engramux/internal/storage/sqlite"
+	"github.com/wotjr1649/engramux/internal/transport/namedpipe"
+
+	_ "github.com/wotjr1649/engramux/internal/host/claude"
+	_ "github.com/wotjr1649/engramux/internal/host/codex"
+)
+
+type rig struct {
+	svc      *service.Service
+	dbPath   string
+	spoolDir string
+}
+
+func start(t *testing.T) *rig {
+	t.Helper()
+	dir := t.TempDir()
+	o := service.Options{
+		DBPath:   filepath.Join(dir, "engramux.db"),
+		SpoolDir: filepath.Join(dir, "spool"),
+		BootID:   "boot-it",
+	}
+	s, err := service.Acquire(o)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	go s.Serve(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	t.Cleanup(func() { s.Close() })
+	return &rig{svc: s, dbPath: o.DBPath, spoolDir: o.SpoolDir}
+}
+
+func (r *rig) relayCfg(t *testing.T, stdin string) relay.Config {
+	t.Helper()
+	return relay.Config{
+		Stdin:    strings.NewReader(stdin),
+		Stdout:   &strings.Builder{},
+		ArgHost:  "codex",
+		ArgEvent: "PostToolUse",
+		Send: func(b []byte) ([]byte, error) {
+			return namedpipe.RoundTrip(r.svc.PipeName(), b)
+		},
+		Spool: spool.Writer{Dir: r.spoolDir}.Write,
+	}
+}
+
+func (r *rig) countEvents(t *testing.T) int {
+	t.Helper()
+	db, err := sqlite.Open(r.dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.Reader.QueryRow(`SELECT count(*) FROM events`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	return n
+}
+
+func payload(session, turn, evt string) string {
+	return fmt.Sprintf(
+		`{"session_id":%q,"cwd":"D:/AI_DEV/engramux","turn_id":%q,"hook_event_name":%q,"tool_use_id":"tu-1"}`,
+		session, turn, evt)
+}
+
+// 게이트 1: 관통이 실제로 커밋된다.
+func TestVerticalSliceCommits(t *testing.T) {
+	r := start(t)
+	if code := relay.Run(r.relayCfg(t, payload("s1", "t1", "PostToolUse"))); code != 0 {
+		t.Fatalf("relay exit = %d, want 0", code)
+	}
+	if n := r.countEvents(t); n != 1 {
+		t.Fatalf("events = %d, want 1", n)
+	}
+}
+
+// 게이트 2: 커밋 후 ACK 전 crash 를 모사한 재전송에서 중복 0, 유령 gap 0.
+func TestRedeliveryLeavesNoDuplicateAndNoGap(t *testing.T) {
+	r := start(t)
+	cfg := r.relayCfg(t, payload("s1", "t1", "PostToolUse"))
+
+	// 같은 envelope 을 직접 5번 더 보낸다 (relay 재시도 + spool import 를 모사).
+	var sent []byte
+	cfg.Send = func(b []byte) ([]byte, error) {
+		sent = append([]byte(nil), b...)
+		return namedpipe.RoundTrip(r.svc.PipeName(), b)
+	}
+	relay.Run(cfg)
+	for i := 0; i < 5; i++ {
+		if _, err := namedpipe.RoundTrip(r.svc.PipeName(), sent); err != nil {
+			t.Fatalf("redelivery %d: %v", i, err)
+		}
+	}
+	if n := r.countEvents(t); n != 1 {
+		t.Fatalf("events = %d, want 1", n)
+	}
+
+	// 그 다음 이벤트가 연속 번호를 받아야 한다 (유령 gap 0).
+	relay.Run(r.relayCfg(t, payload("s1", "t2", "Stop")))
+
+	db, _ := sqlite.Open(r.dbPath)
+	defer db.Close()
+	rows, err := db.Reader.Query(
+		`SELECT ingest_order FROM events WHERE session_id='codex:s1' ORDER BY ingest_order`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	var got []int64
+	for rows.Next() {
+		var v int64
+		rows.Scan(&v)
+		got = append(got, v)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("ingest_order = %v, want [1 2]", got)
+	}
+}
+
+// 게이트 3: 서비스가 없어도 호스트가 막히지 않고 spool 로 떨어진다.
+func TestServiceDownDoesNotBlockHost(t *testing.T) {
+	r := start(t)
+	r.svc.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	cfg := r.relayCfg(t, payload("s2", "t1", "Stop"))
+	if code := relay.Run(cfg); code != 0 {
+		t.Fatalf("relay exit = %d with service down, want 0", code)
+	}
+	n, err := spool.Drain(r.spoolDir, func([]byte) error { return nil })
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("spooled %d, want 1", n)
+	}
+}
+
+// 게이트 4: 서비스 재시작 시 spool 이 자동 회수되고 중복이 생기지 않는다.
+func TestSpoolIsImportedOnRestartWithoutDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	o := service.Options{
+		DBPath:   filepath.Join(dir, "engramux.db"),
+		SpoolDir: filepath.Join(dir, "spool"),
+		BootID:   "boot-1",
+	}
+	s1, err := service.Acquire(o)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	go s1.Serve(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	pipeName := s1.PipeName()
+	cfg := relay.Config{
+		Stdin:    strings.NewReader(payload("s3", "t1", "PostToolUse")),
+		Stdout:   &strings.Builder{},
+		ArgHost:  "codex",
+		ArgEvent: "PostToolUse",
+		Send:     func(b []byte) ([]byte, error) { return namedpipe.RoundTrip(pipeName, b) },
+		Spool:    spool.Writer{Dir: o.SpoolDir}.Write,
+	}
+	relay.Run(cfg)   // 정상 커밋
+	s1.Close()       // 서비스 중지
+
+	// 중지 상태에서 같은 envelope 을 spool 에 직접 넣는다 (crash 후 재전송 모사).
+	db, _ := sqlite.Open(o.DBPath)
+	var key string
+	db.Reader.QueryRow(`SELECT idempotency_key FROM events LIMIT 1`).Scan(&key)
+	db.Close()
+
+	env := map[string]any{
+		"version": 1, "ingest_id": key, "host": "codex", "event_type": "PostToolUse",
+		"host_session_id": "s3", "cwd": "D:/AI_DEV/engramux",
+		"payload": json.RawMessage(`{}`), "payload_sha256": "s",
+		"privacy_class": "sensitive", "redaction_version": 1, "relay_version": "0.1.0-dev",
+	}
+	b, _ := json.Marshal(env)
+	spool.Writer{Dir: o.SpoolDir}.Write(b)
+
+	s2, err := service.Acquire(o)
+	if err != nil {
+		t.Fatalf("second Acquire: %v", err)
+	}
+	defer s2.Close()
+	go s2.Serve(context.Background())
+	time.Sleep(300 * time.Millisecond)
+
+	db2, _ := sqlite.Open(o.DBPath)
+	defer db2.Close()
+	var n int
+	db2.Reader.QueryRow(`SELECT count(*) FROM events`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("events = %d after spool import, want 1 (idempotent)", n)
+	}
+}
+
+// 게이트 5: 임의 바이트·필드 누락 주입에서 relay 는 exit 0, 서비스는 살아 있다.
+func TestGarbageInjectionKeepsBothAlive(t *testing.T) {
+	r := start(t)
+	for _, bad := range []string{
+		"", "not json", `{"session_id":`, "null", "[]",
+		`{"session_id":"s","cwd":"D:/x"}`, // 지문 없음
+	} {
+		cfg := r.relayCfg(t, bad)
+		if code := relay.Run(cfg); code != 0 {
+			t.Fatalf("relay exit = %d for %q, want 0", code, bad)
+		}
+	}
+	// 서비스가 여전히 정상 요청을 받는다.
+	if code := relay.Run(r.relayCfg(t, payload("s9", "t1", "Stop"))); code != 0 {
+		t.Fatalf("relay exit = %d after garbage, want 0", code)
+	}
+	if n := r.countEvents(t); n != 1 {
+		t.Fatalf("events = %d, want 1", n)
+	}
+}
+
+// 게이트 6: foreign_key_check 가 깨끗하다.
+func TestNoForeignKeyViolations(t *testing.T) {
+	r := start(t)
+	relay.Run(r.relayCfg(t, payload("s1", "t1", "PostToolUse")))
+	db, _ := sqlite.Open(r.dbPath)
+	defer db.Close()
+	rows, err := db.Reader.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("foreign_key_check: %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("foreign_key_check reported a violation")
+	}
+}
+
+// 게이트 7: 16 동시 relay 에서 dial 실패 0.
+// spec §8: 실제 도착률은 8세션 기준 2 ev/s 다. 현실적 burst 는 병렬 tool batch 와
+// 서브에이전트로 5~20 수준이므로 100 이 아니라 16 을 잰다.
+func TestSixteenConcurrentRelaysAllCommit(t *testing.T) {
+	r := start(t)
+	const n = 16
+	done := make(chan int, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			done <- relay.Run(r.relayCfg(t, payload(fmt.Sprintf("s%d", i), "t1", "PostToolUse")))
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		if code := <-done; code != 0 {
+			t.Fatalf("relay %d exit = %d", i, code)
+		}
+	}
+	if got := r.countEvents(t); got != n {
+		t.Fatalf("events = %d, want %d", got, n)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./tests/integration/ -v`
+Expected: FAIL — 아직 배선이 완전하지 않으면 일부 게이트가 깨진다. 실패 메시지를 읽고
+어느 게이트인지 확인한다.
+
+- [ ] **Step 3: 실패한 게이트를 고친다**
+
+새 코드를 쓰지 않는다. Task 11·14·15·16 의 구현에서 게이트가 지목한 부분만 고친다.
+가장 흔한 원인 두 가지:
+- `service.ingest` 가 재전송에 `Rejected` 를 돌려준다 → `Ingest` 의 `Duplicate` 를
+  `Committed` 로 매핑했는지 확인한다.
+- `drainSpool` 이 `Serve` 시작 시 한 번만 돌아 타이밍을 놓친다 → 테스트의 대기 시간을
+  늘리지 말고, `Serve` 진입 직후 동기적으로 한 번 `Drain` 한 뒤 goroutine 을 띄운다.
+
+- [ ] **Step 4: 전체 게이트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./tests/integration/ -v`
+Expected: PASS — 7개 게이트 전부 ok
+
+- [ ] **Step 5: 전 패키지 회귀를 돌린다**
+
+Run: `go test -p 1 ./...`
+Expected: PASS — 모든 패키지 ok
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add tests/integration
+git commit -m "test: Phase 1 통합 게이트 — 관통·중복 0·gap 0·fail-open·spool 회수"
+```
+
+---
+
+## Task 18: 이벤트별 contract test (Phase 2)
+
+Task 7·8 의 parser 는 필드 추출이 이벤트에 무관하게 동작하므로, Phase 2 의 실제 작업은
+**승격된 모든 fixture 에 대해 계약을 어서션하는 테이블 테스트**다. 이벤트 하나를 켤 때
+그 fixture 만 있으면 되도록 게이트가 이벤트 단위로 걸린다.
+
+**Files:**
+- Create: `tests/contracts/host_contract_test.go`
+- Test: 위와 동일
+
+**Interfaces:**
+- Consumes: `host.Detect`·`host.For` (Task 6), `claude`·`codex` adapter (Task 7·8), Task 5 fixture
+- Produces: 없음 (게이트 테스트)
+
+- [ ] **Step 1: contract test 를 쓴다**
+
+`tests/contracts/host_contract_test.go`:
+
+```go
+package contracts
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/host"
+
+	_ "github.com/wotjr1649/engramux/internal/host/claude"
+	_ "github.com/wotjr1649/engramux/internal/host/codex"
+)
+
+type fixture struct {
+	path    string
+	host    event.Host
+	evtType event.Type
+	raw     []byte
+}
+
+func loadAll(t *testing.T) []fixture {
+	t.Helper()
+	root := filepath.Join("..", "fixtures", "hosts")
+	var out []fixture
+	for _, h := range []event.Host{event.HostClaudeCode, event.HostCodex} {
+		hostDir := filepath.Join(root, string(h))
+		evts, err := os.ReadDir(hostDir)
+		if err != nil {
+			t.Fatalf("read %s: %v (먼저 실행: go run ./tools/fixtures)", hostDir, err)
+		}
+		for _, e := range evts {
+			files, _ := os.ReadDir(filepath.Join(hostDir, e.Name()))
+			for _, f := range files {
+				p := filepath.Join(hostDir, e.Name(), f.Name())
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					t.Fatalf("read %s: %v", p, err)
+				}
+				out = append(out, fixture{p, h, event.Type(e.Name()), raw})
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("fixture 가 하나도 없다; go run ./tools/fixtures 를 먼저 돌려라")
+	}
+	return out
+}
+
+// 계약 1: 모든 fixture 가 panic 없이 파싱된다.
+func TestAllFixturesParse(t *testing.T) {
+	for _, f := range loadAll(t) {
+		t.Run(f.path, func(t *testing.T) {
+			a, ok := host.For(f.host)
+			if !ok {
+				t.Fatalf("no adapter for %q", f.host)
+			}
+			env, err := a.Parse(f.evtType, f.raw)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if env.Host != f.host {
+				t.Errorf("Host = %q, want %q", env.Host, f.host)
+			}
+			if env.EventType != f.evtType {
+				t.Errorf("EventType = %q, want %q", env.EventType, f.evtType)
+			}
+		})
+	}
+}
+
+// 계약 2: 실제 전역 교집합 4개는 항상 채워진다.
+// permission_mode 는 교집합이 아니다 — Codex SessionEnd 에 없다.
+func TestIntersectionFieldsAlwaysPresent(t *testing.T) {
+	for _, f := range loadAll(t) {
+		t.Run(f.path, func(t *testing.T) {
+			a, _ := host.For(f.host)
+			env, err := a.Parse(f.evtType, f.raw)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if env.HostSessionID == "" {
+				t.Error("HostSessionID is empty (session_id is in the intersection)")
+			}
+			if env.CWD == "" {
+				t.Error("CWD is empty (cwd is in the intersection)")
+			}
+		})
+	}
+}
+
+// 계약 3: 알 수 없는 필드를 안전하게 무시한다.
+func TestUnknownFieldsAreIgnored(t *testing.T) {
+	for _, f := range loadAll(t) {
+		t.Run(f.path, func(t *testing.T) {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(f.raw, &m); err != nil {
+				t.Fatalf("fixture is not an object: %v", err)
+			}
+			m["engramux_unknown_future_field"] = json.RawMessage(`{"x":[1,2,3]}`)
+			mutated, _ := json.Marshal(m)
+
+			a, _ := host.For(f.host)
+			if _, err := a.Parse(f.evtType, mutated); err != nil {
+				t.Fatalf("Parse failed on an unknown field: %v", err)
+			}
+		})
+	}
+}
+
+// 계약 4: 캡처 이벤트의 stdout 은 비어 있다.
+// 실측: CUI 프로브가 11개 이벤트 전부에서 빈 stdout 으로 901회 통과했다.
+func TestCaptureEventsProduceNoStdout(t *testing.T) {
+	for _, f := range loadAll(t) {
+		if f.evtType == event.SessionStart {
+			continue // 컨텍스트 이벤트는 계약 5 에서 본다
+		}
+		t.Run(f.path, func(t *testing.T) {
+			a, _ := host.For(f.host)
+			out, err := a.FormatSuccess(f.evtType, event.Ack{Status: event.Committed})
+			if err != nil {
+				t.Fatalf("FormatSuccess: %v", err)
+			}
+			if len(out) != 0 {
+				t.Fatalf("stdout = %q, want empty", out)
+			}
+		})
+	}
+}
+
+// 계약 5: 컨텍스트가 있으면 JSON document 정확히 하나.
+// 두 개를 이어 붙이면 호스트 파서가 깨진다(upstream #3280).
+func TestSessionStartEmitsExactlyOneJSONDocument(t *testing.T) {
+	ack := event.Ack{
+		Version: 1, Status: event.Committed,
+		Context: &event.ContextBundle{
+			Items: []event.ContextItem{{MemoryID: "m1", Text: "관측"}},
+		},
+	}
+	for _, h := range []event.Host{event.HostClaudeCode, event.HostCodex} {
+		a, _ := host.For(h)
+		out, err := a.FormatSuccess(event.SessionStart, ack)
+		if err != nil {
+			t.Fatalf("%s: FormatSuccess: %v", h, err)
+		}
+		dec := json.NewDecoder(bytes.NewReader(out))
+		n := 0
+		for {
+			var v any
+			if err := dec.Decode(&v); err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatalf("%s: decode: %v", h, err)
+			}
+			n++
+		}
+		if n != 1 {
+			t.Fatalf("%s: %d JSON documents, want exactly 1", h, n)
+		}
+	}
+}
+
+// 계약 6: 어떤 이벤트에서도 fail-open 출력은 비어 있다.
+func TestFailOpenIsSilentForEveryEvent(t *testing.T) {
+	for _, h := range []event.Host{event.HostClaudeCode, event.HostCodex} {
+		a, _ := host.For(h)
+		for _, typ := range event.AllTypes() {
+			if out := a.FormatFailOpen(typ, "service down"); len(out) != 0 {
+				t.Errorf("%s/%s: FormatFailOpen wrote %q", h, typ, out)
+			}
+		}
+	}
+}
+
+// 계약 7: fixture 커버리지를 명시적으로 보고한다.
+// 미확보 이벤트는 실패가 아니라 **기록**이다 — 해당 adapter 를 켤 때 모은다(spec §15.2).
+func TestReportFixtureCoverage(t *testing.T) {
+	have := map[string]bool{}
+	for _, f := range loadAll(t) {
+		have[string(f.host)+"/"+string(f.evtType)] = true
+	}
+	missing := 0
+	for _, h := range []event.Host{event.HostClaudeCode, event.HostCodex} {
+		for _, typ := range event.AllTypes() {
+			k := string(h) + "/" + string(typ)
+			if !have[k] {
+				t.Logf("fixture 미확보: %s", k)
+				missing++
+			}
+		}
+	}
+	t.Logf("커버리지: %d/22", 22-missing)
+	if 22-missing < 13 {
+		t.Fatalf("커버리지가 %d/22 로 떨어졌다; 이미 확보한 13종을 잃었다", 22-missing)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트를 돌린다**
+
+Run: `go test -p 1 ./tests/contracts/ -v`
+Expected: PASS — 7개 계약 전부 ok. 계약 7이 `커버리지: 13/22` 를 로그로 남긴다.
+
+- [ ] **Step 3: 실패한 계약이 있으면 adapter 를 고친다**
+
+새 이벤트 타입을 추가하지 않는다. 실패 원인은 거의 항상 둘 중 하나다:
+- parser 가 optional 필드를 필수로 다뤘다 → 포인터 또는 zero value 로 바꾼다
+- formatter 가 캡처 이벤트에 무언가를 썼다 → `FormatSuccess` 의 early return 조건을 확인한다
+
+- [ ] **Step 4: 커밋**
+
+```bash
+git add tests/contracts
+git commit -m "test: 이벤트별 host contract — 파싱·교집합·미지 필드·출력 계약"
+```
+
+---
+
+## Task 19: 로깅과 진단
+
+`slog` 는 handler 에러를 버린다(`logger.go:264` 가 `_ = l.Handler().Handle(...)`).
+lumberjack 은 다른 프로세스가 로그 파일을 열고 있으면 rename 에 실패한다. 둘을 그대로
+합치면 **로테이션 실패가 무음이고 로그가 무한 증식한다**(실측). 에러를 latch 해서
+`status`/`doctor` 가 읽게 한다.
+
+**Files:**
+- Create: `internal/diagnostics/logging.go`
+- Create: `internal/diagnostics/status.go`
+- Create: `internal/diagnostics/doctor.go`
+- Modify: `cmd/engramux/main.go` — `status`·`doctor` 배선
+- Test: `internal/diagnostics/logging_test.go`
+- Test: `internal/diagnostics/doctor_test.go`
+
+**Interfaces:**
+- Consumes: `config.DataDir` (Task 15), `sqlite.Open` (Task 10), `spool.Drain` (Task 15), `namedpipe.*` (Task 12)
+- Produces:
+  - `diagnostics.NewLogger(path string) (*slog.Logger, *ErrorLatch, error)`
+  - `diagnostics.ErrorLatch` — `Last() error`, `Count() int`
+  - `diagnostics.Check{Name string; OK bool; Detail string}`
+  - `diagnostics.Doctor(opts DoctorOptions) []Check`
+  - `diagnostics.DoctorOptions{DBPath, SpoolDir, PipeName string; Latch *ErrorLatch}`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/diagnostics/logging_test.go`:
+
+```go
+package diagnostics
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoggerWritesToFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "engramux.log")
+	lg, latch, err := NewLogger(p)
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	lg.Info("hello", "k", "v")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(b), "hello") {
+		t.Fatalf("log does not contain the message: %q", b)
+	}
+	if latch.Count() != 0 {
+		t.Fatalf("latch recorded %d errors on a clean write", latch.Count())
+	}
+}
+
+// 로테이션이 실패하면 latch 에 남아야 한다. 무음이면 로그가 무한 증식한다.
+func TestRotationFailureIsLatched(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "engramux.log")
+	lg, latch, err := NewLogger(p)
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	lg.Info("seed")
+
+	// 다른 핸들이 파일을 잡고 있으면 Windows 에서 rename 이 실패한다.
+	holder, err := os.Open(p)
+	if err != nil {
+		t.Fatalf("open holder: %v", err)
+	}
+	defer holder.Close()
+
+	if err := Rotate(lg); err == nil {
+		t.Skip("이 플랫폼에서는 열린 파일도 rename 된다")
+	}
+	if latch.Count() == 0 {
+		t.Fatal("rotation failed but the latch is empty")
+	}
+	if latch.Last() == nil {
+		t.Fatal("latch.Last() is nil after a failure")
+	}
+}
+
+// 로그에 프롬프트 본문이나 도구 출력이 들어가면 안 된다.
+func TestLoggerRedactsSecrets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "engramux.log")
+	lg, _, err := NewLogger(p)
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	lg.Info("ingest", "payload", "export K=sk-ant-api03-WWWWWWWWWWWWWWWWWWWW")
+	b, _ := os.ReadFile(p)
+	if strings.Contains(string(b), "sk-ant-api03-WWWW") {
+		t.Fatal("secret was written to the log")
+	}
+}
+```
+
+`internal/diagnostics/doctor_test.go`:
+
+```go
+package diagnostics
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/wotjr1649/engramux/internal/storage/sqlite"
+)
+
+func TestDoctorReportsDBIntegrity(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "e.db")
+	db, err := sqlite.Open(p)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	db.Close()
+
+	checks := Doctor(DoctorOptions{DBPath: p})
+	got := map[string]Check{}
+	for _, c := range checks {
+		got[c.Name] = c
+	}
+	for _, name := range []string{"db.integrity", "db.foreign_keys", "db.schema"} {
+		c, ok := got[name]
+		if !ok {
+			t.Fatalf("check %q missing", name)
+		}
+		if !c.OK {
+			t.Errorf("check %q failed: %s", name, c.Detail)
+		}
+	}
+}
+
+func TestDoctorReportsMissingDBAsFailure(t *testing.T) {
+	checks := Doctor(DoctorOptions{DBPath: filepath.Join(t.TempDir(), "nope.db")})
+	for _, c := range checks {
+		if c.Name == "db.integrity" && c.OK {
+			t.Fatal("db.integrity reported OK for a missing database")
+		}
+	}
+}
+
+func TestDoctorSurfacesLogLatch(t *testing.T) {
+	latch := &ErrorLatch{}
+	latch.Record(errTest{})
+	checks := Doctor(DoctorOptions{Latch: latch})
+	for _, c := range checks {
+		if c.Name == "log.rotation" {
+			if c.OK {
+				t.Fatal("log.rotation reported OK despite a latched error")
+			}
+			return
+		}
+	}
+	t.Fatal("check log.rotation missing")
+}
+
+type errTest struct{}
+
+func (errTest) Error() string { return "rotation failed" }
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/diagnostics/ -v`
+Expected: FAIL — `undefined: NewLogger`, `undefined: Doctor`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+```bash
+go get gopkg.in/natefinch/lumberjack.v2@v2.2.1
+```
+
+`internal/diagnostics/logging.go`:
+
+```go
+// Package diagnostics 는 로깅과 자가 진단을 담당한다.
+package diagnostics
+
+import (
+	"context"
+	"log/slog"
+	"sync"
+
+	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/wotjr1649/engramux/internal/privacy"
+)
+
+// ErrorLatch 는 마지막 에러를 붙잡아 둔다.
+// slog 가 handler 에러를 버리므로(logger.go:264) 이게 없으면 로테이션 실패가
+// 어디에도 드러나지 않고 로그가 무한 증식한다.
+type ErrorLatch struct {
+	mu    sync.Mutex
+	last  error
+	count int
+}
+
+func (l *ErrorLatch) Record(err error) {
+	if err == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.last = err
+	l.count++
+}
+
+func (l *ErrorLatch) Last() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.last
+}
+
+func (l *ErrorLatch) Count() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.count
+}
+
+type latchingHandler struct {
+	inner slog.Handler
+	latch *ErrorLatch
+}
+
+func (h latchingHandler) Enabled(ctx context.Context, lv slog.Level) bool {
+	return h.inner.Enabled(ctx, lv)
+}
+
+func (h latchingHandler) Handle(ctx context.Context, r slog.Record) error {
+	// 값에 시크릿이 섞이면 저장 전에 없앤다.
+	r.Attrs(func(a slog.Attr) bool {
+		if s, ok := a.Value.Any().(string); ok {
+			if red, _ := privacy.Redact([]byte(s)); string(red) != s {
+				a.Value = slog.StringValue(string(red))
+			}
+		}
+		return true
+	})
+	err := h.inner.Handle(ctx, r)
+	h.latch.Record(err)
+	return err
+}
+
+func (h latchingHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return latchingHandler{h.inner.WithAttrs(as), h.latch}
+}
+
+func (h latchingHandler) WithGroup(name string) slog.Handler {
+	return latchingHandler{h.inner.WithGroup(name), h.latch}
+}
+
+var rotators sync.Map // *slog.Logger -> *lumberjack.Logger
+
+func NewLogger(path string) (*slog.Logger, *ErrorLatch, error) {
+	lj := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    16, // MiB
+		MaxBackups: 5,
+		MaxAge:     30,
+		Compress:   false,
+	}
+	latch := &ErrorLatch{}
+	lg := slog.New(latchingHandler{
+		inner: slog.NewJSONHandler(lj, &slog.HandlerOptions{Level: slog.LevelInfo}),
+		latch: latch,
+	})
+	rotators.Store(lg, lj)
+	return lg, latch, nil
+}
+
+// Rotate 는 명시적으로 회전시키고 에러를 latch 에 남긴다.
+// lumberjack 의 자체 회전은 실패해도 조용하다.
+func Rotate(lg *slog.Logger) error {
+	v, ok := rotators.Load(lg)
+	if !ok {
+		return nil
+	}
+	lj := v.(*lumberjack.Logger)
+	err := lj.Rotate()
+	if err != nil {
+		lg.Handler().(latchingHandler).latch.Record(err)
+	}
+	return err
+}
+```
+
+`internal/diagnostics/doctor.go`:
+
+```go
+package diagnostics
+
+import (
+	"fmt"
+
+	"github.com/wotjr1649/engramux/internal/storage/sqlite"
+)
+
+type Check struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type DoctorOptions struct {
+	DBPath   string
+	SpoolDir string
+	PipeName string
+	Latch    *ErrorLatch
+}
+
+func Doctor(o DoctorOptions) []Check {
+	var out []Check
+
+	if o.DBPath != "" {
+		db, err := sqlite.Open(o.DBPath)
+		if err != nil {
+			out = append(out,
+				Check{"db.integrity", false, err.Error()},
+				Check{"db.foreign_keys", false, "database unavailable"},
+				Check{"db.schema", false, "database unavailable"})
+		} else {
+			defer db.Close()
+			var res string
+			if err := db.Reader.QueryRow(`PRAGMA integrity_check`).Scan(&res); err != nil {
+				out = append(out, Check{"db.integrity", false, err.Error()})
+			} else {
+				out = append(out, Check{"db.integrity", res == "ok", res})
+			}
+
+			rows, err := db.Reader.Query(`PRAGMA foreign_key_check`)
+			if err != nil {
+				out = append(out, Check{"db.foreign_keys", false, err.Error()})
+			} else {
+				bad := rows.Next()
+				rows.Close()
+				out = append(out, Check{"db.foreign_keys", !bad, ""})
+			}
+
+			var n int
+			err = db.Reader.QueryRow(
+				`SELECT count(*) FROM sqlite_master WHERE name IN
+				 ('projects','sessions','events','observations','memory_items','projector_cursors')`).Scan(&n)
+			out = append(out, Check{"db.schema", err == nil && n == 6,
+				fmt.Sprintf("%d/6 core tables", n)})
+		}
+	}
+
+	if o.Latch != nil {
+		ok := o.Latch.Count() == 0
+		detail := ""
+		if !ok {
+			detail = fmt.Sprintf("%d errors, last: %v", o.Latch.Count(), o.Latch.Last())
+		}
+		out = append(out, Check{"log.rotation", ok, detail})
+	}
+
+	return out
+}
+```
+
+`internal/diagnostics/status.go`:
+
+```go
+package diagnostics
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Render 는 doctor 결과를 사람이 읽는 형태로 출력한다.
+func Render(w io.Writer, checks []Check) {
+	for _, c := range checks {
+		mark := "OK  "
+		if !c.OK {
+			mark = "FAIL"
+		}
+		fmt.Fprintf(w, "%s  %-22s %s\n", mark, c.Name, c.Detail)
+	}
+}
+
+func RenderJSON(w io.Writer, checks []Check) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(checks)
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/diagnostics/ -v`
+Expected: PASS — 6개 테스트 ok
+
+- [ ] **Step 5: 전 패키지 회귀와 CGO-free 빌드를 확인한다**
+
+Run:
+```bash
+go test -p 1 ./...
+CGO_ENABLED=0 go build ./...
+```
+Expected: 전부 PASS, 빌드 에러 없음
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add internal/diagnostics cmd/engramux go.mod go.sum
+git commit -m "feat: 로깅과 doctor — 로테이션 에러를 latch 로 표면화"
+```
+
+---
+
+## Self-Review
+
+plan 작성 후 spec 을 다시 훑어 대응을 확인했다.
+
+**1. Spec 커버리지 (Phase 1·2·3 범위)**
+
+| spec 절 | 대응 태스크 |
+|---|---|
+| §0.1 전역 제약 | Global Constraints 로 verbatim 복사 |
+| §2.1 이벤트 11개 | Task 3 (`AllTypes`), Task 18 (커버리지 보고) |
+| §2.2 실행 형태 | Task 1 (CUI 빌드), Task 14 (`relay` 서브커맨드) |
+| §2.3 payload 필드 · 지문 판별 | Task 6, Task 7, Task 8, Task 18 |
+| §2.4 출력 계약 | Task 7·8 formatter, Task 14 (exit 0), Task 18 (계약 4·5·6) |
+| §2.5 Codex 3초 clamp | Task 13 (`DialTimeout+IOTimeout < 3s`) |
+| §3.3 DSN·풀 분리 | Task 10 |
+| §3.4 스키마 | Task 10 마이그레이션 |
+| §3.6 redaction · purge | Task 4 (redaction). **purge 는 Phase 7 범위라 이 plan 에 없다** |
+| §3.7 인제스트 트랜잭션 | Task 11 |
+| §3.8 idempotency key | Task 3 (UUIDv7), Task 11, Task 17 게이트 2 |
+| §4 부분 순서 | Task 11 (`ingest_order`), Task 3 (`Envelope` 에 순서 필드 없음) |
+| §5.1 신뢰 경계 | Task 12 (주석·SDDL·인스턴스 수) |
+| §5.2 파이프 이름 | Task 12 (`Name` 에 SID 해시 + nonce) |
+| §5.3 싱글턴·프로세스 수명 | Task 16 |
+| §5.4 DACL | Task 15 (`config.DataDir` 주석). **실제 DACL 설정은 Phase 7** |
+| §5.5 spool | Task 15 |
+| §5.6 프레임 | Task 2, Task 13 |
+| §13 패키지 트리 | File Structure |
+| §14 Go 인터페이스 | Task 3·6·7·8·11 |
+| §15.1 fixture 승격 | Task 5 |
+| §11 Phase 1 게이트 | Task 17 |
+| §11 Phase 2 게이트 | Task 18 |
+| §11 Phase 3 게이트 | Task 16, Task 19 |
+
+**빈틈으로 남긴 것 (의도적):**
+- Scheduled Task 등록 — spec §11 이 Phase 7 로 옮겼다. §9.1 `schtasks` 실측 전엔 태스크를 쓸 수 없다.
+- `%LOCALAPPDATA%` DACL 실제 적용 — Phase 7 (installer).
+- MCP·검색·추출 — plan #2·#3 범위.
+
+**2. Placeholder 스캔**
+
+`TBD`·`TODO`·`implement later`·`add error handling`·`Similar to Task N` 0건.
+모든 코드 스텝에 실행 가능한 코드 블록이 있다. Task 14 의 `errNoTransport` 는
+placeholder 가 아니라 Task 16 이 배선을 완성할 때까지의 **동작하는** 기본값이다
+(그 상태에서도 relay 는 exit 0 이고 spool 로 떨어진다).
+
+**3. 타입 일관성**
+
+- `event.Envelope` 필드명이 Task 3 정의 → Task 7·8 parser → Task 11 INSERT → Task 14 relay →
+  Task 16 service 에서 동일하다.
+- `IngestResult{IngestOrder, Duplicate}` 가 Task 11 정의 → Task 16 사용에서 동일하다.
+- `host.Adapter` 4개 메서드가 Task 6 정의 → Task 7·8 구현 → Task 14·18 호출에서 동일하다.
+- `namedpipe.Listen/Accept/InstanceCount/Dial/RoundTrip` 이 Task 12·13 정의 → Task 16·17 사용에서 동일하다.
+- `spool.Writer{Dir}.Write` 와 `spool.Drain(dir, fn)` 이 Task 15 정의 → Task 16·17 사용에서 동일하다.
+- `service.Options` 에 `PipeNameOverride` 가 Task 16 테스트에서 쓰이므로 구조체에 포함시켰다.
+
+---
