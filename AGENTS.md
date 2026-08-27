@@ -70,6 +70,7 @@ Claude Code와 Codex의 세션 hook 이벤트를 자동 캡처해, 사용자당 
 | `testing/synctest`는 syscall과 실제 I/O에 통하지 않는다 | 파이프 I/O 테스트에 쓰지 않는다. 백오프·타임아웃·드레인 같은 시간 로직에만 |
 | golangci-lint v2의 `std-error-handling` 프리셋이 **모든 `.Close()` 미검사를 제외**한다 | 그 프리셋을 켜지 않는다. `sqlclosecheck`·`rowserrcheck`·`noctx`·`errorlint`·`gosec`(G115)를 켠다 |
 | `time` 채널은 Go 1.27부터 항상 unbuffered다 | 타이머 채널 버퍼링에 의존하는 코드를 쓰지 않는다 |
+| **`-race`에 CGO-free 경로는 없다.** `CGO_ENABLED=1` **그리고** C 컴파일러 둘 다 필요하다. `race_windows.syso`는 설치돼 있지만 `runtime/race/race.go`의 빌드 태그가 `windows && amd64`를 포함하고 그 파일이 `import "C"`를 한다 — darwin만 `race_darwin_amd64.go`로 우회한다(golang/go#6508 OPEN, Windows 계획 없음). `-ldflags=-linkmode=internal`도 소용없다: 실패 지점이 링크가 아니라 `runtime/cgo` 컴파일이다 | 배포 빌드는 `CGO_ENABLED=0` 유지. 레이스 검증은 **테스트 전용 경로**로 분리한다(§3) |
 
 ---
 
@@ -97,6 +98,31 @@ Claude Code와 Codex의 세션 hook 이벤트를 자동 캡처해, 사용자당 
 - **`session_id == "selftest"` 캡처를 걸러라.** 합성 자가진단 캡처가 claude PreToolUse 버킷에 실재하고 타임스탬프가 가장 빨라 그냥 두면 `001.json`이 된다.
 - `tool_response`는 **호스트마다 형태가 다르다**(실측): Claude `dict` 310/310이나 `stderr`/`interrupted` 키는 241/310에만 있고, Codex는 `str` 24 + `list` 15다. 객체를 가정하는 파서는 Codex 전부와 Claude 69건에서 조용히 틀린다.
 - JSON 에러 문자열을 그대로 비교하지 않는다. Go 1.27이 `encoding/json` 구현을 바꿔 문구가 달라진다.
+
+### 동시성 — 무엇이 무엇을 잡는지 착각하지 마라
+
+이 프로젝트에서 가장 위험한 실패 모드는 **"synctest로 동시성을 검증했다"는 착각**이다.
+
+| 도구 | CGO | 잡는 것 | **절대 못 잡는 것** |
+|---|---|---|---|
+| `go test -race` | **필요** | 실행된 경로의 진짜 데이터 레이스 | 실행 안 된 경로. 각 접근이 락으로 보호된 로직 경합 |
+| `testing/synctest` | 불필요 | 타임아웃·백오프·티커 로직, bubble 전면 차단 시 deadlock 패닉 | **데이터 레이스를 전혀 보고하지 않는다** — bubble 안에서 두 goroutine이 `x++`를 동시에 해도 조용히 통과한다(실측). 실제 I/O·syscall은 durably blocking이 아니라 **파이프 I/O 테스트에 못 쓴다** |
+| `goroutineleak` 프로파일 (1.27) | 불필요 | GC 사이클로 영구 차단된 goroutine, 스택까지 지목 | 데이터 레이스. 깨울 가능성이 남은 차단은 리크로 안 본다 |
+| `go vet` / staticcheck | 불필요 | `copylock`, `lostcancel`, `atomic` 오용, SA2000~2003 | **모든 실제 데이터 레이스.** 구문 매칭이지 happens-before 분석이 아니다 |
+| `-count=N -shuffle=on` | 불필요 | flake가 드러날 **확률**을 높인다 | 아무것도 보장하지 않는다. **통과는 증거가 아니다** |
+
+`goroutineleak`은 지금 CGO 없이 되므로 테스트 하니스에 넣는다. `Profile.Count()`는 탐지
+GC 사이클 **전에** 0을 반환하니 반드시 `WriteTo`로 탐지를 트리거하고 출력을 파싱한다:
+
+```go
+var buf bytes.Buffer
+_ = pprof.Lookup("goroutineleak").WriteTo(&buf, 1)
+first, _, _ := strings.Cut(buf.String(), "\n")
+if !strings.HasSuffix(first, "total 0") { t.Errorf("goroutine leak:\n%s", buf.String()) }
+```
+
+`go.uber.org/goleak`은 넣지 않는다 — `goroutineleak`이 런타임 GC 기반이라 스택 문자열
+휴리스틱보다 정확하고 의존성이 0이다.
 
 ---
 
