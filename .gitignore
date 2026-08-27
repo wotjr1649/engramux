@@ -13,3 +13,6 @@
 
 # superpowers subagent-driven-development 작업 공간
 .superpowers/
+
+# Claude Code 개인 설정 — 머신마다 다르다
+.claude/settings.local.json
