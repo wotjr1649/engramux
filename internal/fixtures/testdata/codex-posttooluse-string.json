@@ -1,0 +1,15 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000002",
+  "transcript_path": "C:\\Users\\fixture\\.codex\\sessions\\2026\\08\\28\\rollout-fixture-2.jsonl",
+  "cwd": "C:\\Users\\fixture\\workspace\\fixture-project",
+  "hook_event_name": "PostToolUse",
+  "model": "fixture-model",
+  "turn_id": "turn_fixture_2",
+  "permission_mode": "default",
+  "tool_use_id": "call_fixture0000000000000002",
+  "tool_name": "shell",
+  "tool_input": {
+    "command": "echo fixture-two"
+  },
+  "tool_response": "fixture-two stdout, as a bare string\n"
+}

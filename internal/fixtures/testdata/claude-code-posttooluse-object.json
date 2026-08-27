@@ -1,0 +1,24 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\fixture\\.claude\\projects\\C--fixture-workspace\\fixture-session-4.jsonl",
+  "cwd": "C:\\Users\\fixture\\workspace\\fixture-project",
+  "hook_event_name": "PostToolUse",
+  "prompt_id": "00000000-0000-4000-8000-0000000000f4",
+  "effort": {
+    "level": "medium"
+  },
+  "permission_mode": "default",
+  "duration_ms": 1234,
+  "tool_use_id": "toolu_fixture000000000000004",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo fixture-four"
+  },
+  "tool_response": {
+    "stdout": "fixture-four stdout\n",
+    "stderr": "fixture-four stderr\n",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  }
+}
