@@ -1,0 +1,28 @@
+# golangci-lint v2 schema. v1 examples will not load.
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - errorlint      # %w and errors.Is/As, not == on wrapped errors
+    - gosec
+    - noctx          # every outbound call carries a context
+    - rowserrcheck   # sql.Rows.Err() after the loop
+    - sqlclosecheck  # Rows and Stmt are closed
+
+  settings:
+    errcheck:
+      # tool_response is object, string, or array depending on host (spec 4.4);
+      # an unchecked type assertion is the shape of that bug.
+      check-type-assertions: true
+
+  exclusions:
+    # Deliberately NOT enabling the std-error-handling preset: it excludes every
+    # unchecked .Close(), which on a single-connection SQLite design is most of
+    # what we want caught.
+    presets: []
+
+formatters:
+  enable:
+    - gofmt
