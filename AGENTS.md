@@ -111,6 +111,20 @@ Claude Code와 Codex의 세션 hook 이벤트를 자동 캡처해, 사용자당 
 | `go vet` / staticcheck | 불필요 | `copylock`, `lostcancel`, `atomic` 오용, SA2000~2003 | **모든 실제 데이터 레이스.** 구문 매칭이지 happens-before 분석이 아니다 |
 | `-count=N -shuffle=on` | 불필요 | flake가 드러날 **확률**을 높인다 | 아무것도 보장하지 않는다. **통과는 증거가 아니다** |
 
+**레이스 검증은 저장소 밖의 portable 툴체인으로 한다.** 시스템 설치가 아니다 — `niXman/mingw-builds-binaries`의
+`x86_64-*-release-posix-seh-ucrt-*.7z`를 `D:\AI_DEV\_tools\mingw64`에 풀어두고 절대경로로만 부른다.
+관리자 권한·PATH·레지스트리를 건드리지 않고 폴더 삭제로 완전히 제거된다. GitHub Actions 러너가 쓰는 방식과 같다.
+
+```bash
+# 사전 판정 — 전체 경로가 안 나오면 그 툴체인은 -race 에 부적합하다
+"D:/AI_DEV/_tools/mingw64/bin/gcc.exe" --print-file-name libsynchronization.a
+
+CGO_ENABLED=1 CC="D:/AI_DEV/_tools/mingw64/bin/gcc.exe" go test -race -p 1 -timeout 20m ./...
+```
+
+`-race`는 5~15배 느려지므로 `-timeout`을 넉넉히 잡는다. `-p 1`은 그대로 유지한다.
+**배포 빌드는 이 경로를 절대 타지 않는다** — 테스트 바이너리는 아티팩트가 아니다.
+
 `goroutineleak`은 지금 CGO 없이 되므로 테스트 하니스에 넣는다. `Profile.Count()`는 탐지
 GC 사이클 **전에** 0을 반환하니 반드시 `WriteTo`로 탐지를 트리거하고 출력을 파싱한다:
 
