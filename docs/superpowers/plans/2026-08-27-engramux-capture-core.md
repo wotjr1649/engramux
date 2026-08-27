@@ -3061,3 +3061,1248 @@ git commit -m "feat: 인제스트 트랜잭션 — idempotency 먼저, 순번은
 ```
 
 ---
+
+## Task 12: Named Pipe 서버
+
+**신뢰 경계를 먼저 읽어라.** 같은 Windows user SID 로 도는 모든 프로세스는 신뢰 경계 **안**이다
+(spec §5.1). 아래 검사는 인증이 아니라 **사고성 오접속 탐지**다. 스쿼터를 막지 못한다 —
+실측으로 스쿼터 8개가 payload 87.5% 를 가로챘고, DACL 로 막으면 `go-winio` 의 `Accept()` 도
+같이 죽는다. 그래서 예방이 아니라 **탐지**를 구현한다.
+
+**Files:**
+- Create: `internal/transport/namedpipe/security_windows.go`
+- Create: `internal/transport/namedpipe/server_windows.go`
+- Test: `internal/transport/namedpipe/server_windows_test.go`
+
+**Interfaces:**
+- Consumes: `framing.Read`·`framing.Write` (Task 2)
+- Produces:
+  - `namedpipe.Name(sidHash, nonce string) string`
+  - `namedpipe.SDDL(userSID string) string`
+  - `namedpipe.CurrentUserSID() (sid string, hash string, err error)`
+  - `namedpipe.NewNonce() (string, error)`
+  - `namedpipe.Listen(name, sddl string) (*Listener, error)`
+  - `(*Listener).Accept() (net.Conn, uint32, error)` — conn 과 peer PID
+  - `(*Listener).InstanceCount() (uint32, error)` — 스쿼터 탐지용
+  - `(*Listener).Close() error`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/transport/namedpipe/server_windows_test.go`:
+
+```go
+package namedpipe
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestNameEmbedsSIDHashAndNonce(t *testing.T) {
+	got := Name("abc123", "nonce9")
+	// 파이프 네임스페이스는 machine-global 이다. SID 해시가 없으면
+	// 다중 사용자·RDP 에서 다른 사용자의 서비스와 충돌한다.
+	if !strings.Contains(got, "abc123") {
+		t.Errorf("name %q lacks the SID hash", got)
+	}
+	// nonce 가 없으면 로그온 시 먼저 뜬 스쿼터가 이름을 선점해
+	// 캡처를 영구히 조용히 죽인다.
+	if !strings.Contains(got, "nonce9") {
+		t.Errorf("name %q lacks the boot nonce", got)
+	}
+	if !strings.HasPrefix(got, `\\.\pipe\`) {
+		t.Errorf("name %q is not a pipe path", got)
+	}
+}
+
+func TestSDDLIsProtectedAndTwoACEs(t *testing.T) {
+	sid := "S-1-5-21-1-2-3-1001"
+	got := SDDL(sid)
+	if !strings.Contains(got, "D:P") {
+		t.Error("DACL is not protected (D:P); inherited ACEs would apply")
+	}
+	if !strings.Contains(got, "(A;;GA;;;SY)") {
+		t.Error("SYSTEM ACE missing")
+	}
+	if !strings.Contains(got, "(A;;GA;;;"+sid+")") {
+		t.Error("current-user ACE missing")
+	}
+	for _, bad := range []string{";;;WD)", ";;;BA)", ";;;AN)"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("SDDL grants %s; only SYSTEM and the current user may be present", bad)
+		}
+	}
+}
+
+func TestNewNonceIsUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		n, err := NewNonce()
+		if err != nil {
+			t.Fatalf("NewNonce: %v", err)
+		}
+		if n == "" {
+			t.Fatal("NewNonce returned empty")
+		}
+		if seen[n] {
+			t.Fatalf("duplicate nonce %q at i=%d", n, i)
+		}
+		seen[n] = true
+	}
+}
+
+func TestListenAndAcceptReportsPeerPID(t *testing.T) {
+	sid, hash, err := CurrentUserSID()
+	if err != nil {
+		t.Fatalf("CurrentUserSID: %v", err)
+	}
+	nonce, _ := NewNonce()
+	name := Name(hash, nonce)
+
+	l, err := Listen(name, SDDL(sid))
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer l.Close()
+
+	type accepted struct {
+		pid uint32
+		err error
+	}
+	got := make(chan accepted, 1)
+	go func() {
+		c, pid, err := l.Accept()
+		if c != nil {
+			c.Close()
+		}
+		got <- accepted{pid, err}
+	}()
+
+	c, err := Dial(name)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	c.Close()
+
+	a := <-got
+	if a.err != nil {
+		t.Fatalf("Accept: %v", a.err)
+	}
+	// 같은 프로세스에서 dial 했으므로 peer PID 는 우리 자신이다.
+	if a.pid != uint32(os.Getpid()) {
+		t.Fatalf("peer pid = %d, want %d", a.pid, os.Getpid())
+	}
+}
+
+// 두 번째 Listen 은 같은 이름에서 실패해야 한다. 이것이 싱글턴의 권위다
+// (64-way 경합에서 승자가 정확히 1개임을 실측했다).
+func TestSecondListenOnSameNameFails(t *testing.T) {
+	sid, hash, _ := CurrentUserSID()
+	nonce, _ := NewNonce()
+	name := Name(hash, nonce)
+
+	l1, err := Listen(name, SDDL(sid))
+	if err != nil {
+		t.Fatalf("first Listen: %v", err)
+	}
+	defer l1.Close()
+
+	if l2, err := Listen(name, SDDL(sid)); err == nil {
+		l2.Close()
+		t.Fatal("second Listen succeeded; pipe name is not exclusive")
+	}
+}
+
+// 인스턴스 수가 자기 것보다 많으면 스쿼터가 붙은 것이다. 막을 수는 없지만
+// doctor 가 red 를 띄울 수 있어야 한다.
+func TestInstanceCountIsReadable(t *testing.T) {
+	sid, hash, _ := CurrentUserSID()
+	nonce, _ := NewNonce()
+	name := Name(hash, nonce)
+	l, err := Listen(name, SDDL(sid))
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer l.Close()
+
+	n, err := l.InstanceCount()
+	if err != nil {
+		t.Fatalf("InstanceCount: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("InstanceCount = 0, want at least 1")
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/transport/namedpipe/ -v`
+Expected: FAIL — `undefined: Name`, `undefined: Listen`
+
+- [ ] **Step 3: 의존성을 추가하고 구현한다**
+
+```bash
+go get github.com/Microsoft/go-winio@v0.6.2
+go get golang.org/x/sys/windows
+```
+
+`internal/transport/namedpipe/security_windows.go`:
+
+```go
+// Package namedpipe 는 hook ingress 의 전송 계층이다.
+//
+// 신뢰 경계: 같은 Windows user SID 로 도는 모든 프로세스는 경계 **안**이다.
+// 이 패키지의 검사는 인증이 아니라 사고성 오접속 탐지다. 같은 SID 스쿼터를
+// DACL 로 막을 수 없다 — FILE_CREATE_PIPE_INSTANCE 를 빼면 go-winio 의
+// Accept() 도 같이 죽는다(spec §5.1).
+package namedpipe
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"os/user"
+)
+
+// Name 은 SID 해시와 부팅 nonce 를 모두 담는다.
+// SID 해시: 파이프 네임스페이스가 machine-global 이라 다중 사용자 충돌을 막는다. 비밀이 아니다.
+// nonce: 생성 성공 후에만 공개하므로 로그온 시 선점 스쿼팅이 불가능해진다.
+func Name(sidHash, nonce string) string {
+	return `\\.\pipe\engramux.v1.` + sidHash + "." + nonce
+}
+
+// SDDL 은 소유자를 현재 사용자로 두고 DACL 을 protected(D:P) 로 만든다.
+// ACE 는 SYSTEM 과 현재 사용자 둘뿐이다 — Everyone/Administrators/ANONYMOUS 없음.
+func SDDL(userSID string) string {
+	return "O:" + userSID + "D:P(A;;GA;;;SY)(A;;GA;;;" + userSID + ")"
+}
+
+func CurrentUserSID() (sid string, hash string, err error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", "", err
+	}
+	sum := sha256.Sum256([]byte(u.Uid))
+	return u.Uid, hex.EncodeToString(sum[:8]), nil
+}
+
+func NewNonce() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+```
+
+`internal/transport/namedpipe/server_windows.go`:
+
+```go
+package namedpipe
+
+import (
+	"fmt"
+	"net"
+
+	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
+)
+
+type Listener struct {
+	inner net.Listener
+	name  string
+}
+
+func Listen(name, sddl string) (*Listener, error) {
+	l, err := winio.ListenPipe(name, &winio.PipeConfig{
+		SecurityDescriptor: sddl,
+		InputBufferSize:    64 << 10,
+		OutputBufferSize:   64 << 10,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listen %s: %w", name, err)
+	}
+	return &Listener{inner: l, name: name}, nil
+}
+
+// Accept 는 conn 과 peer PID 를 함께 돌려준다.
+// PID 조회 실패는 **거부**로 처리한다 — 조회에 실패한 피어를 통과시키면
+// 검사가 없는 것과 같다.
+func (l *Listener) Accept() (net.Conn, uint32, error) {
+	c, err := l.inner.Accept()
+	if err != nil {
+		return nil, 0, err
+	}
+	pid, err := peerPID(c)
+	if err != nil {
+		c.Close()
+		return nil, 0, fmt.Errorf("peer pid: %w", err)
+	}
+	return c, pid, nil
+}
+
+// peerPID 는 go-winio 가 숨긴 핸들을 타입 어서션으로 회수한다.
+// win32Pipe 가 *win32File 을 embed 하고 그쪽에 Fd() 가 있다.
+func peerPID(c net.Conn) (uint32, error) {
+	f, ok := c.(interface{ Fd() uintptr })
+	if !ok {
+		return 0, fmt.Errorf("conn does not expose Fd()")
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeClientProcessId(windows.Handle(f.Fd()), &pid); err != nil {
+		return 0, err
+	}
+	return pid, nil
+}
+
+// InstanceCount 는 이 이름에 붙어 있는 파이프 인스턴스 수를 돌려준다.
+// 서비스가 자기 인스턴스 수보다 큰 값을 보면 스쿼터가 붙은 것이다.
+// 막을 수는 없으나 doctor 가 red 를 띄울 수 있다(spec §5.1).
+func (l *Listener) InstanceCount() (uint32, error) {
+	h, err := windows.CreateFile(
+		windows.StringToUTF16Ptr(l.name),
+		windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(h)
+	var cur uint32
+	if err := windows.GetNamedPipeHandleState(h, nil, &cur, nil, nil, nil, 0); err != nil {
+		return 0, err
+	}
+	return cur, nil
+}
+
+func (l *Listener) Close() error { return l.inner.Close() }
+func (l *Listener) Name() string { return l.name }
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/transport/namedpipe/ -v`
+Expected: PASS — 6개 테스트 ok. `TestListenAndAcceptReportsPeerPID`는 Task 13의 `Dial`이
+있어야 통과하므로, 이 태스크에서는 그 테스트만 실패해도 된다 —
+Task 13 Step 4에서 다시 돌린다.
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/transport/namedpipe
+git commit -m "feat: Named Pipe 서버 — SDDL, peer PID, 인스턴스 수 탐지"
+```
+
+---
+
+## Task 13: Named Pipe 클라이언트
+
+`winio.DialPipeContext` 의 context 는 **dial 만** 제한한다. 반환된 `net.Conn` 에는 데드라인이
+없어서, 스쿼터가 accept 만 하고 읽지 않으면 relay 가 무한 정지한다 — 실측으로 120초 이상
+멈추는 것을 확인했다. dial 직후 반드시 `SetDeadline` 을 건다.
+
+**Files:**
+- Create: `internal/transport/namedpipe/client_windows.go`
+- Test: `internal/transport/namedpipe/client_windows_test.go`
+
+**Interfaces:**
+- Consumes: `namedpipe.Name` (Task 12), `framing` (Task 2)
+- Produces:
+  - `namedpipe.DialTimeout = 2 * time.Second`, `namedpipe.IOTimeout = 2 * time.Second`
+  - `namedpipe.Dial(name string) (net.Conn, error)` — dial 후 `SetDeadline` 적용됨
+  - `namedpipe.RoundTrip(name string, req []byte) ([]byte, error)`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/transport/namedpipe/client_windows_test.go`:
+
+```go
+package namedpipe
+
+import (
+	"bytes"
+	"errors"
+	"net"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/wotjr1649/engramux/internal/transport/framing"
+)
+
+func startEcho(t *testing.T) string {
+	t.Helper()
+	sid, hash, err := CurrentUserSID()
+	if err != nil {
+		t.Fatalf("CurrentUserSID: %v", err)
+	}
+	nonce, _ := NewNonce()
+	name := Name(hash, nonce)
+	l, err := Listen(name, SDDL(sid))
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, _, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b, err := framing.Read(c)
+				if err != nil {
+					return
+				}
+				framing.Write(c, append([]byte("echo:"), b...))
+			}(c)
+		}
+	}()
+	return name
+}
+
+func TestRoundTrip(t *testing.T) {
+	name := startEcho(t)
+	got, err := RoundTrip(name, []byte(`{"k":"v"}`))
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if !bytes.Equal(got, []byte(`echo:{"k":"v"}`)) {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDialFailsFastWhenNoServer(t *testing.T) {
+	sid, hash, _ := CurrentUserSID()
+	_ = sid
+	nonce, _ := NewNonce()
+	start := time.Now()
+	_, err := Dial(Name(hash, nonce))
+	if err == nil {
+		t.Fatal("Dial succeeded with no server")
+	}
+	if el := time.Since(start); el > DialTimeout*2 {
+		t.Fatalf("Dial took %v, want <= %v", el, DialTimeout*2)
+	}
+}
+
+// accept 만 하고 읽지 않는 서버에 붙으면 데드라인이 걸려야 한다.
+// 이게 없으면 스쿼터 하나가 모든 도구 호출을 정지시킬 수 있다.
+func TestReadHasDeadline(t *testing.T) {
+	sid, hash, _ := CurrentUserSID()
+	nonce, _ := NewNonce()
+	name := Name(hash, nonce)
+	l, err := Listen(name, SDDL(sid))
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		c, _, err := l.Accept()
+		if err == nil {
+			// 일부러 읽지도 쓰지도 않는다.
+			time.Sleep(30 * time.Second)
+			c.Close()
+		}
+	}()
+
+	start := time.Now()
+	_, err = RoundTrip(name, []byte("hi"))
+	if err == nil {
+		t.Fatal("RoundTrip succeeded against a silent server")
+	}
+	var ne net.Error
+	if !errors.As(err, &ne) || !ne.Timeout() {
+		t.Fatalf("err = %v, want a timeout", err)
+	}
+	if el := time.Since(start); el > IOTimeout*3 {
+		t.Fatalf("RoundTrip blocked for %v, want <= %v", el, IOTimeout*3)
+	}
+}
+
+func TestRoundTripRejectsOversizeRequest(t *testing.T) {
+	name := startEcho(t)
+	_, err := RoundTrip(name, make([]byte, framing.MaxFrame+1))
+	if !errors.Is(err, framing.ErrFrameTooLarge) {
+		t.Fatalf("err = %v, want ErrFrameTooLarge", err)
+	}
+}
+
+func TestDialTimeoutFitsCodexSessionEndClamp(t *testing.T) {
+	// Codex 는 SessionEnd hook timeout 을 3초로 강제 clamp 한다.
+	// dial + IO 예산이 그 안에 들어가야 flush 가 가능하다.
+	if DialTimeout+IOTimeout >= 3*time.Second {
+		t.Fatalf("DialTimeout+IOTimeout = %v, want < 3s (Codex SessionEnd clamp)",
+			DialTimeout+IOTimeout)
+	}
+	_ = os.Getpid()
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/transport/namedpipe/ -run 'TestRoundTrip|TestDial|TestRead' -v`
+Expected: FAIL — `undefined: Dial`, `undefined: RoundTrip`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/transport/namedpipe/client_windows.go`:
+
+```go
+package namedpipe
+
+import (
+	"context"
+	"net"
+	"time"
+
+	"github.com/Microsoft/go-winio"
+
+	"github.com/wotjr1649/engramux/internal/transport/framing"
+)
+
+// DialTimeout + IOTimeout 은 Codex 의 SessionEnd 3초 clamp 안에 들어가야 한다.
+const (
+	DialTimeout = 1200 * time.Millisecond
+	IOTimeout   = 1200 * time.Millisecond
+)
+
+// Dial 은 연결 직후 데드라인을 건다.
+// DialPipeContext 의 context 는 dial 만 제한하고 반환된 conn 에는 적용되지 않는다 —
+// 그대로 두면 읽지 않는 피어에 걸려 120초 넘게 멈춘다(실측).
+func Dial(name string) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), DialTimeout)
+	defer cancel()
+	c, err := winio.DialPipeContext(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.SetDeadline(time.Now().Add(IOTimeout)); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
+// RoundTrip 은 프레임 하나를 보내고 응답 프레임 하나를 받는다.
+func RoundTrip(name string, req []byte) ([]byte, error) {
+	if len(req) > framing.MaxFrame {
+		return nil, framing.ErrFrameTooLarge
+	}
+	c, err := Dial(name)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	if err := framing.Write(c, req); err != nil {
+		return nil, err
+	}
+	return framing.Read(c)
+}
+```
+
+- [ ] **Step 4: 서버 테스트까지 함께 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/transport/namedpipe/ -v`
+Expected: PASS — 서버 6개 + 클라이언트 5개, 총 11개 ok
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/transport/namedpipe
+git commit -m "feat: Named Pipe 클라이언트 — dial 직후 SetDeadline"
+```
+
+---
+
+## Task 14: relay 배선
+
+relay 는 **어떤 경로로도 exit 0** 이어야 한다. Go panic 은 exit 2 를 내고, exit 2 는 호스트가
+차단 신호로 읽는 바로 그 코드다(실측: 3종 panic 전부 exit 2). 미확보 fixture 10종이 곧
+panic 후보이므로 최상단 `recover()` 없이는 첫 `PreCompact` 에서 호스트가 막힌다.
+
+**Files:**
+- Create: `internal/relay/relay.go`
+- Modify: `cmd/engramux/main.go` — `relay` 서브커맨드 배선
+- Test: `internal/relay/relay_test.go`
+
+**Interfaces:**
+- Consumes: `host.Detect`·`host.For` (Task 6), `claude`·`codex` adapter (Task 7·8), `privacy.Redact`·`privacy.Limit` (Task 4), `event.NewIngestID` (Task 3), `namedpipe.RoundTrip` (Task 13), `framing` (Task 2), `version.String` (Task 1)
+- Produces:
+  - `relay.Config{Stdin io.Reader; Stdout io.Writer; ArgHost string; ArgEvent string; PipeName string; Send func([]byte) ([]byte, error); Spool func([]byte) error; AdapterFor func([]byte) (host.Adapter, bool)}`
+  - `relay.Run(cfg Config) int` — **항상 0을 돌려준다**
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/relay/relay_test.go`:
+
+```go
+package relay
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/host"
+	_ "github.com/wotjr1649/engramux/internal/host/claude"
+	_ "github.com/wotjr1649/engramux/internal/host/codex"
+)
+
+func okSend(t *testing.T, captured *[]byte) func([]byte) ([]byte, error) {
+	t.Helper()
+	return func(req []byte) ([]byte, error) {
+		*captured = append([]byte(nil), req...)
+		ack, _ := json.Marshal(event.Ack{Version: 1, Status: event.Committed})
+		return ack, nil
+	}
+}
+
+func base(t *testing.T) (Config, *bytes.Buffer) {
+	t.Helper()
+	var out bytes.Buffer
+	return Config{
+		Stdout:   &out,
+		ArgHost:  "codex",
+		ArgEvent: "PostToolUse",
+		Send:     func([]byte) ([]byte, error) { return nil, errors.New("no server") },
+		Spool:    func([]byte) error { return nil },
+	}, &out
+}
+
+func TestRunAlwaysReturnsZero(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+	}{
+		{"empty", ""},
+		{"garbage", "not json at all"},
+		{"truncated", `{"session_id":`},
+		{"null", "null"},
+		{"array", "[1,2,3]"},
+		{"no_fingerprint", `{"session_id":"s","cwd":"D:/x"}`},
+		{"valid", `{"session_id":"s","cwd":"D:/x","turn_id":"t","hook_event_name":"PostToolUse"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, _ := base(t)
+			cfg.Stdin = strings.NewReader(c.stdin)
+			if code := Run(cfg); code != 0 {
+				t.Fatalf("Run = %d, want 0; exit 2 blocks the host", code)
+			}
+		})
+	}
+}
+
+// panic 이 exit 2 로 새어 나가면 안 된다.
+func TestRunRecoversFromPanic(t *testing.T) {
+	cfg, _ := base(t)
+	cfg.Stdin = strings.NewReader(`{"session_id":"s","cwd":"D:/x","turn_id":"t"}`)
+	cfg.AdapterFor = func([]byte) (host.Adapter, bool) { panic("boom") }
+	if code := Run(cfg); code != 0 {
+		t.Fatalf("Run = %d after panic, want 0", code)
+	}
+}
+
+// 캡처 이벤트의 stdout 은 비어 있어야 한다.
+func TestCaptureEventWritesNothingToStdout(t *testing.T) {
+	var sent []byte
+	cfg, out := base(t)
+	cfg.Stdin = strings.NewReader(
+		`{"session_id":"s","cwd":"D:/x","turn_id":"t","hook_event_name":"PostToolUse"}`)
+	cfg.Send = okSend(t, &sent)
+	if code := Run(cfg); code != 0 {
+		t.Fatalf("Run = %d", code)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}
+
+// 서비스가 없어도 호스트를 막지 않고 spool 로 떨어진다.
+func TestServiceDownSpoolsAndStaysSilent(t *testing.T) {
+	var spooled [][]byte
+	cfg, out := base(t)
+	cfg.Stdin = strings.NewReader(
+		`{"session_id":"s","cwd":"D:/x","turn_id":"t","hook_event_name":"Stop"}`)
+	cfg.Spool = func(b []byte) error {
+		spooled = append(spooled, append([]byte(nil), b...))
+		return nil
+	}
+	if code := Run(cfg); code != 0 {
+		t.Fatalf("Run = %d", code)
+	}
+	if len(spooled) != 1 {
+		t.Fatalf("spooled %d envelopes, want 1", len(spooled))
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on fail-open", out.String())
+	}
+}
+
+// spool 까지 실패해도 exit 0 이다.
+func TestSpoolFailureStillExitsZero(t *testing.T) {
+	cfg, _ := base(t)
+	cfg.Stdin = strings.NewReader(`{"session_id":"s","cwd":"D:/x","turn_id":"t"}`)
+	cfg.Spool = func([]byte) error { return errors.New("disk full") }
+	if code := Run(cfg); code != 0 {
+		t.Fatalf("Run = %d, want 0", code)
+	}
+}
+
+// 호스트 판별은 argv 가 아니라 payload 지문으로 한다.
+func TestPayloadFingerprintOverridesArgHost(t *testing.T) {
+	var sent []byte
+	cfg, _ := base(t)
+	cfg.ArgHost = "codex" // 틀린 argv
+	cfg.Stdin = strings.NewReader(
+		`{"session_id":"s","cwd":"D:/x","prompt_id":"p","hook_event_name":"Stop"}`)
+	cfg.Send = okSend(t, &sent)
+	Run(cfg)
+
+	var env event.Envelope
+	if err := json.Unmarshal(sent, &env); err != nil {
+		t.Fatalf("unmarshal sent: %v", err)
+	}
+	if env.Host != event.HostClaudeCode {
+		t.Fatalf("Host = %q, want claude-code from the payload fingerprint", env.Host)
+	}
+}
+
+// 시크릿은 파이프에 나가기 전에 사라져야 한다.
+func TestSecretIsRedactedBeforeSend(t *testing.T) {
+	var sent []byte
+	cfg, _ := base(t)
+	cfg.Stdin = strings.NewReader(
+		`{"session_id":"s","cwd":"D:/x","turn_id":"t","tool_input":` +
+			`{"command":"export K=sk-ant-api03-QQQQQQQQQQQQQQQQQQQQQQQQ"}}`)
+	cfg.Send = okSend(t, &sent)
+	Run(cfg)
+	if bytes.Contains(sent, []byte("sk-ant-api03-QQQQ")) {
+		t.Fatal("secret reached the pipe")
+	}
+}
+
+// IngestID 는 UUIDv7 이고 재전송에서 재사용되도록 envelope 에 실려야 한다.
+func TestEnvelopeCarriesIngestIDAndVersion(t *testing.T) {
+	var sent []byte
+	cfg, _ := base(t)
+	cfg.Stdin = strings.NewReader(`{"session_id":"s","cwd":"D:/x","turn_id":"t"}`)
+	cfg.Send = okSend(t, &sent)
+	Run(cfg)
+
+	var env event.Envelope
+	json.Unmarshal(sent, &env)
+	if len(env.IngestID) != 36 {
+		t.Fatalf("IngestID = %q, want a 36-char UUID", env.IngestID)
+	}
+	if env.RelayVersion == "" {
+		t.Fatal("RelayVersion is empty; events.relay_version is NOT NULL")
+	}
+	if env.PayloadSHA256 == "" {
+		t.Fatal("PayloadSHA256 is empty")
+	}
+	if env.RedactionVersion == 0 {
+		t.Fatal("RedactionVersion is zero")
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/relay/ -v`
+Expected: FAIL — `undefined: Run`, `undefined: Config`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/relay/relay.go`:
+
+```go
+// Package relay 는 hook 이 실행하는 무상태 클라이언트다.
+// DB·모델·검색 인덱스·HTTP listener 를 열지 않는다(spec I-03).
+package relay
+
+import (
+	"encoding/json"
+	"io"
+
+	"github.com/wotjr1649/engramux/internal/event"
+	"github.com/wotjr1649/engramux/internal/host"
+	"github.com/wotjr1649/engramux/internal/privacy"
+	"github.com/wotjr1649/engramux/internal/version"
+)
+
+type Config struct {
+	Stdin    io.Reader
+	Stdout   io.Writer
+	ArgHost  string
+	ArgEvent string
+
+	// Send 는 파이프 왕복이다. 테스트에서 교체한다.
+	Send func(req []byte) (ack []byte, err error)
+	// Spool 은 Send 실패 시 호출된다.
+	Spool func(envelope []byte) error
+	// AdapterFor 는 기본값이 nil 이면 host.Detect + host.For 를 쓴다.
+	AdapterFor func(payload []byte) (host.Adapter, bool)
+}
+
+// Run 은 무슨 일이 있어도 0 을 돌려준다.
+// 호출자(main)는 이 값을 그대로 os.Exit 에 넘긴다.
+func Run(cfg Config) (code int) {
+	defer func() {
+		// panic 은 exit 2 를 내고 exit 2 는 호스트를 차단한다(spec I-08).
+		_ = recover()
+		code = 0
+	}()
+
+	raw, err := io.ReadAll(cfg.Stdin)
+	if err != nil {
+		return 0
+	}
+
+	payload, class := privacy.Redact(raw)
+	limited, sha, truncated, origBytes := privacy.Limit(payload)
+
+	adapterFor := cfg.AdapterFor
+	if adapterFor == nil {
+		adapterFor = defaultAdapterFor
+	}
+	a, ok := adapterFor(limited)
+	if !ok {
+		// 지문이 없으면 어느 serializer 도 안전하지 않다. 조용히 끝낸다.
+		return 0
+	}
+
+	env, err := a.Parse(event.Type(cfg.ArgEvent), limited)
+	if err != nil {
+		return 0
+	}
+
+	id, err := event.NewIngestID()
+	if err != nil {
+		return 0
+	}
+	env.Version = 1
+	env.IngestID = id
+	env.Payload = json.RawMessage(limited)
+	env.PayloadSHA256 = sha
+	env.PayloadTruncated = truncated
+	env.PayloadOrigBytes = origBytes
+	env.PrivacyClass = class
+	env.RedactionVersion = privacy.RedactionVersion
+	env.RelayVersion = version.String()
+
+	body, err := json.Marshal(env)
+	if err != nil {
+		return 0
+	}
+
+	ackBytes, err := cfg.Send(body)
+	if err != nil {
+		if cfg.Spool != nil {
+			_ = cfg.Spool(body) // spool 실패도 삼킨다. 호스트를 막지 않는다.
+		}
+		writeOut(cfg, a, env.EventType, a.FormatFailOpen(env.EventType, err.Error()))
+		return 0
+	}
+
+	var ack event.Ack
+	if err := json.Unmarshal(ackBytes, &ack); err != nil {
+		return 0
+	}
+	out, err := a.FormatSuccess(env.EventType, ack)
+	if err != nil {
+		return 0
+	}
+	writeOut(cfg, a, env.EventType, out)
+	return 0
+}
+
+func writeOut(cfg Config, _ host.Adapter, _ event.Type, b []byte) {
+	if len(b) == 0 || cfg.Stdout == nil {
+		return
+	}
+	_, _ = cfg.Stdout.Write(b)
+}
+
+func defaultAdapterFor(payload []byte) (host.Adapter, bool) {
+	h, ok := host.Detect(payload)
+	if !ok {
+		return nil, false
+	}
+	return host.For(h)
+}
+```
+
+`cmd/engramux/main.go` 에 `relay` 를 배선한다:
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/wotjr1649/engramux/internal/relay"
+	"github.com/wotjr1649/engramux/internal/version"
+
+	_ "github.com/wotjr1649/engramux/internal/host/claude"
+	_ "github.com/wotjr1649/engramux/internal/host/codex"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: engramux <relay|version>")
+		os.Exit(1)
+	}
+	switch os.Args[1] {
+	case "version":
+		fmt.Println(version.String())
+	case "relay":
+		os.Exit(runRelay(os.Args[2:]))
+	default:
+		fmt.Fprintln(os.Stderr, "unknown command:", os.Args[1])
+		os.Exit(1)
+	}
+}
+
+func runRelay(args []string) int {
+	var argHost, argEvent string
+	for i := 0; i+1 < len(args); i++ {
+		switch args[i] {
+		case "--host":
+			argHost = args[i+1]
+		case "--event":
+			argEvent = args[i+1]
+		}
+	}
+	// Send·Spool 은 Task 15·16 에서 실제 파이프와 spool 로 배선한다.
+	return relay.Run(relay.Config{
+		Stdin:    os.Stdin,
+		Stdout:   os.Stdout,
+		ArgHost:  argHost,
+		ArgEvent: argEvent,
+		Send:     func([]byte) ([]byte, error) { return nil, errNoTransport },
+		Spool:    func([]byte) error { return nil },
+	})
+}
+
+var errNoTransport = fmt.Errorf("transport not wired yet")
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/relay/ -v`
+Expected: PASS — 15개 하위 테스트 전부 ok
+
+- [ ] **Step 5: 실제 바이너리가 exit 0 인지 확인한다**
+
+Run:
+```bash
+CGO_ENABLED=0 go build -ldflags "-s -w" -o /tmp/engramux.exe ./cmd/engramux
+echo 'garbage not json' | /tmp/engramux.exe relay --host codex --event PostToolUse
+echo "exit=$?"
+```
+Expected: `exit=0`, stdout 에 아무것도 출력되지 않음
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add internal/relay cmd/engramux
+git commit -m "feat: relay 배선 — 어떤 경로로도 exit 0"
+```
+
+---
+
+## Task 15: spool
+
+서비스가 내려가 있어도 이벤트를 잃지 않는다. 공용 append 파일을 쓰지 않는다 —
+outage 와 burst 가 겹치면 여러 relay 가 같은 파일에 끼어 쓰고, 회전과 import 가 경합한다.
+**이벤트마다 임시 파일 하나에 쓰고 flush 한 뒤 고유 이름으로 atomic rename** 한다(spec §5.5).
+
+**Files:**
+- Create: `internal/spool/spool.go`
+- Create: `internal/config/paths.go`
+- Test: `internal/spool/spool_test.go`
+
+**Interfaces:**
+- Consumes: `event.Envelope` (Task 3)
+- Produces:
+  - `config.DataDir() (string, error)` — `%LOCALAPPDATA%\Engramux`
+  - `config.SpoolDir() (string, error)`
+  - `spool.Writer{Dir string}`, `(Writer).Write(envelope []byte) error`
+  - `spool.Drain(dir string, fn func(envelope []byte) error) (n int, err error)`
+
+- [ ] **Step 1: 실패 테스트를 쓴다**
+
+`internal/spool/spool_test.go`:
+
+```go
+package spool
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestWriteThenDrainRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	w := Writer{Dir: dir}
+	want := []byte(`{"ingest_id":"a","host":"codex"}`)
+	if err := w.Write(want); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	var got [][]byte
+	n, err := Drain(dir, func(b []byte) error {
+		got = append(got, append([]byte(nil), b...))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n != 1 || len(got) != 1 || string(got[0]) != string(want) {
+		t.Fatalf("n=%d got=%q want %q", n, got, want)
+	}
+}
+
+// 성공한 항목만 지운다. 실패하면 남아서 다음에 다시 시도된다.
+func TestDrainKeepsFailedItems(t *testing.T) {
+	dir := t.TempDir()
+	w := Writer{Dir: dir}
+	w.Write([]byte(`{"ingest_id":"a"}`))
+	w.Write([]byte(`{"ingest_id":"b"}`))
+
+	_, _ = Drain(dir, func(b []byte) error {
+		if strings.Contains(string(b), `"b"`) {
+			return errors.New("service busy")
+		}
+		return nil
+	})
+	left, _ := os.ReadDir(dir)
+	if len(left) != 1 {
+		t.Fatalf("%d files left, want 1 (the failed one)", len(left))
+	}
+}
+
+// 부분 기록된 파일을 Drain 이 읽으면 안 된다. rename 전 임시 파일은
+// 점(.)으로 시작해 무시된다.
+func TestDrainIgnoresPartialFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".partial.tmp"), []byte(`{"hal`), 0o600)
+	n, err := Drain(dir, func([]byte) error { return nil })
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("Drain read %d partial files, want 0", n)
+	}
+}
+
+// 여러 relay 프로세스가 동시에 써도 프레임이 섞이지 않는다.
+func TestConcurrentWritesDoNotInterleave(t *testing.T) {
+	dir := t.TempDir()
+	const n = 64
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			b, _ := json.Marshal(map[string]int{"i": i})
+			if err := (Writer{Dir: dir}).Write(b); err != nil {
+				t.Errorf("Write %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[int]bool{}
+	got, err := Drain(dir, func(b []byte) error {
+		var m map[string]int
+		if err := json.Unmarshal(b, &m); err != nil {
+			return err // 섞였으면 여기서 깨진다
+		}
+		seen[m["i"]] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if got != n || len(seen) != n {
+		t.Fatalf("drained %d distinct %d, want %d", got, len(seen), n)
+	}
+}
+
+func TestWriteCreatesDirIfMissing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "spool")
+	if err := (Writer{Dir: dir}).Write([]byte(`{"a":1}`)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("dir not created: %v", err)
+	}
+}
+
+func TestDrainOnMissingDirIsNotAnError(t *testing.T) {
+	n, err := Drain(filepath.Join(t.TempDir(), "nope"), func([]byte) error { return nil })
+	if err != nil {
+		t.Fatalf("Drain on missing dir: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("n = %d, want 0", n)
+	}
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+
+Run: `go test -p 1 ./internal/spool/ -v`
+Expected: FAIL — `undefined: Writer`, `undefined: Drain`
+
+- [ ] **Step 3: 최소 구현을 쓴다**
+
+`internal/config/paths.go`:
+
+```go
+// Package config 는 경로 계산만 한다.
+package config
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+)
+
+// DataDir 은 %LOCALAPPDATA%\Engramux 다.
+// 이 디렉터리는 설치 시 명시적 protected DACL 로 만든다 — 기본 상속을 쓰면
+// CodexSandboxUsers 가 읽기 권한을 상속받는다(spec §5.4).
+func DataDir() (string, error) {
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		return "", errors.New("config: LOCALAPPDATA is not set")
+	}
+	return filepath.Join(base, "Engramux"), nil
+}
+
+func SpoolDir() (string, error) {
+	d, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "spool"), nil
+}
+```
+
+`internal/spool/spool.go`:
+
+```go
+// Package spool 은 서비스가 내려가 있을 때 이벤트를 디스크에 남긴다.
+// 이벤트마다 파일 하나를 쓰고 atomic rename 으로 노출한다 — 공용 append
+// 파일은 burst 에서 프레임이 섞이고 회전과 import 가 경합한다(spec §5.5).
+package spool
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+type Writer struct{ Dir string }
+
+func (w Writer) Write(envelope []byte) error {
+	if err := os.MkdirAll(w.Dir, 0o700); err != nil {
+		return err
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return err
+	}
+	name := hex.EncodeToString(b[:]) + ".json"
+
+	// 점으로 시작하는 임시 이름으로 쓴다. Drain 은 이 접두를 무시하므로
+	// 부분 기록된 파일을 읽을 수 없다.
+	tmp := filepath.Join(w.Dir, "."+name)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(envelope); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(w.Dir, name))
+}
+
+// Drain 은 fn 이 성공한 항목만 지운다. 실패한 것은 남아서 다음 회에 재시도된다.
+// 디렉터리가 없는 것은 에러가 아니다 — 서비스가 한 번도 실패하지 않은 정상 상태다.
+func Drain(dir string, fn func(envelope []byte) error) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || strings.HasPrefix(n, ".") || filepath.Ext(n) != ".json" {
+			continue
+		}
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	done := 0
+	for _, n := range names {
+		p := filepath.Join(dir, n)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if err := fn(b); err != nil {
+			continue // 남겨 둔다
+		}
+		if err := os.Remove(p); err != nil {
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+```
+
+- [ ] **Step 4: 테스트가 통과하는지 확인한다**
+
+Run: `go test -p 1 ./internal/spool/ ./internal/config/ -v`
+Expected: PASS — 6개 테스트 ok
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add internal/spool internal/config
+git commit -m "feat: spool — 이벤트당 파일 하나, atomic rename"
+```
+
+---
