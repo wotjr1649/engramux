@@ -1,0 +1,20 @@
+# Go·SQL·설정은 저장소 안에서 항상 LF. Windows 체크아웃에서도 CRLF 로 바꾸지 않는다.
+* text=auto eol=lf
+
+*.go       text eol=lf
+*.sql      text eol=lf
+*.md       text eol=lf
+*.json     text eol=lf
+*.mjs      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+go.mod     text eol=lf
+go.sum     text eol=lf
+
+# Windows 전용 스크립트만 CRLF
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+*.exe      binary
+*.db       binary
