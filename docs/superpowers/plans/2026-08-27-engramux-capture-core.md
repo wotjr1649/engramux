@@ -1,6 +1,21 @@
-# Engramux Capture Core Implementation Plan
+# Engramux Capture Core Implementation Plan — **SUPERSEDED. 실행하지 말 것**
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> ## ⛔ 이 문서를 구현 지시서로 쓰지 마라
+>
+> 5건의 독립 적대적 검토(실행 검증 2 · API 정확성 1 · 정합성 1 · Codex 1)에서 **약 70건**이 확인됐고,
+> 그중 다수가 이 문서의 코드가 **실행되지 않음**을 실측으로 증명했다.
+>
+> - 마이그레이션이 아예 돌지 않는다 (goose가 `;`로 트리거 본문을 자름) → Task 10·11의 15개 테스트 전부 실패
+> - Task 12는 컴파일되지 않는다 (Task 13의 `Dial` 호출)
+> - Task 6·7은 fixture 결함으로 실패, Task 10은 pragma 자기모순으로 실패, Task 19는 2건 실패
+> - **프로덕션 `engramux relay`가 파이프에도 spool에도 연결되지 않는다** — 실제 배선은 Task 17의 테스트 rig 안에만 있다
+> - 고의 파괴 **20개 중 15개**를 테스트가 놓쳤다
+>
+> **남겨두는 이유는 기록이다.** 어떤 결정이 어떤 근거로 내려졌는지, 그리고 "실행해보지 않은 코드를
+> 계획서에 쓰면 무슨 일이 벌어지는지"의 사례로서 가치가 있다.
+>
+> **유효한 문서는 `docs/superpowers/specs/2026-08-27-engramux-1.0-design.md` (rev.3) 하나다.**
+> 구현은 그 문서의 "진행 방식"에 따라 코드 먼저 TDD로 한다. 이 문서의 코드를 복사하지 않는다.
 
 **Goal:** Claude Code와 Codex의 hook 이벤트를 무상태 relay가 Named Pipe로 단일 서비스에 보내고, 서비스가 SQLite에 durable하게 커밋한 뒤에만 ACK하는 수직 관통을 완성한다.
 
