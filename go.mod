@@ -3,6 +3,7 @@ module github.com/wotjr1649/engramux
 go 1.26.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/pressly/goose/v3 v3.27.3
 	modernc.org/sqlite v1.57.0
 )
