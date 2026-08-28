@@ -147,3 +147,37 @@ func TestNameIsTheRootsLastElement(t *testing.T) {
 		t.Fatalf("Identify(%q).Name = %q, want %q", repo, got.Name, "engramux")
 	}
 }
+
+// TestNonAbsolutePathIsNeverWalked. The walk resolves relative elements against
+// the *process's* working directory, and the process here is one long-lived
+// service started by Task Scheduler. An unguarded walk would therefore give one
+// payload two different project identities depending on where the service was
+// launched from - and, worse, could attribute it to a real repository it has
+// nothing to do with.
+//
+// t.Chdir puts the process inside a real repository, which is exactly the
+// situation an unguarded walk absorbs silently. Every case below must come back
+// as the cleaned, folded input and nothing else.
+//
+// The last two are the reason [filepath.IsAbs] is the test rather than "starts
+// with a drive letter" or "starts with a separator": `D:work` names D:'s own
+// current directory and `\work` names the current drive, so both are process
+// state wearing an absolute path's clothes.
+func TestNonAbsolutePathIsNeverWalked(t *testing.T) {
+	t.Chdir(repoAt(t, filepath.Join(t.TempDir(), "launched-here")))
+
+	for _, tc := range []struct{ in, want string }{
+		{"", "."},
+		{".", "."},
+		{"..", ".."},
+		{filepath.Join("nested", "dir"), filepath.Join("nested", "dir")},
+		{"D:work", "d:work"},
+		{`\work`, `\work`},
+	} {
+		want := strings.ToLower(tc.want)
+		got := Identify(tc.in)
+		if got.Root != want {
+			t.Fatalf("Identify(%q).Root = %q, want %q", tc.in, got.Root, want)
+		}
+	}
+}

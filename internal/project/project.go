@@ -46,8 +46,20 @@ type Project struct {
 // still a project, because I-04 does not allow an event to be dropped for
 // wanting one.
 //
-// path is expected to be absolute. The walk stops when [filepath.Dir] reaches a
-// fixed point, which for a relative path is "." rather than a volume root.
+// # A non-absolute path is taken literally
+//
+// Only an absolute path is walked. Every other shape - "", ".", a relative
+// path, and the two Windows shapes that only look absolute (`D:work` names D:'s
+// own current directory, `\work` names the current drive) - resolves against
+// the *process's* working directory, and the process is one long-lived service
+// started by Task Scheduler. Walking those would make a payload's project
+// identity depend on where the service was launched from, and could attribute
+// an event to a real repository it has nothing to do with. So they are cleaned,
+// folded and returned as their own root, which no absolute path can collide
+// with.
+//
+// Nothing in the 900-capture corpus produces one: every `cwd` observed is
+// absolute. This is a guard on a trust boundary, not a path with traffic.
 //
 // # What the normalisation folds
 //
@@ -70,7 +82,11 @@ type Project struct {
 // substituted drives. Each of those is a different string for the same
 // directory and this package treats them as different projects.
 func Identify(path string) Project {
-	root := strings.ToLower(worktreeRoot(filepath.Clean(path)))
+	clean := filepath.Clean(path)
+	if filepath.IsAbs(clean) {
+		clean = worktreeRoot(clean)
+	}
+	root := strings.ToLower(clean)
 	sum := sha256.Sum256([]byte(root))
 	return Project{
 		ID:   hex.EncodeToString(sum[:16]),
