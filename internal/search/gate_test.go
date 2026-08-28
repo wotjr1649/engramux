@@ -469,11 +469,18 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	if c.name == twoTokensClass {
 		// Logged on the passing path too, and both numbers are needed.
 		// The first says how many comparisons ran; the second says how
-		// many of them could have failed, which over the fixtures is
-		// zero - see [escapesTheIntersection].
+		// many of them could have failed - see [escapesTheIntersection].
 		t.Logf("%s / %s: the intersection holds over %d of %d terms; %d carry no token to match on, "+
 			"and %d match something the pair does not, which is where an OR would show",
 			mode, c.name, 2*len(cands)-skipped-len(escaped), 2*len(cands), skipped, sharp)
+		if sharp == 0 {
+			t.Errorf("%s / %s: no term of the %d compared matched a document the pair does not, so every "+
+				"comparison this class ran was one where an AND and an OR return the same set and the "+
+				"class did not test the join - the containment check above cannot fail on a run like "+
+				"this. Either no document repeats one word of a derived pair, or the pair is already "+
+				"returning at least as much as each term alone, which is the OR that check names",
+				mode, c.name, 2*len(cands)-skipped)
+		}
 	}
 	if len(escaped) > 0 {
 		t.Errorf("%s / %s: %d term comparisons of %d sampled queries returned an event that term did not. "+
@@ -510,10 +517,11 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // returns exactly one side, which is a superset of the intersection whenever the
 // two terms select different documents.
 //
-// Containment and not equality, because rank order and [maxDocsPerClass] are
-// not what this is measuring, and because an intersection is a subset by
-// definition - a proper one whenever either term matches a document the other
-// does not.
+// Containment and not equality, because rank order is not what this is
+// measuring, and because an intersection is a subset by definition - a proper
+// one whenever either term matches a document the other does not. Not because
+// of [maxDocsPerClass]: the pair and both of its terms are searched with the
+// limit at the document count, so no sampling cap is in play on either side.
 //
 // A term the tokenizer reduces to nothing constrains nothing and is skipped,
 // which is measurement and not leniency. The corpus derives them - `"===`
@@ -525,12 +533,16 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // zero: it is how much of the sample this assertion did not cover.
 //
 // sharp counts the comparisons that could have failed - the terms matching
-// something the pair does not - and it is returned for the same reason. A term
-// whose result set is exactly the pair's cannot tell an AND from an OR: the
-// union and the intersection are then the same set. Measured: over the four
-// fixtures all six comparisons are of that kind, so a builder that ORs its
-// tokens passes the fixtures mode of this class and fails the corpus mode
-// loudly. A count of held comparisons alone would have hidden that.
+// something the pair does not - and it is returned so that [gateClass] can
+// require it to be positive. A term whose result set is exactly the pair's
+// cannot tell an AND from an OR: the union and the intersection are then the
+// same set, and a run of nothing but those reports a pass for a check that
+// gated nothing. The four fixtures alone were exactly such a run - all six
+// comparisons of that kind - which is what [pairSharpener] is in the document
+// set to fix. Measured with it, over the fixtures: 8 comparisons over 4 pairs,
+// none skipped, sharp 2 - one from `fixture-two` now selecting two documents
+// against its pair's one, and one from the sharpener's own derived pair. Over
+// the corpus: 50 comparisons, 1 skipped, sharp 45 of the 49 that ran.
 func escapesTheIntersection(
 	t *testing.T, db *sql.DB, cd candidate, both []search.Hit, limit int,
 ) (escaped []string, skipped, sharp int) {

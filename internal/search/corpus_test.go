@@ -87,16 +87,56 @@ func leavesOf(raw json.RawMessage) []string {
 	return out
 }
 
+// pairSharpener is one test-owned event that exists so the two-token class's
+// containment assertion can fail over the fixtures. It is not a Phase 1 fixture
+// and does not belong in internal/fixtures/testdata: nothing but this gate
+// reads it, and fixtures.All() is a list the shape test guards.
+//
+// Without it each of the four fixtures carried its derived pair's two words and
+// no other document carried either, so every single-term search returned the
+// same one document the pair did - an AND and an OR are then the same set, and
+// the assertion gated nothing. This repeats exactly one word of one derived
+// pair, `fixture-two fixturebot이` (codex-posttooluse-string), so that
+// `fixture-two` alone now returns two documents against the pair's one.
+//
+// Four things it must not acquire, each of which would move a number some other
+// part of this gate rests on:
+//
+//   - `fixturebot`, which would put it in the other term's result set too and
+//     take the pair back to the same set on both sides.
+//   - `cwd`, in any leaf and in any case, and no token beginning `cwd`. The
+//     precision assertion counts leaves as its bound and the fixtures' bound is
+//     0 of 4; one leaf here would make it 1 of 5 and buy the index a document.
+//     A key is not a leaf, but this carries no `cwd` key either.
+//   - a Hangul run of three syllables, or a token ending in one of spec 5.7's
+//     particles - both are Hangul, so no Hangul at all settles both.
+//   - a three-hump camelCase identifier, or a path with an extension.
+//
+// The last two are why the other four classes measure the same three and four
+// candidate documents they did before this was added: a document that carried
+// one would add a candidate and change what those classes sample.
+const pairSharpener = `{
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "fixture-two turns this class sharp: one word of one derived pair, repeated here and nowhere else",
+  "session_id": "gate-two-token-sharpener"
+}`
+
+// pairSharpenerName is what [pairSharpener] answers to in a failure message.
+// It says test-owned in the name because every other name this gate prints is a
+// file that exists, and a reader who went looking for this one would not find
+// it.
+const pairSharpenerName = "two-token-sharpener (test-owned)"
+
 // fixtureDocs is the mode that always runs: the four Phase 1 fixtures, reached
 // through All() so a fixture dropped from that list fails here rather than
-// going quietly unsearched.
+// going quietly unsearched, plus [pairSharpener].
 func fixtureDocs(t testing.TB) []doc {
 	t.Helper()
 	all := fixtures.All()
 	if len(all) == 0 {
 		t.Fatalf("fixtures.All() is empty; there is nothing to search")
 	}
-	docs := make([]doc, 0, len(all))
+	docs := make([]doc, 0, len(all)+1)
 	for _, f := range all {
 		b, err := f.Bytes()
 		if err != nil {
@@ -104,7 +144,11 @@ func fixtureDocs(t testing.TB) []doc {
 		}
 		docs = append(docs, doc{name: f.File, payload: b, leaves: leavesOf(b)})
 	}
-	return docs
+	// leaves is filled the same way, and not left nil: a document without
+	// them derives no query for any class and answers hasLeaf false, so it
+	// would sit in the precision denominator without ever being inspected.
+	sharpener := json.RawMessage(pairSharpener)
+	return append(docs, doc{name: pairSharpenerName, payload: sharpener, leaves: leavesOf(sharpener)})
 }
 
 // corpusDocs is the mode that runs when the raw corpus is present: every
