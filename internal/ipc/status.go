@@ -51,12 +51,54 @@ type StatusReply struct {
 	SpoolDepth int `json:"spool_depth"`
 	// Events is the number of rows in the events table.
 	Events int64 `json:"events"`
+	// Cells is the per-cell breakdown of Events: one entry per distinct
+	// (Host, EventName) pair the events table holds. Their Count values sum
+	// to Events.
+	Cells []Cell `json:"cells"`
 	// UptimeMS is how long this service process has been running, in
 	// milliseconds. A duration rather than a start instant, so a reader does
 	// not have to trust two clocks.
 	UptimeMS int64 `json:"uptime_ms"`
 	// DatabasePath is the database the service opened.
 	DatabasePath string `json:"database_path"`
+}
+
+// Cell is one host x event-name cell of the capture breakdown, and the unit
+// spec 8's Phase 2 enables events in: its 22-cell allowlist is spec 4.1's 11
+// events across two hosts, and only 13 of those cells occur in the captured
+// corpus. Which cells live dogfooding has actually produced is a question only
+// the service can answer, because I-07 leaves nothing else able to look.
+//
+// # An absent cell is a zero cell, and there are no zero rows
+//
+// [StatusReply.Cells] carries the cells the events table holds and no others.
+// Count is a COUNT over a GROUP BY, so it is never 0 - a cell with no events is
+// absent from the slice rather than present with a zero. The two cannot be
+// confused because only one of them is ever on the wire.
+//
+// The alternative - a grid pre-filled with zeroes for every cell that could
+// exist - was rejected because the cell space is not closed. EventName is
+// events.event_name, which is whatever the payload's hook_event_name said,
+// including "" for a payload that did not say (internal/store's Ingest stores
+// it rather than dropping the event, per I-04). A 22-row grid would therefore
+// be a partial fiction: it would show zeroes for cells that cannot occur while
+// still needing extra rows for the ones outside it. It would also put Phase 2's
+// allowlist in a second place before Phase 2 has defined it once.
+//
+// Host is one of internal/host.Detect's three values, which is what the
+// events.host CHECK constrains it to. `unknown` is reachable and is not an
+// error (I-04).
+//
+// FirstSeenMS and LastSeenMS are the smallest and largest events.received_at in
+// the cell - milliseconds since the Unix epoch, the same clock the column
+// holds. They bound when the cell was captured; they do not order anything,
+// because I-06 makes ordering partial and a timestamp is not an ordering key.
+type Cell struct {
+	Host        string `json:"host"`
+	EventName   string `json:"event_name"`
+	Count       int64  `json:"count"`
+	FirstSeenMS int64  `json:"first_seen_ms"`
+	LastSeenMS  int64  `json:"last_seen_ms"`
 }
 
 // Sentinel errors [StatusReply.Verify] returns, distinguishable with

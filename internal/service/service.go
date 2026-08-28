@@ -265,6 +265,10 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&events); err != nil {
 		return ipc.StatusReply{}, fmt.Errorf("service: count events: %w", err)
 	}
+	byCell, err := cells(ctx, db)
+	if err != nil {
+		return ipc.StatusReply{}, err
+	}
 	depth, err := spool.Depth(spoolPath)
 	if err != nil {
 		return ipc.StatusReply{}, err
@@ -272,7 +276,58 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 	return ipc.StatusReply{
 		SpoolDepth:   depth,
 		Events:       events,
+		Cells:        byCell,
 		UptimeMS:     time.Since(started).Milliseconds(),
 		DatabasePath: dbPath,
 	}, nil
+}
+
+// cells is the per-cell breakdown [ipc.Cell] documents: one row per distinct
+// (host, event_name) pair in the events table, with the count and the span of
+// received_at.
+//
+// It is one aggregate query and no join. The counts have to come from events
+// and not from sessions: a session row is one per session and would count how
+// many sessions touched a cell rather than how many events landed in it, which
+// is a different number that looks like the right one.
+//
+// The ORDER BY is not decoration - it is what makes the CLI's table stable
+// between two runs over an unchanged database, so a reader can diff them.
+// SQLite's default collation is BINARY, so `unknown` sorts last of the three
+// hosts by construction rather than by luck.
+//
+// A cell with no events produces no row, because that is what GROUP BY does.
+// [ipc.Cell] says why that is the answer rather than a zero-filled grid.
+//
+// ponytail: the reply grows with the number of distinct cells, and nothing
+// caps it. The ceiling is ipc.MaxFrameLen, at which point WriteFrame refuses
+// and the CLI reports a failed read rather than a short answer. Real traffic
+// is spec 4.1's 11 event names across two hosts; the upgrade path is a LIMIT
+// and a truncation flag, which needs a number nothing has needed yet.
+func cells(ctx context.Context, db *sql.DB) ([]ipc.Cell, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT host, event_name, count(*), min(received_at), max(received_at)
+		FROM events
+		GROUP BY host, event_name
+		ORDER BY host, event_name`)
+	if err != nil {
+		return nil, fmt.Errorf("service: group events by cell: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []ipc.Cell
+	for rows.Next() {
+		var c ipc.Cell
+		if err := rows.Scan(&c.Host, &c.EventName, &c.Count, &c.FirstSeenMS, &c.LastSeenMS); err != nil {
+			return nil, fmt.Errorf("service: scan a cell: %w", err)
+		}
+		out = append(out, c)
+	}
+	// Checked rather than assumed: rows.Next returns false both for "that
+	// was the last row" and for "the read failed", and without this a
+	// truncated breakdown would be served as a complete one.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("service: read the cell breakdown: %w", err)
+	}
+	return out, nil
 }

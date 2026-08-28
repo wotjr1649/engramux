@@ -26,9 +26,11 @@ func cli(args []string) int {
 	switch args[0] {
 	case "status":
 		return status()
+	case "cells":
+		return cells()
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux status")
+		warn("usage: engramux status | engramux cells")
 		return 2
 	}
 }
@@ -53,6 +55,58 @@ func status() int {
 		reply.Events, reply.SpoolDepth, reply.DatabasePath)
 	return 0
 }
+
+// cells prints the per-cell capture breakdown - host x event name, with a count
+// and the span it was captured over.
+//
+// # It is a second command over the same request
+//
+// It sends the Status request [status] sends, unchanged: spec 5.2 fixes the
+// request set at five types and a breakdown is not a sixth thing to ask the
+// service, it is part of what "how is the service doing" already answers. So
+// the service cannot tell these two commands apart, and there is nothing to
+// keep in sync between them.
+//
+// A separate command rather than extra lines on `status`, because the two
+// answer different questions at different lengths. `status` is four lines a
+// person reads to find out whether the service is alive; this is a table that
+// grows with the corpus, and printing it every time would bury the four lines
+// that were asked for. A flag would have been the same decision with an
+// argument parser attached - this binary's argument handling is one switch in
+// front of the relay path (see main), and it stays that way.
+//
+// # Absent, not zero
+//
+// Only cells the database holds are printed. A cell nothing has been captured
+// for has no row, and no row ever carries a count of zero - see [ipc.Cell] for
+// why the alternative, a grid pre-filled with zeroes, is not available here.
+func cells() int {
+	reply, err := askStatus()
+	if err != nil {
+		warn("cells: %v", err)
+		return 1
+	}
+	// Stdout, for the same reason [status] uses it.
+	//
+	// The event name is quoted and bounded, and the host is not. host is
+	// constrained by the events.host CHECK to three values this program
+	// knows; event_name is whatever a payload's hook_event_name said, so it
+	// is untrusted width, untrusted bytes, and - for a payload that carried
+	// no name at all - empty, which unquoted would print as blank columns
+	// that read like a missing value rather than a real cell.
+	_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-19s  %7s  %-19s  %s\n",
+		"host", "event", "count", "first seen", "last seen")
+	for _, c := range reply.Cells {
+		_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-19.64q  %7d  %-19s  %s\n",
+			c.Host, c.EventName, c.Count, stamp(c.FirstSeenMS), stamp(c.LastSeenMS))
+	}
+	return 0
+}
+
+// stamp renders one of [ipc.Cell]'s epoch-millisecond timestamps in local time.
+// The service that wrote it and the person reading it are the same Windows user
+// on the same machine (spec 2), so there is one clock and one zone in play.
+func stamp(ms int64) string { return time.UnixMilli(ms).Format(time.DateTime) }
 
 // askStatus sends one Status request and returns the reply it can accept.
 //

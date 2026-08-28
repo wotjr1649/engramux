@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -336,4 +337,156 @@ func TestTheServiceDrainsTheDirectoryTheRelayWritesTo(t *testing.T) {
 	if want := filepath.Join(dir, spoolDir); relaySpool != want {
 		t.Errorf("the relay spools into %q and the service drains %q", relaySpool, want)
 	}
+}
+
+// TestTheCellBreakdownIsWhatTheDatabaseHolds is the per-cell half of a Status
+// reply (spec 8's Phase 2 counts cells, and I-07 leaves the service as the only
+// process that can).
+//
+// Every expected number is one this test wrote in by hand, with received_at
+// values it chose, so nothing here is compared against another run of the query
+// under test. The rows are inserted with SQL rather than through store.Ingest
+// for the same reason: a seed that classified the host itself would be asserting
+// that two code paths agree, not that the breakdown matches the table.
+//
+// It does not need the pipe - it calls [status] directly - so it can run beside
+// a development service, unlike everything above it in this file.
+func TestTheCellBreakdownIsWhatTheDatabaseHolds(t *testing.T) {
+	dir := t.TempDir()
+	db := openMigrated(t, filepath.Join(dir, dbName))
+
+	// Three of one cell with the smallest and largest received_at neither
+	// first nor last in insertion order, so min/max cannot be an accident of
+	// which row went in when.
+	seedEvent(t, db, "e1", "claude-code", "PostToolUse", 1000)
+	seedEvent(t, db, "e2", "claude-code", "PostToolUse", 3000)
+	seedEvent(t, db, "e3", "claude-code", "PostToolUse", 2000)
+	seedEvent(t, db, "e4", "codex", "SessionEnd", 5000)
+	// host `unknown` is reachable and is not an error (I-04), and an event
+	// whose payload carried no hook_event_name is stored with event_name ""
+	// rather than dropped. Both are real rows and both must appear.
+	seedEvent(t, db, "e5", "unknown", "", 7000)
+
+	// A row in another table the breakdown must not count. Without it, a
+	// query that grouped over the wrong table would still have to be caught
+	// by the numbers alone.
+	if _, err := db.ExecContext(t.Context(),
+		`INSERT INTO observations (id, project_id, event_id, kind, body, created_at)
+		 VALUES ('o1', 'p', 'e1', 'note', 'not an event', 0)`); err != nil {
+		t.Fatalf("seed an observation: %v", err)
+	}
+
+	reply := statusOf(t, db, dir)
+
+	want := []ipc.Cell{
+		{Host: "claude-code", EventName: "PostToolUse", Count: 3, FirstSeenMS: 1000, LastSeenMS: 3000},
+		{Host: "codex", EventName: "SessionEnd", Count: 1, FirstSeenMS: 5000, LastSeenMS: 5000},
+		{Host: "unknown", EventName: "", Count: 1, FirstSeenMS: 7000, LastSeenMS: 7000},
+	}
+	if !slices.Equal(reply.Cells, want) {
+		t.Fatalf("the breakdown is not what the table holds\n got %+v\nwant %+v", reply.Cells, want)
+	}
+	// The counts are a decomposition of the total, not a second opinion
+	// about it. A query that grouped the wrong rows can match one and not
+	// both.
+	var sum int64
+	for _, c := range reply.Cells {
+		sum += c.Count
+	}
+	if sum != reply.Events {
+		t.Errorf("the cells sum to %d and events = %d", sum, reply.Events)
+	}
+
+	// A cell nothing was captured for is absent, never a row whose count is
+	// zero: ("codex", "PostToolUse") is exactly such a cell above, and the
+	// equality already proved it is missing. This says the other half - that
+	// no cell on the wire is a zero - which is what makes "absent" readable
+	// as "zero" at the other end.
+	for _, c := range reply.Cells {
+		if c.Count == 0 {
+			t.Errorf("cell %s/%q has count 0; an empty cell is absent, not zero", c.Host, c.EventName)
+		}
+	}
+}
+
+// TestTheCellBreakdownIsReadAtEveryRequest. The breakdown is a decomposition of
+// a number the status command exists to be able to trust, so a cached one would
+// go stale exactly when someone is checking whether a cell has been captured
+// yet - which is the question spec 8's Phase 2 gates on.
+//
+// Two calls with a write in between, because one call cannot tell a value that
+// was read from a value that was computed once and kept.
+func TestTheCellBreakdownIsReadAtEveryRequest(t *testing.T) {
+	dir := t.TempDir()
+	db := openMigrated(t, filepath.Join(dir, dbName))
+
+	seedEvent(t, db, "e1", "codex", "PreToolUse", 1000)
+	before := statusOf(t, db, dir)
+	if len(before.Cells) != 1 || before.Cells[0].Count != 1 {
+		t.Fatalf("the first breakdown is already wrong: %+v", before.Cells)
+	}
+
+	seedEvent(t, db, "e2", "codex", "PreToolUse", 4000)
+	seedEvent(t, db, "e3", "claude-code", "Stop", 9000)
+
+	after := statusOf(t, db, dir)
+	want := []ipc.Cell{
+		{Host: "claude-code", EventName: "Stop", Count: 1, FirstSeenMS: 9000, LastSeenMS: 9000},
+		{Host: "codex", EventName: "PreToolUse", Count: 2, FirstSeenMS: 1000, LastSeenMS: 4000},
+	}
+	if !slices.Equal(after.Cells, want) {
+		t.Fatalf("the second breakdown did not see the two new rows\n got %+v\nwant %+v", after.Cells, want)
+	}
+}
+
+// statusOf calls [status] the way the pipe handler does.
+func statusOf(t *testing.T, db *sql.DB, dir string) ipc.StatusReply {
+	t.Helper()
+	reply, err := status(t.Context(), db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	return reply
+}
+
+// openMigrated opens a database at path with the schema applied, and closes it
+// when the test ends - including its WAL sidecars, or t.TempDir cannot clean up.
+func openMigrated(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := store.Open(t.Context(), path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the database: %v", err)
+		}
+	})
+	if err := store.Migrate(t.Context(), db); err != nil {
+		t.Fatalf("migrate %s: %v", path, err)
+	}
+	return db
+}
+
+// seedEvent inserts one events row with the host, event name and received_at
+// the caller chose, plus the project and session rows the foreign keys need
+// (spec 5.4 turns foreign_keys on).
+func seedEvent(t *testing.T, db *sql.DB, id, host, eventName string, receivedAt int64) {
+	t.Helper()
+	// Spec 6's session id: the host joined to the host session id.
+	sessionID := host + ":s"
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.ExecContext(t.Context(), query, args...); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	exec(`INSERT INTO projects (id, root, name, created_at)
+	      VALUES ('p', 'Z:\cells', 'cells', 0) ON CONFLICT DO NOTHING`)
+	exec(`INSERT INTO sessions (id, project_id, host, host_session_id, status, created_at)
+	      VALUES (?, 'p', ?, 's', 'active', 0) ON CONFLICT DO NOTHING`, sessionID, host)
+	exec(`INSERT INTO events (id, project_id, session_id, host, source, event_name,
+	                          payload, privacy_class, redaction_version, received_at)
+	      VALUES (?, 'p', ?, ?, 'pipe', ?, '{}', '', 1, ?)`,
+		id, sessionID, host, eventName, receivedAt)
 }

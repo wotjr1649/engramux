@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -377,6 +379,103 @@ func TestStatusReportsWhatIsActuallyThere(t *testing.T) {
 	down := cli(t, "status")
 	if down.exit == 0 {
 		t.Errorf("engramux status exited 0 with no service running:\n%s", down.stdout)
+	}
+	if !strings.Contains(down.stderr, `\\.\pipe\engramux.v1`) {
+		t.Errorf("the failure does not say what could not be reached:\n%s", down.stderr)
+	}
+}
+
+// TestTheCellBreakdownTravelsOverThePipe is the breakdown's half of I-08, at
+// the process level: the counts are read out of a database no other process can
+// open (I-07), so the pipe is the only thing that could have carried them.
+//
+// The expected counts are the events this test ingested, not a second query.
+// Three hosts on purpose - `unknown` is reachable and is not an error (I-04),
+// and it is the value most likely to be quietly dropped by a reader that
+// assumes the two real hosts.
+func TestTheCellBreakdownTravelsOverThePipe(t *testing.T) {
+	local := t.TempDir()
+	svc := start(t, local)
+
+	// One payload per host, chosen so each takes a different branch of spec
+	// 4.3: prompt_id is step 1, model is step 2, and the third carries
+	// neither and no transcript_path, so it classifies as unknown.
+	const cwd = `"cwd":"Z:\\cells\\project"`
+	payloads := []struct {
+		host, event string
+		body        string
+	}{
+		{"claude-code", "PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"cc",` + cwd + `,"prompt_id":"p1"}`},
+		{"claude-code", "PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"cc",` + cwd + `,"prompt_id":"p2"}`},
+		{"codex", "SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"cx",` + cwd + `,"model":"m"}`},
+		{"unknown", "Stop", `{"hook_event_name":"Stop","session_id":"uk",` + cwd + `}`},
+	}
+	want := map[string]int64{}
+	before := time.Now()
+	for i, p := range payloads {
+		ingest(t, fmt.Sprintf("0192f0c0-0000-7000-8000-0000000007%02d", i), []byte(p.body))
+		want[p.host+" "+p.event]++
+	}
+
+	var reply ipc.StatusReply
+	if err := json.Unmarshal(send(t, request(t, ipc.Version, ipc.Status, "", nil)), &reply); err != nil {
+		t.Fatalf("decode the status reply: %v", err)
+	}
+	if err := reply.Verify(); err != nil {
+		t.Fatalf("the service did not answer a status reply: %v", err)
+	}
+
+	got := map[string]int64{}
+	for _, c := range reply.Cells {
+		if c.Count == 0 {
+			t.Errorf("cell %s/%q has count 0; an empty cell is absent, not zero", c.Host, c.EventName)
+		}
+		// The span brackets the ingests this test made, which is what
+		// says these are the row timestamps and not, say, a clock read
+		// when the reply was built.
+		if c.FirstSeenMS > c.LastSeenMS ||
+			c.FirstSeenMS < before.UnixMilli() || c.LastSeenMS > time.Now().UnixMilli() {
+			t.Errorf("cell %s/%q spans %d..%d, which is not inside this test's run",
+				c.Host, c.EventName, c.FirstSeenMS, c.LastSeenMS)
+		}
+		got[c.Host+" "+c.EventName] = c.Count
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("the breakdown is not what this test ingested\n got %v\nwant %v", got, want)
+	}
+
+	// The CLI prints what the pipe said, and it is a second command sending
+	// the same Status request - spec 5.2 fixes the request set at five types.
+	res := cli(t, "cells")
+	if res.exit != 0 {
+		t.Fatalf("engramux cells exited %d, want 0", res.exit)
+	}
+	// Parsed by field rather than by column position, so this asserts what
+	// was printed and not how it was padded.
+	printed := map[string]string{}
+	for _, line := range strings.Split(res.stdout, "\n")[1:] {
+		if f := strings.Fields(line); len(f) >= 3 {
+			printed[f[0]+" "+f[1]] = f[2]
+		}
+	}
+	for cell, n := range want {
+		host, event, _ := strings.Cut(cell, " ")
+		// The event name is quoted on the way out, so that an event with
+		// no name is visible rather than blank.
+		key := host + ` "` + event + `"`
+		if printed[key] != strconv.FormatInt(n, 10) {
+			t.Errorf("engramux cells printed %q for %s, want %d:\n%s", printed[key], key, n, res.stdout)
+		}
+	}
+
+	svc.stop(t)
+
+	// With the service down there is no read path at all (I-08), so this
+	// fails rather than falling back to the database - the same contract
+	// `status` holds, because it is the same request.
+	down := cli(t, "cells")
+	if down.exit == 0 {
+		t.Errorf("engramux cells exited 0 with no service running:\n%s", down.stdout)
 	}
 	if !strings.Contains(down.stderr, `\\.\pipe\engramux.v1`) {
 		t.Errorf("the failure does not say what could not be reached:\n%s", down.stderr)

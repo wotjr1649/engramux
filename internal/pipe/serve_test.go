@@ -9,6 +9,7 @@ import (
 	"net"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -690,6 +691,14 @@ func TestStatusIsAnsweredWithAStatusReply(t *testing.T) {
 		Events:       9001,
 		UptimeMS:     1234,
 		DatabasePath: `Z:\service\engramux.db`,
+		// The breakdown travels the same way the scalars do (I-08). The
+		// empty event name is the shape a payload with no
+		// hook_event_name produces, and it has to survive the wire as
+		// itself rather than as an omitted field.
+		Cells: []ipc.Cell{
+			{Host: "claude-code", EventName: "PostToolUse", Count: 310, FirstSeenMS: 11, LastSeenMS: 12},
+			{Host: "unknown", EventName: "", Count: 1, FirstSeenMS: 13, LastSeenMS: 13},
+		},
 	}
 	name, _ := startHandler(t, Handler{
 		Ingest: (&recorder{status: ipc.Committed}).ingest,
@@ -705,7 +714,8 @@ func TestStatusIsAnsweredWithAStatusReply(t *testing.T) {
 		t.Fatalf("Verify: %v (reply = %q)", err, raw)
 	}
 	if got.SpoolDepth != want.SpoolDepth || got.Events != want.Events ||
-		got.UptimeMS != want.UptimeMS || got.DatabasePath != want.DatabasePath {
+		got.UptimeMS != want.UptimeMS || got.DatabasePath != want.DatabasePath ||
+		!slices.Equal(got.Cells, want.Cells) {
 		t.Errorf("the reply is not the handler's numbers\n got %+v\nwant %+v", got, want)
 	}
 }
