@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,15 @@ const gateCWD = `Z:\gate\workspace\gate-project`
 //
 //	go test -p 1 -run TestPhase1Gate -v ./internal/spool/
 func TestPhase1Gate(t *testing.T) {
+	// Both relay clauses run the shipped binary, which dials the derived name
+	// (spec 5.2): on the real one a development service would take the event
+	// clause 1 expects to find in the spool, and would refuse the listener the
+	// same clause stands up. Set before anything is built or launched, so
+	// every child inherits it - t.Setenv here rather than in each clause,
+	// because a subtest's name is not the parent's and the two ends of the
+	// dial have to agree.
+	useTestPipeName(t)
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "engramux.db")
 	spoolDir := filepath.Join(dir, "spool")
@@ -229,6 +239,15 @@ func gateBothDeliveryPathsStoreTheSameBytes(t *testing.T, db *sql.DB) {
 	}
 }
 
+// useTestPipeName moves the derived pipe name - this process's and every
+// child's, since they inherit the environment - onto one unique to the test
+// and the process. It is what lets the two relay clauses run while a
+// development service holds the real name.
+func useTestPipeName(t *testing.T) {
+	t.Helper()
+	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+}
+
 // buildRelay compiles the relay to a path this test owns. It is the shipped
 // program, built the way the shipped program is built: the divergence this
 // clause is about lives in what the relay does with its stdin, so a
@@ -283,7 +302,8 @@ func relayThroughTheSpool(t *testing.T, bin string, raw []byte, db *sql.DB) stri
 	names := entries(t, spoolDir)
 	if len(names) != 1 {
 		t.Fatalf("the spool holds %q, want exactly one record - if it is empty, something is listening on "+
-			"the relay's pipe and took the event: stop the development engramux service and re-run with -p 1", names)
+			"the relay's pipe and took the event: another copy of this test binary, or a leaked listener "+
+			"from an earlier clause. Re-run with -p 1", names)
 	}
 	id, ok := strings.CutSuffix(names[0], ext)
 	if !ok {
@@ -320,8 +340,8 @@ func relayOverTheWire(t *testing.T, bin string, raw []byte, db *sql.DB) string {
 	}
 	l, err := pipe.Listen(name, u.Uid)
 	if err != nil {
-		t.Fatalf("Listen(%s): %v\nAn access-denied here means something else already holds the relay's pipe - "+
-			"a development engramux service, or another copy of this test binary. Stop it and re-run with -p 1.", name, err)
+		t.Fatalf("Listen(%s): %v\nAn access-denied here means something else already holds this run's pipe - "+
+			"another copy of this test binary, or a listener an earlier clause leaked. Re-run with -p 1.", name, err)
 	}
 
 	// Buffered, so the handler never blocks on a send, and read

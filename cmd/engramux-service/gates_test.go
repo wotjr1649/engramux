@@ -32,6 +32,7 @@ import (
 // choosing, and asserts what I-03 promises: exit 0 and nothing on stdout.
 func relay(t *testing.T, local string, stdin []byte) {
 	t.Helper()
+	useTestPipeName(t)
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built
 	cmd := exec.CommandContext(t.Context(), relayBin)
@@ -60,6 +61,9 @@ type cliResult struct {
 // cli runs the CLI half of the relay binary.
 func cli(t *testing.T, args ...string) cliResult {
 	t.Helper()
+	// `status` and `doctor` dial the derived name; the CLI inherits this
+	// process's environment, so it reaches the same service start did.
+	useTestPipeName(t)
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built, args are the caller's literals
 	cmd := exec.CommandContext(t.Context(), relayBin, args...)
@@ -717,9 +721,10 @@ func TestThirtyConcurrentStartsLeaveOneService(t *testing.T) {
 		go func() { done <- exit{i, in.cmd.Wait()} }()
 	}
 
-	// Nothing survives this test. The pipe name is fixed (spec 5.2), so a
-	// process left running would fail the *next* test in this package with a
-	// diagnosis pointing at a development service that does not exist.
+	// Nothing survives this test. A leaked service is a process holding a
+	// database and a pipe for the rest of the run, and since every test now
+	// derives a pipe name of its own it would no longer announce itself by
+	// failing the next one - so the cleanup is the only thing that catches it.
 	consumed := 0
 	t.Cleanup(func() {
 		for _, in := range insts {

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -23,9 +25,11 @@ import (
 // Windows closes every handle a dead process held (docs/evidence/crash). The
 // process-level gates live in cmd/engramux-service.
 //
-// The pipe name is fixed (spec 5.2), so these cannot run beside a development
-// service or beside each other - the same constraint every pipe test in this
-// repository has, and the reason for -p 1.
+// The pipe name is fixed (spec 5.2), and these tests move it with
+// ipc.TestPipeSIDEnv so that a development service holding the real one is not
+// in the way. They still cannot run beside each other: the override is a
+// process-wide environment variable, which is why the value carries the test's
+// name and the process id.
 
 // running starts Run in dir on its own goroutine and returns a function that
 // stops it and hands back Run's error.
@@ -140,10 +144,30 @@ func pipeName(t *testing.T) string {
 	return name
 }
 
+// useTestPipeName moves Run's listener and this test's dials onto a name
+// unique to the test and the process, so that a development service holding
+// the real one is no longer in the way. It sets nothing else: the DACL is
+// still the real user's.
+//
+// It is called from requirePipeFree, which is the single gate every test here
+// that touches the pipe already goes through, and not from pipeName: pipeName
+// is called again after the listener exists, and re-deriving there would put a
+// second rule in the same place as the first.
+func useTestPipeName(t *testing.T) {
+	t.Helper()
+	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+}
+
+// requirePipeFree claims the test's own pipe name and checks nothing answers
+// on it yet. After the override it is no longer about the development
+// service: what it catches is a listener an earlier test in this binary
+// leaked, or two copies of this binary sharing a process id, neither of which
+// any other assertion here would name.
 func requirePipeFree(t *testing.T) {
 	t.Helper()
+	useTestPipeName(t)
 	if dialOK(t) {
-		t.Fatal("something is already listening on the service's pipe - stop the development engramux service and re-run with -p 1")
+		t.Fatalf("something is already listening on %s - an earlier test leaked a listener", pipeName(t))
 	}
 }
 
@@ -349,8 +373,8 @@ func TestTheServiceDrainsTheDirectoryTheRelayWritesTo(t *testing.T) {
 // for the same reason: a seed that classified the host itself would be asserting
 // that two code paths agree, not that the breakdown matches the table.
 //
-// It does not need the pipe - it calls [status] directly - so it can run beside
-// a development service, unlike everything above it in this file.
+// It does not need the pipe at all - it calls [status] directly - so unlike
+// everything above it in this file it needs no pipe name of its own either.
 func TestTheCellBreakdownIsWhatTheDatabaseHolds(t *testing.T) {
 	dir := t.TempDir()
 	db := openMigrated(t, filepath.Join(dir, dbName))

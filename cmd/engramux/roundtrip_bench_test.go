@@ -71,7 +71,7 @@ func benchServer(b *testing.B) *sql.DB {
 	name := relayPipeName(b)
 	l, err := pipe.Listen(name, currentSID(b))
 	if err != nil {
-		b.Fatalf("Listen(%s): %v\nSomething else holds the relay's pipe - a development service, or another benchmark.", name, err)
+		b.Fatalf("Listen(%s): %v\nSomething else holds this benchmark's pipe - another copy of this binary, or a leaked listener.", name, err)
 	}
 
 	done := make(chan error, 1)

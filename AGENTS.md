@@ -43,10 +43,13 @@ imports `crypto/rand`, directly or transitively, makes it print `0 issues.` **an
 `go run` builds it with the local toolchain, so the linter and the standard library it is
 reading always agree. The first run downloads and builds; after that it is cached.
 
-Run `go test` with `-p 1`. Parallel test binaries collide on the single database file and on fixed
-pipe names — both are consequences of 1.0 decisions, not laws. If the tests ever move to per-test
-databases and per-test pipe names, re-measure and drop this. Nothing in the repository enforces it;
-a contributor's machine may or may not have a guard.
+Run `go test` with `-p 1`. Pipe names are no longer a reason: a test that listens on the derived
+name, or launches a binary that dials it, moves the derivation with `ipc.TestPipeSIDEnv` first,
+keyed on the test name and the process id. What is left is the single database file — and the fact
+that the override is a *process-wide* environment variable, so no test in these packages may call
+`t.Parallel` (`t.Setenv` panics if it does, which is the right answer rather than a limitation to
+work around). Whether `-p 1` is still needed has not been re-measured, so keep it. Nothing in the
+repository enforces it; a contributor's machine may or may not have a guard.
 
 ## How we work
 
@@ -91,8 +94,8 @@ row on its own, delete the row — the test is the better owner.
 
 | Symptom | What is actually happening |
 |---|---|
-| `database is locked` during tests, doctor, or migrations | A development service is running and holds the database exclusively. This is almost never a DSN or pragma bug |
-| Tests fail with *"something is already listening on `\\.\pipe\engramux.v1-…`"*, or a relay delivers when the test expected it to spool | The same cause as the row above, through the other door: a development service is running. The pipe name is derived from the **user SID, not the data directory**, so pointing `LOCALAPPDATA` somewhere else does not isolate anything — a relay reaches whichever service currently owns the pipe. One machine, one instance, by design (I-01, I-09). Stop the service before running the suite; the tests say so themselves rather than failing obscurely |
+| `database is locked` against the real data directory — `doctor`, a migration, a second service started by hand | A development service is running and holds that file exclusively (I-07). This is almost never a DSN or pragma bug. The suite does not meet it: every test opens a database under its own `t.TempDir` |
+| *"something is already listening on `\\.\pipe\engramux.v1-…`"*, or a relay delivers when the test expected it to spool | **Not** the development service any more. The name is still derived from the **user SID, not the data directory** — so redirecting `LOCALAPPDATA` isolates nothing — but tests override the SID that feeds the hash with `ipc.TestPipeSIDEnv`, keyed on the test name and the process id, and their children inherit it. So the suite runs with the service up, and this message now means a listener an earlier test leaked, a second copy of the test binary, or a test that reaches the pipe without going through its package's `useTestPipeName`. In production the derivation is untouched: one machine, one instance, by design (I-01, I-09) |
 | `Access is denied` from `go build -o` | You are overwriting a running `.exe` |
 | A Windows CLI flag is mangled into a path — `schtasks /query` becomes `C:/Program Files/Git/query` | MSYS path conversion. Set `MSYS_NO_PATHCONV=1`, or use `//query` |
 | A DSN pragma silently has no effect | Only `_pragma` values skip validation — a typo returns `err=nil` and SQLite ignores it. The answer is I-11, not a retry |

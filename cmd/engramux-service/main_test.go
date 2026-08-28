@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -258,17 +259,36 @@ func pipeName(t *testing.T) string {
 	return name
 }
 
-// requirePipeFree fails with the one diagnosis that matters when these tests
-// go wrong: the pipe name is fixed (spec 5.2), so a development service or a
-// second copy of this binary owns it and nothing here can.
+// useTestPipeName moves the derived name (spec 5.2) onto one unique to this
+// test and this process, so that the development service holding the real name
+// is not in the way. Every child inherits it - all of them are launched with
+// os.Environ() or with the parent's environment untouched - so the service, the
+// relay and the CLI all meet on the same name.
+//
+// It is called from every helper that launches a process - start through
+// requirePipeFree, plus relay and cli - and never from pipeName: pipeName is
+// also called inside subtests, whose t.Name() is not the parent's, and a
+// subtest that re-derived the name would dial a pipe the service its parent
+// started never listened on.
+func useTestPipeName(t *testing.T) {
+	t.Helper()
+	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+}
+
+// requirePipeFree claims this test's pipe name and fails with the one
+// diagnosis that matters when nothing answers there yet is wrong: something
+// else owns the name and nothing here can. Since the name is the test's own,
+// that something is a listener an earlier test leaked or a second copy of this
+// binary sharing a process id - not the development service.
 func requirePipeFree(t *testing.T) {
 	t.Helper()
+	useTestPipeName(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	c, err := winio.DialPipeContext(ctx, pipeName(t))
 	if err == nil {
 		_ = c.Close()
-		t.Fatalf("something is already listening on %s - stop the development engramux service and re-run with -p 1", pipeName(t))
+		t.Fatalf("something is already listening on %s - an earlier test leaked a listener; re-run with -p 1", pipeName(t))
 	}
 }
 

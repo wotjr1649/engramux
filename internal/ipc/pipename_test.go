@@ -60,4 +60,42 @@ func TestCurrentPipeName(t *testing.T) {
 	if got != want {
 		t.Errorf("CurrentPipeName() did not match PipeName(user.Current().Uid)")
 	}
+
+	// The seam itself. Every test in this repository that listens on the
+	// derived name is now standing on it, so it is asserted here rather than
+	// inferred from those tests passing: they would also pass on a build that
+	// ignored the variable and happened to run with no service up.
+	const override = "engramux-test-current-pipe-name"
+	t.Setenv(TestPipeSIDEnv, override)
+
+	overridden, err := CurrentPipeName()
+	if err != nil {
+		t.Fatalf("CurrentPipeName under %s: %v", TestPipeSIDEnv, err)
+	}
+	// It stands in for the SID as the *input to the hash*, so the name keeps
+	// the shape spec 5.2 fixes and only lands elsewhere in the namespace.
+	if wantOverridden := PipeName(override); overridden != wantOverridden {
+		t.Errorf("CurrentPipeName() under %s = %q, want PipeName(%q) = %q",
+			TestPipeSIDEnv, overridden, override, wantOverridden)
+	}
+	if overridden == got {
+		t.Errorf("CurrentPipeName() returned the same name with and without %s, "+
+			"so the override is not reaching the derivation", TestPipeSIDEnv)
+	}
+	const wantPrefix = `\\.\pipe\engramux.v1`
+	if !strings.HasPrefix(overridden, wantPrefix) {
+		t.Errorf("CurrentPipeName() under %s = %q, want prefix %q", TestPipeSIDEnv, overridden, wantPrefix)
+	}
+
+	// Empty is not set. A stray empty value in an environment - a child
+	// launched with the variable cleared rather than removed - must leave the
+	// real derivation alone, or the service would listen where nothing dials.
+	t.Setenv(TestPipeSIDEnv, "")
+	empty, err := CurrentPipeName()
+	if err != nil {
+		t.Fatalf("CurrentPipeName under an empty %s: %v", TestPipeSIDEnv, err)
+	}
+	if empty != want {
+		t.Errorf("an empty %s moved the pipe name off the real derivation", TestPipeSIDEnv)
+	}
 }

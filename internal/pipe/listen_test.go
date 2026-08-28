@@ -30,12 +30,28 @@ func currentSID(t *testing.T) string {
 	return u.Uid
 }
 
+// testSID is the stand-in this binary hashes its pipe names from: unique to
+// the test, and to the process, so no other test here and no concurrently
+// running copy of this binary derives the same name.
+func testSID(t *testing.T) string {
+	t.Helper()
+	return "engramux-test-" + strconv.Itoa(os.Getpid()) + "-" + t.Name()
+}
+
 // uniquePipeName derives a pipe name no other test in this binary uses, and
-// no concurrently running copy of this binary uses either. Fixed names are
-// half the reason the suite runs with -p 1; this task does not add more.
+// no concurrently running copy of this binary uses either.
 func uniquePipeName(t *testing.T) string {
 	t.Helper()
-	return ipc.PipeName("engramux-test-" + strconv.Itoa(os.Getpid()) + "-" + t.Name())
+	return ipc.PipeName(testSID(t))
+}
+
+// useTestPipeName points ipc.CurrentPipeName - and so ListenCurrent, and any
+// child this test launches with the environment it inherits - at the same
+// name uniquePipeName would give. It is what lets a test exercise the derived
+// name while a development service holds the real one.
+func useTestPipeName(t *testing.T) {
+	t.Helper()
+	t.Setenv(ipc.TestPipeSIDEnv, testSID(t))
 }
 
 // listen opens a listener on a name unique to t and closes it when t ends.
@@ -232,7 +248,15 @@ func TestOwnerSIDAcceptsARealSID(t *testing.T) {
 // TestListenCurrentUsesTheDerivedName ties the two halves of the singleton
 // together: the name ListenCurrent takes has to be the name ipc sends a relay
 // to, or the service listens where nothing dials.
+//
+// It used to skip when a development service held the real name, which made
+// the one assertion binding the two halves together the one assertion that
+// did not run on the machine this is developed on. Under the override both
+// halves move and neither is hardcoded, so the test measures the same thing
+// it always claimed to and now measures it every run.
 func TestListenCurrentUsesTheDerivedName(t *testing.T) {
+	useTestPipeName(t)
+
 	want, err := ipc.CurrentPipeName()
 	if err != nil {
 		t.Fatalf("ipc.CurrentPipeName: %v", err)
@@ -240,7 +264,7 @@ func TestListenCurrentUsesTheDerivedName(t *testing.T) {
 
 	l, err := ListenCurrent()
 	if err != nil {
-		t.Skipf("ListenCurrent: %v (a service is probably already running for this user)", err)
+		t.Fatalf("ListenCurrent: %v", err)
 	}
 	defer func() {
 		if err := l.Close(); err != nil {

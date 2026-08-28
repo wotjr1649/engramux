@@ -116,14 +116,24 @@ func Listen(name, ownerSID string) (net.Listener, error) {
 // ListenCurrent is [Listen] on the pipe name and the DACL of the user this
 // process runs as - the one listener the service ever creates.
 //
-// On Windows os/user.Current().Uid is the user's SID, and one call to it
-// derives both halves, so the name the service listens on and the ACE that
-// protects it cannot come from two different users. It is the same derivation
-// ipc.CurrentPipeName performs for the relay's side of the dial.
+// The name comes from ipc.CurrentPipeName rather than from a second copy of
+// the derivation, because that is the function the relay dials with: two
+// copies of one rule are two things to move, and a listener on a name nothing
+// dials is invisible until an event is lost. ipc.TestPipeSIDEnv moves both
+// ends at once for exactly that reason.
+//
+// The DACL is derived separately, from os/user.Current().Uid - on Windows the
+// user's SID - and never from the name. So the ACE protecting the pipe is the
+// real user's under every environment, and the override reaches nothing
+// spec 5.2 puts inside the trust boundary.
 func ListenCurrent() (net.Listener, error) {
 	u, err := user.Current()
 	if err != nil {
 		return nil, fmt.Errorf("pipe: current user: %w", err)
 	}
-	return Listen(ipc.PipeName(u.Uid), u.Uid)
+	name, err := ipc.CurrentPipeName()
+	if err != nil {
+		return nil, err
+	}
+	return Listen(name, u.Uid)
 }

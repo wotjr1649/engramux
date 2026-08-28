@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -106,6 +107,10 @@ func run(t *testing.T, bin string, stdin []byte) result {
 
 func runWith(t *testing.T, bin string, setup func(*exec.Cmd)) result {
 	t.Helper()
+	// Before os.Environ is read below: the child derives its pipe name from
+	// what it inherits, and a child on the real name would reach the
+	// development service.
+	useTestPipeName(t)
 
 	local := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -239,12 +244,27 @@ func currentSID(t testing.TB) string {
 	return u.Uid
 }
 
+// useTestPipeName moves the derived name onto one unique to this test and this
+// process, so a development service holding the real one is not in the way.
+// The relay reads it from its environment, which [runWith] passes down, so
+// both ends of the dial move together.
+//
+// Every path that either listens or launches the relay goes through
+// [relayPipeName] or [runWith], and both call this: a test that missed it
+// would send the relay at the live service, which would take the event and
+// leave the spool assertions failing for a reason that is not about the relay.
+func useTestPipeName(t testing.TB) {
+	t.Helper()
+	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+}
+
 // relayPipeName is the name the relay dials. It is derived, not configurable -
-// that is spec 5.2's fixed name - so a test server has to take the real one,
-// and these tests cannot run beside a live service. -p 1 keeps them from
-// colliding with each other.
+// that is spec 5.2's fixed name - so a test server has to take the derivation
+// rather than a name of its own, and moving the derivation is the only way to
+// stand beside a live service. -p 1 keeps these from colliding with each other.
 func relayPipeName(t testing.TB) string {
 	t.Helper()
+	useTestPipeName(t)
 	name, err := ipc.CurrentPipeName()
 	if err != nil {
 		t.Fatalf("ipc.CurrentPipeName: %v", err)
@@ -258,9 +278,9 @@ func listenRelayPipe(t *testing.T) net.Listener {
 	l, err := pipe.Listen(name, currentSID(t))
 	if err != nil {
 		t.Fatalf("Listen(%s): %v\n"+
-			"An access-denied here means something else already holds the relay's pipe - "+
-			"a development engramux service, or another copy of this test binary. "+
-			"Stop it and re-run with -p 1.", name, err)
+			"An access-denied here means something else already holds this test's pipe - "+
+			"another copy of this test binary, or a listener an earlier test leaked. "+
+			"Re-run with -p 1.", name, err)
 	}
 	return l
 }
@@ -471,6 +491,10 @@ func TestNoServiceListening(t *testing.T) {
 	}
 }
 
+// requirePipeFree claims this test's pipe name and checks nothing answers on
+// it. It is no longer about the development service - the name is this test's
+// own - so what it catches is a listener an earlier test leaked, which is the
+// one thing that would make "the relay spooled" mean nothing.
 func requirePipeFree(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
@@ -478,7 +502,7 @@ func requirePipeFree(t *testing.T) {
 	c, err := winio.DialPipeContext(ctx, relayPipeName(t))
 	if err == nil {
 		_ = c.Close()
-		t.Fatalf("something is listening on %s; stop the development engramux service", relayPipeName(t))
+		t.Fatalf("something is listening on %s - an earlier test leaked a listener", relayPipeName(t))
 	}
 }
 
