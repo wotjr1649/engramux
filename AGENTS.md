@@ -49,8 +49,10 @@ that listens on the derived name or launches a binary that dials it now moves th
 file, because every database a test opens is under its own `t.TempDir`. Whether it can now be
 dropped is `[unverified]` — nothing re-measured it, and the timing-sensitive tests are what would
 decide it (the 30-concurrent-starts gate, the relay's dial and total budgets). Keep passing it
-until someone does. Nothing in the repository enforces it; the maintainer's machine has a hook that
-insists on it, which is not the same thing.
+until someone does. Nothing in the repository enforces it; what refuses a `go test` without `-p` on
+the maintainer's machine is a Claude Code `PreToolUse` hook in that machine's settings — which is
+why searching `.git/hooks`, `core.hooksPath`, shell profiles and `GOFLAGS` finds nothing, and why
+it is not a guarantee for anyone else.
 
 ## How we work
 
@@ -96,7 +98,7 @@ row on its own, delete the row — the test is the better owner.
 | Symptom | What is actually happening |
 |---|---|
 | `database is locked` against the real data directory — `doctor`, a migration, a second service started by hand | A development service is running and holds that file exclusively (I-07). This is almost never a DSN or pragma bug. The suite does not meet it: every test opens a database under its own `t.TempDir` |
-| *"something is already listening on `\\.\pipe\engramux.v1-…`"*, or a relay delivers when the test expected it to spool | **Not** the development service any more. The name is still derived from the **user SID, not the data directory** — so redirecting `LOCALAPPDATA` isolates nothing — but tests override the SID that feeds the hash with `ipc.TestPipeSIDEnv`, keyed on the test name and the process id, and their children inherit it. So the suite runs with the service up, and this message now means a listener an earlier test leaked, a second copy of the test binary, or a test that reaches the pipe without going through its package's `useTestPipeName`. In production the derivation is untouched: one machine, one instance, by design (I-01, I-09) |
+| *"something is already listening on `\\.\pipe\engramux.v1-…`"*, or a relay delivers when the test expected it to spool | **Not** the development service any more. The name is still derived from the **user SID, not the data directory** — so redirecting `LOCALAPPDATA` isolates nothing — but tests override the SID that feeds the hash with `ipc.TestPipeSIDEnv`, and their children inherit it. So the suite runs with the service up, and this message now means a listener an earlier test leaked, a second copy of the test binary, or a test that reaches the pipe without going through its package's `useTestPipeName`. No shipped path sets that variable, but the read is in every build: whichever process sees it moves, so a relay and a service given different environments land on different names and stop meeting. Nothing is lost when they do — the relay spools and the drain is by directory, so the events arrive at the next `drainInterval` instead of over the pipe (I-01, I-09 still hold; it is one user's own processes either way) |
 | A pipe test panics with *"testing: test using t.Setenv, t.Chdir, or cryptotest.SetGlobalRandom can not use t.Parallel"* | The pipe-name override is set with `t.Setenv`, which is process-wide, so a test that moves the name cannot be parallel and cannot have a parallel ancestor. Go 1.27 raises it from `t.Parallel` when `Setenv` came first, and from `Setenv` when an ancestor was already parallel. The panic is the right answer, not a limitation to work around: a process holds one value at a time. This is *in-process* parallelism and has nothing to do with `-p 1`, which sets how many package binaries run at once |
 | `Access is denied` from `go build -o` | You are overwriting a running `.exe` |
 | A Windows CLI flag is mangled into a path — `schtasks /query` becomes `C:/Program Files/Git/query` | MSYS path conversion. Set `MSYS_NO_PATHCONV=1`, or use `//query` |
