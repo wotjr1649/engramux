@@ -14,10 +14,17 @@
 // returned" and "the lock exists" is precisely when another process could slip
 // in, and I-07 does not have that window.
 //
-// The exclusive lock is also why no -shm wal-index file is ever created. That
-// file is the one modernc.org/sqlite cannot defend: it is built with
-// SQLITE_OMIT_SEH=1, so it cannot catch the structured exception upstream
+// The exclusive lock was also supposed to be why no -shm wal-index file is ever
+// created - the file modernc.org/sqlite cannot defend, because it is built with
+// SQLITE_OMIT_SEH=1 and so cannot catch the structured exception upstream
 // SQLite retries when a filter driver faults the -shm mapping (spec 5.4).
+//
+// Measured, it is not. The driver sorts _pragma values lexicographically, so
+// journal_mode(wal) is applied before locking_mode(exclusive), and reading the
+// schema for the first pragma opens the wal-index while the pager is still in
+// normal locking mode. A database this package created has no -shm; every
+// reopen of it does, whether or not the WAL was hot and whether or not it was
+// checkpointed first. TestTheWalIndexIsCreatedOnEveryReopen has the steps.
 //
 // # Transactions
 //
@@ -43,8 +50,11 @@
 // Either failure fails startup. Running misconfigured is not an option this
 // package offers.
 //
-// Checkpointing is deliberately not here: spec 5.4 specifies a straight
-// TRUNCATE on a timer and a size threshold, and no Phase 1 gate depends on it.
+// # Checkpointing
+//
+// [Checkpoint] and [Checkpointer] are spec 5.4's policy: a straight TRUNCATE,
+// on a timer and on a size threshold. The three numbers are the run loop's and
+// live with it, not here.
 package store
 
 import (

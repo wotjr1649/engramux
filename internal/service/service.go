@@ -70,6 +70,47 @@ const (
 // A var so a test can shrink it; nothing else writes to it.
 var drainInterval = 30 * time.Second
 
+// Spec 5.4's checkpoint policy, as the three numbers [store.Checkpointer]
+// takes. Vars for the same reason drainInterval is one.
+//
+// walThreshold is the spec's, and it is the same 64 MiB as the DSN's
+// journal_size_limit. §7.4 measured a cold TRUNCATE there at 32.5 ms, which is
+// the bound on how long one checkpoint can hold the single connection.
+//
+// checkpointInterval and checkpointPoll are judgements the spec leaves open,
+// read against §7.2's 12,439 B of WAL per event and the busiest rate that was
+// actually measured, 2 events/s across eight sessions.
+//
+// One thing has to be said about that growth rate before the numbers below make
+// sense: §7.2 measured it with wal_autocheckpoint(0), and this DSN does not
+// turn wal_autocheckpoint off. Left at SQLite's default of 1,000 pages, it
+// PASSIVE-checkpoints on its own at about 4.1 MiB and the WAL settles there
+// rather than growing - measured, and it is what the live installation's WAL
+// was doing. So the threshold below is not what stops the WAL running away;
+// SQLite already does. What these two numbers buy is the file being *given
+// back*, which only TRUNCATE does, and a bound on what a crash leaves to
+// recover.
+//
+//   - Five minutes is 7.5 MiB of writes at that busiest rate, so a checkpoint
+//     costs about 4 ms (§7.4's 0.54 ms/MiB) and reclaims roughly the 4.1 MiB
+//     the automatic checkpoint would otherwise leave allocated. 288 a day.
+//   - Five seconds is how far past the threshold the WAL can get before
+//     anything notices: 124 KiB at that same rate, 0.2% of the threshold. One
+//     os.Stat, and deliberately far shorter than the interval - if it were not,
+//     the timer would always fire first and the threshold would never do
+//     anything.
+var (
+	walThreshold       = int64(64 << 20)
+	checkpointInterval = 5 * time.Minute
+	checkpointPoll     = 5 * time.Second
+)
+
+// shutdownCheckpointTimeout bounds the checkpoint on the way out. §7.4 measured
+// 140.5 ms at 258 MiB of WAL, against a WAL the loop above keeps at 64 MiB, so
+// this is not a budget - it is a limit on how long a wedged checkpoint may hold
+// up the process exit.
+const shutdownCheckpointTimeout = 5 * time.Second
+
 // Dir is Engramux's directory: "engramux" under the user's local application
 // data directory (spec 5.6). os.UserCacheDir returns %LocalAppData% on Windows,
 // which is the same derivation [spool.Dir] makes - a test pins the two against
@@ -173,15 +214,29 @@ func run(ctx context.Context, dir string) error {
 	slog.Info("engramux-service: serving",
 		"pipe", l.Addr().String(), "database", dbPath, "spool", spoolPath)
 
-	// The drain shares the shutdown but gets its own cancel, so that the
-	// accept loop returning for any reason stops it too.
-	drainCtx, stopDrain := context.WithCancel(ctx)
-	defer stopDrain()
+	// The drain and the checkpointer share the shutdown but get their own
+	// cancel, so that the accept loop returning for any reason stops them
+	// too. Both hold the single connection (spec 5.4), so both have to be
+	// stopped and waited for before the deferred Close above runs.
+	bgCtx, stopBackground := context.WithCancel(ctx)
+	defer stopBackground()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		drain(drainCtx, &spool.Drainer{
+		c := &store.Checkpointer{
+			DB:        db,
+			Path:      dbPath,
+			Threshold: walThreshold,
+			Interval:  checkpointInterval,
+			Poll:      checkpointPoll,
+		}
+		c.Run(bgCtx)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		drain(bgCtx, &spool.Drainer{
 			Dir: spoolPath,
 			Log: slog.Default(),
 			Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
@@ -203,10 +258,11 @@ func run(ctx context.Context, dir string) error {
 	})
 
 	// Serve has returned, so no handler is using the pool any more. Stop the
-	// drain and wait for it before the deferred Close runs, or the last
-	// replay would be handed a closed database.
-	stopDrain()
+	// drain and the checkpointer and wait for them before the deferred Close
+	// runs, or the last replay would be handed a closed database.
+	stopBackground()
 	wg.Wait()
+	checkpointOnTheWayOut(ctx, db)
 
 	// Serve always returns an error, so "was this the shutdown we asked for"
 	// is the caller's question and this is where it is answered: the context
@@ -216,6 +272,32 @@ func run(ctx context.Context, dir string) error {
 		return nil
 	}
 	return serveErr
+}
+
+// checkpointOnTheWayOut is spec 5.4's checkpoint on shutdown. It runs after the
+// accept loop, the drain and the checkpoint loop have all stopped, so it is the
+// last thing to touch the connection before the deferred Close.
+//
+// It gets a context of its own because ctx is already cancelled by the time it
+// is called - that is what started the shutdown - and the driver would refuse
+// the statement without running it.
+//
+// What it is worth, measured rather than assumed: nothing, on this path. A
+// clean db.Close checkpoints the WAL and deletes it and the wal-index anyway,
+// and TestTheWalIndexIsCreatedOnEveryReopen measures the same on-disk state
+// either way. Deleting this line changes no observable outcome as long as
+// Close is reached. It is here because it is the only part of the shutdown
+// state this file states rather than inherits from the driver, and because
+// there is one path where it is not redundant: a Close that fails.
+//
+// It is emphatically not what keeps the -shm away. Nothing does - see
+// [store.Checkpointer] and spec 5.4.
+func checkpointOnTheWayOut(ctx context.Context, db *sql.DB) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownCheckpointTimeout)
+	defer cancel()
+	if err := store.Checkpoint(ctx, db); err != nil {
+		slog.Error("engramux-service: checkpoint the WAL on the way out", "error", err)
+	}
 }
 
 // drain replays the spool now and then every drainInterval, until ctx is

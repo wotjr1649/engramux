@@ -19,7 +19,7 @@ cd docs/evidence/<name> && go mod tidy && go build -o probe.exe . && ./probe.exe
 | `ckpt` | Cold `TRUNCATE` checkpoint cost at several WAL sizes. `wal` measures TRUNCATE *after* a PASSIVE has already copied every page, which is not the number the checkpoint policy needs | §5.4, §7.4-2 |
 | `nodespawn` | What spawning Node costs versus a Go binary, as the comparison against upstream claude-mem | §7.2 |
 | `console` | Whether a console-less parent spawning a console child creates a visible window, under three creation-flag variants. Build `child` as a console binary and `parent` with `-H=windowsgui`, then run `parent <dir>` | §5.1, §7.1 |
-| `exclusive` | Whether `locking_mode=exclusive` suppresses the `-shm` file, refuses a second connection, and survives a writer + reader + checkpoint load | §5.4, §7.1 |
+| `exclusive` | Whether `locking_mode=exclusive` refuses a second connection and survives a writer + reader + checkpoint load. It also reports no `-shm` file, and **that half of its answer is only true of the database it creates** — every reopen makes one, which this harness never does. `TestTheWalIndexIsCreatedOnEveryReopen` in `internal/store` is the one that measures it | §5.4, §7.1 |
 
 `nodespawn` needs a trivial Go binary to measure bare process creation cost. `noop-main.go.txt`
 holds it; put it in `noop/main.go` and `go build -o noop.exe ./noop` before running.
