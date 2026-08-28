@@ -8,8 +8,9 @@
 // # The record
 //
 // One record is one file: the name is the relay-minted id with a ".json"
-// suffix, and the body is the hook payload exactly as it arrived on the
-// relay's stdin.
+// suffix, and the body is the event's bytes as the relay defined them at its
+// stdin boundary - the same bytes it would have put on the wire, which is what
+// makes the two delivery paths store one byte string rather than two.
 //
 // The id is in the name and nowhere else, which is the whole point. The body
 // is bytes a host wrote and this process never validated - Phase 1 gates on a
@@ -45,8 +46,38 @@ const ext = ".json"
 // of the drain's listing; os.CreateTemp replaces the '*'.
 const tempPattern = ".partial-*"
 
-// ErrID is returned when the id is not a UUID.
-var ErrID = errors.New("spool: id is not a uuid")
+// ErrID is returned when the id is not a UUID in the canonical form.
+var ErrID = errors.New("spool: id is not a canonical uuid")
+
+// canonicalUUID reports whether id is a UUID spelled the one way this package
+// accepts: the canonical 36 characters, lower case. It is what [Write] requires
+// of a record's name and what [scan] reads one back as, so a name Write could
+// not have produced is not a record.
+//
+// uuid.Validate is not that check. It accepts four spellings - the canonical
+// 36, "urn:uuid:<36>", "{<36>}", and 32 hex digits with no hyphens - and
+// uuid.Parse accepts upper-case hex in all of them. Each alternate is a bug
+// here rather than a convenience:
+//
+//   - "urn:uuid:..." puts a ':' in the file name, and on Windows ':' opens an
+//     alternate data stream: os.Rename either fails with ERROR_INVALID_NAME or
+//     writes a stream on a file called "urn" that os.ReadDir will never list.
+//     Either way the event is gone.
+//   - The other three are legal file names that round-trip through scan and
+//     reach the database under an events.id that is a *different string* from
+//     the canonical spelling of the same UUID. Two rows for one event, which is
+//     I-05 broken.
+//
+// Parsing and comparing the round trip is the whole test: uuid.UUID.String
+// emits the canonical form, so id survives it only if that is what it already
+// was.
+//
+// Nothing reaches this today - cmd/engramux passes uuid.NewV7().String() - so
+// it is a guard one caller away from mattering rather than a bug being fixed.
+func canonicalUUID(id string) bool {
+	u, err := uuid.Parse(id)
+	return err == nil && u.String() == id
+}
 
 // Dir is the spool directory: "spool" under Engramux's directory under the
 // user's local application data directory (spec 5.6). os.UserCacheDir returns
@@ -76,13 +107,13 @@ func Dir() (string, error) {
 // that can decide to drop an event.
 func Write(dir, id string, payload []byte) error {
 	// id becomes a file name. It is minted by uuid.NewV7 today and so is
-	// always a UUID, but a "..\\.." would escape dir, and rejecting every
-	// shape that is not a UUID removes the escape instead of blacklisting
-	// the characters that reach it. It is also a real check on the caller:
-	// an empty id means the mint was skipped, and a record with no id
-	// cannot be replayed idempotently.
-	if err := uuid.Validate(id); err != nil {
-		return fmt.Errorf("%w: %.64q: %w", ErrID, id, err)
+	// always a canonical UUID, but a "..\\.." would escape dir, and
+	// rejecting every shape that is not one removes the escape instead of
+	// blacklisting the characters that reach it. It is also a real check on
+	// the caller: an empty id means the mint was skipped, and a record with
+	// no id cannot be replayed idempotently.
+	if !canonicalUUID(id) {
+		return fmt.Errorf("%w: %.64q", ErrID, id)
 	}
 
 	// The bounds, measured against what is already on disk (spec 5.6). The

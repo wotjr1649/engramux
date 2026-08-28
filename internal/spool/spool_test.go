@@ -87,6 +87,12 @@ func TestWritePreservesBytesExactly(t *testing.T) {
 // minted by uuid.NewV7 today, so this never fires in production - but the id
 // is concatenated into a file name, and "..\\..\\x" is a working directory
 // escape. Removing the shape is cheaper than trusting every future caller.
+//
+// The last four are the ones a bare uuid.Validate accepts and this package must
+// not: they are the same UUID spelled four other ways, and each one either
+// cannot be a Windows file name or reaches events.id as a different string from
+// the canonical spelling - two rows for one event, which is I-05 broken. See
+// canonicalUUID.
 func TestWriteRejectsAnIDThatIsNotAUUID(t *testing.T) {
 	for _, id := range []string{
 		"",
@@ -97,6 +103,10 @@ func TestWriteRejectsAnIDThatIsNotAUUID(t *testing.T) {
 		"0192f0c0-0000-7000-8000-00000000000",   // 35 chars
 		"0192f0c0-0000-7000-8000-0000000000011", // 37 chars
 		"0192f0c0_0000_7000_8000_000000000001",
+		"urn:uuid:0192f0c0-0000-7000-8000-000000000001",
+		"{0192f0c0-0000-7000-8000-000000000001}",
+		"0192f0c0000070008000000000000001",
+		"0192F0C0-0000-7000-8000-000000000001",
 	} {
 		t.Run(id, func(t *testing.T) {
 			dir := t.TempDir()

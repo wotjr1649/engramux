@@ -9,6 +9,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/host"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/secret"
 )
 
@@ -87,6 +88,27 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 
 	h := host.Detect(fields)
 
+	// Resolved before the transaction is opened, and this is the whole
+	// reason both are hoisted up here rather than evaluated where they are
+	// used. project.Identify walks the filesystem - one os.Lstat per path
+	// component, up to the volume root - and takes no context, so nothing
+	// can bound or cancel it. secret.Detect is the same shape and much
+	// smaller: eight RE2 patterns over every string leaf.
+	//
+	// The DSN carries _txlock=immediate, so BeginTx takes the write lock the
+	// moment it returns, and there is exactly one connection (spec 5.4).
+	// Anything slow between BeginTx and Commit is therefore held by every
+	// other ingest and by the drain, waiting in BeginTx for the same
+	// connection - so one cwd that is slow to stat, a UNC path to a host
+	// that is down or a mapped drive whose share has gone away, would stall
+	// the entire service rather than one event. Neither call needs the
+	// transaction, so neither is in it.
+	//
+	// A missing or non-absolute cwd is resolved by project.Identify without
+	// consulting the service's own working directory - see its doc comment.
+	p := project.Identify(field(fields, "cwd"))
+	privacyClass := secret.Detect(env.Payload).String()
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return ipc.Rejected, fmt.Errorf("store: begin the ingest transaction: %w", err)
@@ -98,9 +120,7 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	// on (spec 5.4).
 	defer func() { _ = tx.Rollback() }()
 
-	// A missing or non-absolute cwd is resolved by project.Identify without
-	// consulting the service's own working directory - see its doc comment.
-	projectID, err := UpsertProject(ctx, tx, field(fields, "cwd"), now)
+	projectID, err := UpsertProject(ctx, tx, p, now)
 	if err != nil {
 		return ipc.Rejected, err
 	}
@@ -130,8 +150,10 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	// a STRICT table, and modernc.org/sqlite binds []byte as a BLOB, which
 	// STRICT then refuses. TEXT is byte-safe here - invalid UTF-8, lone
 	// surrogate bytes and embedded NULs all round-trip byte-identical - and
-	// the bytes go in exactly as the host wrote them, because Phase 1 gates
-	// on a byte-for-byte round trip and nothing here re-marshals them.
+	// the bytes go in exactly as they arrived, because Phase 1 gates on a
+	// byte-for-byte round trip and nothing here re-marshals them. The one
+	// normalisation the gate permits happens at the relay's stdin boundary,
+	// before either delivery path exists.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO events (id, project_id, session_id, host, source, event_name,
 		                    tool_name, tool_use_id, payload, privacy_class,
@@ -140,7 +162,7 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 		ON CONFLICT (id) DO NOTHING`,
 		env.IngestID, projectID, sessionID, h, string(src), eventName,
 		nullable(fields, "tool_name"), nullable(fields, "tool_use_id"),
-		string(env.Payload), secret.Detect(env.Payload).String(),
+		string(env.Payload), privacyClass,
 		int64(secret.Version), now.UnixMilli()); err != nil {
 		return ipc.Rejected, fmt.Errorf("store: insert event %s: %w", env.IngestID, err)
 	}

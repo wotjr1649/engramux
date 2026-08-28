@@ -352,7 +352,15 @@ func ackBytes(t *testing.T, version string, status ipc.AckStatus, id string) []b
 // The payload every test sends
 // ---------------------------------------------------------------------------
 
-// payload is a real fixture: the bytes a host writes to a hook's stdin.
+// payload is a real fixture with the file's framing newline removed: the
+// event's bytes, which is what trimFraming leaves and therefore what the relay
+// carries down both of its paths.
+//
+// It is trimmed here with bytes.TrimRight rather than by calling trimFraming,
+// so that every "what went in came out" assertion below keeps an expectation
+// the implementation did not compute. That the relay's own trim is the right
+// one is asserted by TestTrimFramingRemovesOnlyJSONFraming and, end to end, by
+// the Phase 1 gate's clause 1.
 func payload(t *testing.T) []byte {
 	t.Helper()
 	b, err := fixtures.Fixture{File: fixtures.CodexSessionEnd}.Bytes()
@@ -539,9 +547,15 @@ func TestAckWithDifferentIngestID(t *testing.T) {
 // TestMalformedStdin. The bytes are not JSON, so they can never travel inside
 // an envelope and can never be ingested. They are still an event the host
 // handed us, and I-04 says an event is never silently dropped.
+//
+// The input's trailing space is the second thing this asserts: trimFraming runs
+// at the stdin boundary, before anything decides these bytes are not a
+// document, so the record holds the event and not the sender's framing. want is
+// written out rather than computed from in, so a broken trim cannot satisfy it.
 func TestMalformedStdin(t *testing.T) {
 	serveReal(t, ipc.Committed)
 	in := []byte(`{"hook_event_name": "SessionEnd", `)
+	want := []byte(`{"hook_event_name": "SessionEnd",`)
 
 	res := run(t, relayBin, in)
 
@@ -550,8 +564,8 @@ func TestMalformedStdin(t *testing.T) {
 	if err := uuidV7(id); err != nil {
 		t.Errorf("spool record id %q: %v", id, err)
 	}
-	if !bytes.Equal(body, in) {
-		t.Errorf("spool record body\n got %q\nwant %q", body, in)
+	if !bytes.Equal(body, want) {
+		t.Errorf("spool record body\n got %q\nwant %q", body, want)
 	}
 }
 
@@ -733,6 +747,37 @@ func TestEncodeEnvelopeDoesNotTouchThePayload(t *testing.T) {
 				t.Errorf("payload\n got %q\nwant %q", env.Payload, in)
 			}
 		})
+	}
+}
+
+// TestTrimFramingRemovesOnlyJSONFraming pins the two halves of the set
+// trimFraming trims: RFC 8259's four whitespace bytes come off either end, and
+// nothing else does.
+//
+// The last case is the one that rules out bytes.TrimSpace. U+00A0 is
+// unicode.IsSpace but not JSON whitespace, so a parser rejects a document
+// wrapped in it - and trimming it here would turn bytes the relay has to refuse
+// into bytes it sends.
+func TestTrimFramingRemovesOnlyJSONFraming(t *testing.T) {
+	for name, c := range map[string]struct{ in, want string }{
+		"trailing newline":            {"{\"a\":1}\n", `{"a":1}`},
+		"crlf":                        {"{\"a\":1}\r\n", `{"a":1}`},
+		"both ends":                   {" \t\r\n{\"a\":1}\n\t ", `{"a":1}`},
+		"nothing to trim":             {`{"a":1}`, `{"a":1}`},
+		"inside is untouched":         {"{ \"a\" : 1,\n\t\"b\": 2 }\n", "{ \"a\" : 1,\n\t\"b\": 2 }"},
+		"whitespace only":             {"\n\t ", ""},
+		"empty":                       {"", ""},
+		"nbsp is not json whitespace": {"\u00a0{\"a\":1}\u00a0", "\u00a0{\"a\":1}\u00a0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := trimFraming([]byte(c.in)); string(got) != c.want {
+				t.Errorf("trimFraming(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+	// The premise of the last case, so it cannot quietly stop testing it.
+	if json.Valid([]byte("\u00a0{\"a\":1}\u00a0")) {
+		t.Error("encoding/json accepts a document wrapped in U+00A0; the reason for the narrow set is gone")
 	}
 }
 

@@ -78,6 +78,7 @@ func main() {
 	if ev.err != nil {
 		return
 	}
+	ev.payload = trimFraming(ev.payload)
 
 	// Minted once, before the first send attempt, and reused by every
 	// retry including the spool record's name (I-05). It is the
@@ -97,6 +98,33 @@ func main() {
 	ev.err = deliver(start, ev.id, ev.payload)
 }
 
+// trimFraming strips leading and trailing JSON whitespace from the bytes read
+// from stdin. It is where this program decides what the event's bytes are, and
+// it runs once, before anything branches.
+//
+// A trailing newline is the writer's framing, not part of the JSON document,
+// and two hosts disagreeing about whether to emit one must not produce two
+// different stored payloads for one event. Without this the two delivery paths
+// disagree: the envelope splices the payload in as raw JSON, so a trailing
+// newline lands between the payload's last byte and the envelope's closing
+// brace - structural whitespace, which json.RawMessage discards - while the
+// spool has no decoder in its path and keeps every byte. I-05 then hides which
+// one the row got, because whichever path commits first is the one
+// ON CONFLICT DO NOTHING keeps. Trimming here makes both paths carry the same
+// bytes by construction rather than by agreement.
+//
+// This is the one thing Phase 1's byte-for-byte round trip permits, and it
+// still forbids everything it was written to forbid: no re-marshalling, no
+// compaction, no key reordering, no HTML escaping, nothing inside the outermost
+// JSON value altered. One deterministic normalisation, applied once, before the
+// paths diverge.
+//
+// The set is RFC 8259's four whitespace bytes and not bytes.TrimSpace's
+// unicode.IsSpace, which also eats U+0085 and U+00A0. A JSON parser rejects
+// those, so trimming them would turn a document this relay has to refuse into
+// one it sends.
+func trimFraming(b []byte) []byte { return bytes.Trim(b, " \t\r\n") }
+
 // event is what the deferred handler needs to know: the bytes, the id they
 // were sent under, and why the send failed. A nil err means the service
 // committed it.
@@ -110,6 +138,22 @@ type event struct {
 // still has to be saved, and returns normally - which is what makes main
 // return, which is exit 0 (I-03).
 func (e *event) settle() {
+	// The second recover, and the reason there is one: the recover below
+	// catches what main was doing, and nothing catches what happens after
+	// it. A panic in spool.Dir, spool.Write or warn would take the process
+	// down with a non-zero exit - the one thing I-03 forbids - through the
+	// handler whose whole job is to stop that. This is a deferred call of
+	// settle, so it covers settle's entire body.
+	//
+	// There is nothing after it to save the event with, so it reports and
+	// returns: an event lost to a panic in the code that saves events is
+	// already lost, and a hook that fails its host on the way out is worse.
+	defer func() {
+		if p := recover(); p != nil {
+			warn("panic while settling the event: %v\n%s", p, debug.Stack())
+		}
+	}()
+
 	if p := recover(); p != nil {
 		// debug.Stack is worth the bytes: this is the only record that a
 		// panic happened at all, since the process is about to report
@@ -133,6 +177,15 @@ func (e *event) settle() {
 		return
 	}
 
+	// ponytail: the 1 s total budget covers readStdin and deliver and stops
+	// short of here. The write below enumerates the spool directory - up to
+	// maxRecords entries - then writes, fsyncs and renames, under no
+	// deadline at all. Spec 5.3 licenses that much, since "blowing any relay
+	// limit means spool and exit 0" puts the spool after the limit, and the
+	// common case is measured inside the ceiling; the ceiling is that a full
+	// or slow spool has no numeric bound. Windows will not cancel an fsync,
+	// so the upgrade path is a cheaper sweep before the write rather than a
+	// timeout around it.
 	dir, err := spool.Dir()
 	if err == nil {
 		err = spool.Write(dir, e.id, e.payload)
@@ -163,6 +216,18 @@ func warn(format string, args ...any) {
 //
 // Nothing waits for the goroutine. When main returns the process exits, and a
 // goroutine parked in a read syscall goes with it.
+//
+// ponytail: the read is unbounded in size. A host that writes without stopping
+// takes this process down with an out-of-memory fatal error, which is not a
+// panic and no recover catches it - ipc.ReadFrame checks a length before
+// allocating for exactly this reason, and there is no equivalent here. The
+// ceiling is that real payloads are small: spec 7.4's largest observed is
+// 171,764 B, and anything over ipc.MaxFrameLen already fails at WriteFrame and
+// spools, so this is a guard against pathological input rather than a path with
+// traffic. The upgrade path is an io.LimitReader, and it needs a number and a
+// decision Phase 1 has not made: a cap that truncates produces a corrupt
+// payload that looks whole, and a cap that refuses drops an event I-04 says is
+// never dropped.
 func readStdin(r io.Reader, deadline time.Time) ([]byte, error) {
 	type read struct {
 		b   []byte

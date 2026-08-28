@@ -308,6 +308,48 @@ func TestDrainIgnoresAPartiallyWrittenRecord(t *testing.T) {
 	requireBytes(t, partial, half, "the partial record after the drain")
 }
 
+// TestDrainIgnoresANameWriteCouldNotHaveProduced is the other half of the id
+// guard. Write refuses every UUID spelling but the canonical one, so a file
+// named with one of the others did not come from this package - and replaying
+// it would put the same UUID into events.id under a *different string* from the
+// canonical spelling, which is two rows for one event (I-05).
+//
+// The urn:uuid: spelling is missing here because it cannot be tested: ':' opens
+// an alternate data stream on Windows, so the file cannot be created under that
+// name in the first place. That is exactly why Write refuses it.
+func TestDrainIgnoresANameWriteCouldNotHaveProduced(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, idN(1), []byte(`{"n":1}`)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	notRecords := []string{
+		"{0192f0c0-0000-7000-8000-000000000002}" + ext,
+		"0192f0c0000070008000000000000003" + ext,
+		"0192F0C0-0000-7000-8000-000000000004" + ext,
+	}
+	for _, name := range notRecords {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"n":9}`), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	c := &collector{}
+	d := &Drainer{Dir: dir, Ingest: c.ingest}
+	n, err := d.Drain(t.Context())
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Drain replayed %d records, want 1", n)
+	}
+	if got := c.ids(); !slices.Equal(got, []string{idN(1)}) {
+		t.Fatalf("the drain replayed %q, want only the canonically named record %q", got, idN(1))
+	}
+	// Left where they are, not consumed: a name this package did not write
+	// is not this package's to delete.
+	requireNames(t, dir, "after the drain", notRecords...)
+}
+
 // TestWriteNeverExposesAPartialRecordUnderTheFinalName is the atomic-rename
 // half of spec 5.6, and the only assertion that can tell a staged write from
 // an in-place one. A poller watches the final name for the whole of a 4 MiB

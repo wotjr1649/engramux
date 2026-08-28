@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/pipe"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/secret/secrettest"
 	"github.com/wotjr1649/engramux/internal/store"
@@ -29,10 +33,11 @@ const (
 )
 
 // gateRowsBeforeTheKill is what clauses 1 and 4 together are expected to have
-// written: one row per fixture, plus the one carrying the secret. Clause 3
-// counts relative to it, and asserting the absolute number is what catches a
-// clause that committed nothing and reported success.
-const gateRowsBeforeTheKill = 5
+// written: one row per fixture, the two rows the same fixture leaves when a
+// real relay delivers it over each of the two paths, plus the one carrying the
+// secret. Clause 3 counts relative to it, and asserting the absolute number is
+// what catches a clause that committed nothing and reported success.
+const gateRowsBeforeTheKill = 7
 
 // gateCWD is the working directory every payload this file builds claims. It is
 // on a volume that does not exist, so nothing walks out of it, and it holds no
@@ -72,6 +77,7 @@ func TestPhase1Gate(t *testing.T) {
 
 	runClause(t, "1 - the four fixtures round-trip byte for byte", func(t *testing.T) {
 		gateFixturesRoundTrip(t, db)
+		gateBothDeliveryPathsStoreTheSameBytes(t, db)
 	})
 	runClause(t, "4 - a runtime-generated secret is tagged on ingest and absent from the log", func(t *testing.T) {
 		gateSecretIsTaggedAndFilteredOnEgress(t, db)
@@ -171,6 +177,189 @@ func gateFixturesRoundTrip(t *testing.T, db *sql.DB) {
 			t.Fatalf("%s: stored %d bytes, want %d\n got: %q\nwant: %q",
 				f.File, len(got), len(want), got, want)
 		}
+	}
+}
+
+// gateBothDeliveryPathsStoreTheSameBytes is the rest of clause 1, and the half
+// no test on this branch used to reach: one event, delivered by the real relay
+// over each of its two paths, has to become the same bytes in events.payload.
+//
+// The half above it hands a fixture to store.Ingest directly, so it never
+// crosses the wire; the pipe tests that do cross it trim the fixture's trailing
+// newline before sending. Between them they left the one shape that diverges
+// untested. json.RawMessage captures the JSON *value*, so whitespace a sender
+// puts after the payload inside the envelope is envelope structure to the
+// decoder and is gone by the time the store sees it; the spool has no decoder
+// in its path and keeps every byte. Before the relay defined the event at its
+// stdin boundary, the same fixture stored 273 bytes over the wire and 274 out
+// of the spool, and I-05 hid it - whichever path committed first is the row
+// ON CONFLICT DO NOTHING keeps.
+//
+// So the fixture goes in with its trailing newline intact, through the real
+// binary, twice: once with nothing listening, which spools it and gets it back
+// through the drain, and once against the production pipe server. Both rows are
+// then compared with each other and with the fixture's own bytes, because two
+// paths that agree on the empty string also agree.
+func gateBothDeliveryPathsStoreTheSameBytes(t *testing.T, db *sql.DB) {
+	raw, err := fixtures.Fixture{File: fixtures.CodexSessionEnd}.Bytes()
+	if err != nil {
+		t.Fatalf("read the fixture: %v", err)
+	}
+	// The premise. A fixture that lost its trailing newline would make
+	// everything below pass while testing nothing.
+	if raw[len(raw)-1] != '\n' {
+		t.Fatalf("%s does not end in a newline, so this clause tests nothing", fixtures.CodexSessionEnd)
+	}
+	want := raw[:len(raw)-1]
+
+	relay := buildRelay(t)
+	// The spool path first, while nothing in this process is listening.
+	spoolID := relayThroughTheSpool(t, relay, raw, db)
+	wireID := relayOverTheWire(t, relay, raw, db)
+
+	overTheWire := readStored(t, db, wireID).payload
+	outOfTheSpool := readStored(t, db, spoolID).payload
+	if overTheWire != outOfTheSpool {
+		t.Fatalf("one event stored as two different byte strings\n wire (%d bytes): %q\nspool (%d bytes): %q",
+			len(overTheWire), overTheWire, len(outOfTheSpool), outOfTheSpool)
+	}
+	if !bytes.Equal([]byte(overTheWire), want) {
+		t.Fatalf("both paths agree on the wrong bytes\n got (%d): %q\nwant (%d): %q",
+			len(overTheWire), overTheWire, len(want), want)
+	}
+}
+
+// buildRelay compiles the relay to a path this test owns. It is the shipped
+// program, built the way the shipped program is built: the divergence this
+// clause is about lives in what the relay does with its stdin, so a
+// reimplementation of that here would be the bug's own opinion of itself.
+func buildRelay(t *testing.T) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "engramux-gate.exe")
+	//nolint:gosec // G204: every argument is this function's own literal or a
+	// path it just built inside t.TempDir.
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", out, filepath.Join("..", "..", "cmd", "engramux"))
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build the relay: %v\n%s", err, b)
+	}
+	return out
+}
+
+// runRelay runs one relay process over stdin and returns the spool directory it
+// was given. LOCALAPPDATA is the whole seam: spool.Dir calls os.UserCacheDir,
+// which on Windows is %LocalAppData% and nothing else, so the relay needs no
+// flag and no environment variable of its own.
+//
+// A non-nil error from Run is a non-zero exit, which I-03 forbids on every
+// path, so this asserts it for free.
+func runRelay(t *testing.T, bin string, stdin []byte) string {
+	t.Helper()
+	local := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	//nolint:gosec // G204: bin is the binary buildRelay just produced.
+	cmd := exec.CommandContext(t.Context(), bin)
+	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run the relay: %v (stderr: %s)", err, stderr.Bytes())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("the relay wrote %q on stdout, want nothing (spec 4.5)", stdout.Bytes())
+	}
+	t.Logf("relay stderr: %s", stderr.Bytes())
+	return filepath.Join(local, "engramux", "spool")
+}
+
+// relayThroughTheSpool runs the relay with no service listening and replays
+// what it saved, returning the id it minted.
+func relayThroughTheSpool(t *testing.T, bin string, raw []byte, db *sql.DB) string {
+	t.Helper()
+	spoolDir := runRelay(t, bin, raw)
+
+	names := entries(t, spoolDir)
+	if len(names) != 1 {
+		t.Fatalf("the spool holds %q, want exactly one record - if it is empty, something is listening on "+
+			"the relay's pipe and took the event: stop the development engramux service and re-run with -p 1", names)
+	}
+	id, ok := strings.CutSuffix(names[0], ext)
+	if !ok {
+		t.Fatalf("the spool holds %q, which is not a record", names[0])
+	}
+
+	d := &Drainer{Dir: spoolDir, Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+		return store.Ingest(ctx, db, env, store.SourceSpool, time.Now())
+	}}
+	n, err := d.Drain(t.Context())
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Drain replayed %d records, want 1", n)
+	}
+	return id
+}
+
+// relayOverTheWire runs the relay against the production pipe server on the
+// relay's real pipe name, and returns the id it minted. The server is torn down
+// before this returns, so nothing outlives the clause holding a closure over
+// the gate's database.
+func relayOverTheWire(t *testing.T, bin string, raw []byte, db *sql.DB) string {
+	t.Helper()
+
+	name, err := ipc.CurrentPipeName()
+	if err != nil {
+		t.Fatalf("ipc.CurrentPipeName: %v", err)
+	}
+	u, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	l, err := pipe.Listen(name, u.Uid)
+	if err != nil {
+		t.Fatalf("Listen(%s): %v\nAn access-denied here means something else already holds the relay's pipe - "+
+			"a development engramux service, or another copy of this test binary. Stop it and re-run with -p 1.", name, err)
+	}
+
+	// Buffered, so the handler never blocks on a send, and read
+	// non-blockingly below: by the time the relay has exited it has read the
+	// ACK, which is written after the handler returned.
+	ids := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- pipe.Serve(t.Context(), l, func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+			ids <- env.IngestID
+			return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+		})
+	}()
+	defer func() {
+		_ = l.Close()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("pipe.Serve did not return within 10s of Close")
+		}
+	}()
+
+	spoolDir := runRelay(t, bin, raw)
+	// Glob rather than entries: a relay that never spooled never created the
+	// directory, and that is this path's success case.
+	got, err := filepath.Glob(filepath.Join(spoolDir, "*"))
+	if err != nil {
+		t.Fatalf("glob the spool: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("the relay spooled %q as well as delivering it; the drain would replay an event the service has", got)
+	}
+	select {
+	case id := <-ids:
+		return id
+	default:
+		t.Fatalf("the service saw no event, so nothing crossed the wire")
+		return ""
 	}
 }
 

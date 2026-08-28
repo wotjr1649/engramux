@@ -195,8 +195,14 @@ func TestFixturePayloadsRoundTripByteIdentically(t *testing.T) {
 				t.Fatalf("fixture bytes: %v", err)
 			}
 			// The fixture files end in a newline after the closing brace.
-			// That byte is not part of the JSON value and no correct sender
-			// transmits it, so it is trimmed here rather than asserted on.
+			// That byte is not part of the JSON value: the relay trims it
+			// at its stdin boundary, so it never reaches the wire, and it
+			// is trimmed here rather than asserted on. Asserting on it
+			// would be asserting json.RawMessage's own semantics - the
+			// byte lands outside the payload value inside the envelope,
+			// where the decoder discards it as envelope structure. That
+			// the two delivery paths agree once it is trimmed is the
+			// Phase 1 gate's clause 1, which crosses this wire for real.
 			// Everything inside the braces is left exactly as embedded -
 			// these fixtures are pretty-printed across seven or more lines,
 			// so the assertion below still fails on any re-encode.

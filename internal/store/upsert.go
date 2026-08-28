@@ -14,16 +14,26 @@ import (
 // is exactly one connection to run it on. They are the first two thirds of that
 // transaction and neither opens one of its own.
 //
+// Neither does anything but SQL, and that is a rule rather than an accident.
+// The transaction holds the service's only connection (spec 5.4), so work that
+// happens inside it is work every other ingest and the drain wait behind. That
+// is why UpsertProject takes a resolved [project.Project] rather than a cwd:
+// resolving one walks the filesystem, takes no context and so can be neither
+// bounded nor cancelled, and [Ingest] does it before it opens the transaction.
+//
 // now is a parameter rather than a call to time.Now, so one ingest stamps all
 // of its rows with one instant. Timestamps are milliseconds since the Unix
 // epoch. They are not an ordering key - I-06 makes ordering partial, and
 // Windows clock resolution is around 550 us against a busiest-session rate of
 // 14.8 events/min, so a timestamp neither orders nor disambiguates.
 
-// UpsertProject resolves cwd to a project (see [project.Identify]) and makes
-// sure its row exists, returning the project id. Calling it again for the same
-// project is not an error and does not touch the existing row: created_at means
-// "when the service first saw this project".
+// UpsertProject makes sure p's row exists, returning the project id. Calling it
+// again for the same project is not an error and does not touch the existing
+// row: created_at means "when the service first saw this project".
+//
+// p comes from [project.Identify], and resolving it is the caller's job because
+// it is filesystem work and this runs inside the transaction - see the note
+// above.
 //
 // The conflict target is the id and not the whole row on purpose. projects.root
 // is UNIQUE as well, and because the id is derived from root, a root conflict
@@ -32,8 +42,7 @@ import (
 //
 // The error names the id, never the root: a project root is an absolute path
 // and carries the user's name, and errors reach logs.
-func UpsertProject(ctx context.Context, tx *sql.Tx, cwd string, now time.Time) (string, error) {
-	p := project.Identify(cwd)
+func UpsertProject(ctx context.Context, tx *sql.Tx, p project.Project, now time.Time) (string, error) {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO projects (id, root, name, created_at)
 		VALUES (?, ?, ?, ?)

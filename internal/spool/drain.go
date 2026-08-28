@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/wotjr1649/engramux/internal/ipc"
 )
 
@@ -174,7 +172,8 @@ func (d *Drainer) Drain(ctx context.Context) (int, error) {
 func (d *Drainer) replay(ctx context.Context, id string) (bool, error) {
 	path := filepath.Join(d.Dir, id+ext)
 	//nolint:gosec // G304: d.Dir joined with a name scan has already checked
-	// is a UUID, so the path cannot climb out of the spool directory.
+	// is a canonical UUID, so the path cannot climb out of the spool
+	// directory.
 	payload, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		// Another relay's age sweep took it between the listing and
@@ -286,7 +285,7 @@ func scan(dir string, now time.Time) ([]string, int64, error) {
 			continue
 		}
 		id, ok := strings.CutSuffix(de.Name(), ext)
-		if !ok || uuid.Validate(id) != nil {
+		if !ok || !canonicalUUID(id) {
 			continue
 		}
 		info, err := de.Info()
@@ -299,6 +298,22 @@ func scan(dir string, now time.Time) ([]string, int64, error) {
 			if err := os.Remove(filepath.Join(dir, de.Name())); err != nil {
 				return nil, 0, fmt.Errorf("spool: drop the expired record %s: %w", id, err)
 			}
+			// This is the one log line in this package the *relay*
+			// reaches: scan runs inside Write, and cmd/engramux
+			// configures no logger, so it leaves through the package
+			// default handler in the log package's format rather than
+			// through the relay's own warn().
+			//
+			// That is not an I-10 filtering hole, and the reason is the
+			// values rather than the destination. An id is a UUID the
+			// relay minted, and an age and a bound are durations; none
+			// of the three is derived from a payload, so there is
+			// nothing here for secret.NewLogHandler to filter. The
+			// destination is the relay's own stderr, which spec 2 puts
+			// inside the trust boundary along with the rest of one
+			// Windows SID. Adding a payload-derived value to this line
+			// would change that answer and would need the handler
+			// installed first.
 			slog.Warn("spool: dropped a record past the age bound",
 				"id", id, "age", now.Sub(info.ModTime()).Round(time.Second), "bound", maxAge)
 			continue

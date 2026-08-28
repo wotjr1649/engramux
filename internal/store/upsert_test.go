@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wotjr1649/engramux/internal/project"
 )
 
 // upsertNow is the timestamp every test below writes. A fixed value, because
@@ -72,6 +74,9 @@ func sessionRow(t *testing.T, db *sql.DB, id string) (status string, endedAt sql
 // projects.root is UNIQUE, so this also proves the normalisation reaches the
 // stored string and not only the derived id: two spellings that normalise
 // differently would fail the constraint rather than quietly making two rows.
+//
+// project.Identify is called at the call site, the way [Ingest] calls it: the
+// resolution is filesystem work and does not belong inside the transaction.
 func TestUpsertProjectFoldsSpellingsIntoOneRow(t *testing.T) {
 	db := migrated(t)
 	repo := repoDir(t)
@@ -89,7 +94,7 @@ func TestUpsertProjectFoldsSpellingsIntoOneRow(t *testing.T) {
 	ids := make([]string, len(spellings))
 	inTx(t, db, func(tx *sql.Tx) {
 		for i, spelling := range spellings {
-			id, err := UpsertProject(t.Context(), tx, spelling, upsertNow)
+			id, err := UpsertProject(t.Context(), tx, project.Identify(spelling), upsertNow)
 			if err != nil {
 				t.Fatalf("UpsertProject(%q): %v", spelling, err)
 			}
@@ -128,13 +133,13 @@ func TestUpsertProjectTwiceLeavesOneRow(t *testing.T) {
 	var first, second string
 	inTx(t, db, func(tx *sql.Tx) {
 		var err error
-		if first, err = UpsertProject(t.Context(), tx, repo, upsertNow); err != nil {
+		if first, err = UpsertProject(t.Context(), tx, project.Identify(repo), upsertNow); err != nil {
 			t.Fatalf("UpsertProject: %v", err)
 		}
 	})
 	inTx(t, db, func(tx *sql.Tx) {
 		var err error
-		if second, err = UpsertProject(t.Context(), tx, repo, upsertNow.Add(time.Hour)); err != nil {
+		if second, err = UpsertProject(t.Context(), tx, project.Identify(repo), upsertNow.Add(time.Hour)); err != nil {
 			t.Fatalf("UpsertProject, second call: %v", err)
 		}
 	})
@@ -167,7 +172,7 @@ func TestUpsertSessionIsCreatedByANonSessionStartEvent(t *testing.T) {
 	var projectID, sessionID string
 	inTx(t, db, func(tx *sql.Tx) {
 		var err error
-		if projectID, err = UpsertProject(t.Context(), tx, repoDir(t), upsertNow); err != nil {
+		if projectID, err = UpsertProject(t.Context(), tx, project.Identify(repoDir(t)), upsertNow); err != nil {
 			t.Fatalf("UpsertProject: %v", err)
 		}
 		if sessionID, err = UpsertSession(t.Context(), tx,
@@ -224,7 +229,7 @@ func TestUpsertSessionTwiceLeavesOneRow(t *testing.T) {
 
 	var first, second string
 	inTx(t, db, func(tx *sql.Tx) {
-		projectID, err := UpsertProject(t.Context(), tx, repoDir(t), upsertNow)
+		projectID, err := UpsertProject(t.Context(), tx, project.Identify(repoDir(t)), upsertNow)
 		if err != nil {
 			t.Fatalf("UpsertProject: %v", err)
 		}
@@ -274,7 +279,7 @@ func TestSessionStatusFollowsTheLastEventUntilItEnds(t *testing.T) {
 	var projectID string
 	inTx(t, db, func(tx *sql.Tx) {
 		var err error
-		if projectID, err = UpsertProject(t.Context(), tx, repoDir(t), upsertNow); err != nil {
+		if projectID, err = UpsertProject(t.Context(), tx, project.Identify(repoDir(t)), upsertNow); err != nil {
 			t.Fatalf("UpsertProject: %v", err)
 		}
 	})
@@ -338,7 +343,7 @@ func TestUpsertSessionSeparatesHosts(t *testing.T) {
 
 	var claude, codex string
 	inTx(t, db, func(tx *sql.Tx) {
-		projectID, err := UpsertProject(t.Context(), tx, repoDir(t), upsertNow)
+		projectID, err := UpsertProject(t.Context(), tx, project.Identify(repoDir(t)), upsertNow)
 		if err != nil {
 			t.Fatalf("UpsertProject: %v", err)
 		}
