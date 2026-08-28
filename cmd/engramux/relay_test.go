@@ -34,6 +34,10 @@ var (
 	// binary contains no injection point at all, and the tag is a
 	// dependency the test picks at build time.
 	panicBin string
+	// settlePanicBin panics inside settle instead, under a tag of its own -
+	// the two cannot be one build, because the test below needs settle to
+	// work while this one needs it to fail.
+	settlePanicBin string
 )
 
 func TestMain(m *testing.M) {
@@ -50,6 +54,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	if err := build(panicBin, "-tags", "engramux_panicinject"); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	settlePanicBin = filepath.Join(dir, "engramux-settlepanic.exe")
+	if err := build(settlePanicBin, "-tags", "engramux_settlepanic"); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -267,9 +276,11 @@ func serveReal(t *testing.T, status ipc.AckStatus) *observed {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- pipe.Serve(t.Context(), l, func(_ context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
-			obs.add(env)
-			return status, nil
+		done <- pipe.Serve(t.Context(), l, pipe.Handler{
+			Ingest: func(_ context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+				obs.add(env)
+				return status, nil
+			},
 		})
 	}()
 	t.Cleanup(func() {
@@ -614,6 +625,36 @@ func TestPanicExitsZeroAndSpools(t *testing.T) {
 	if !bytes.Equal(body, in) {
 		t.Errorf("spool record body\n got %q\nwant %q", body, in)
 	}
+}
+
+// TestPanicWhileSettlingExitsZero covers the recover nothing else reaches: the
+// one inside settle, which catches a panic in settle's own body.
+//
+// main's recover has already run by then, so a panic in spool.Dir, spoolWrite
+// or warn would take the process down with a non-zero exit - through the
+// handler whose entire job is to stop that. There is nothing left to save the
+// event with and this build does not try; the promise is only the one a host
+// observes, which is exit 0 (I-03).
+//
+// The dial in this build is the production one, so the path is the ordinary
+// undelivered-event path: nothing is listening, settle decides to spool, and
+// the write is what panics.
+func TestPanicWhileSettlingExitsZero(t *testing.T) {
+	requirePipeFree(t)
+	in := payload(t)
+
+	res := run(t, settlePanicBin, in)
+
+	res.requireExitZeroAndSilentStdout(t)
+	// The message from settle's own handler, and not the one main's recover
+	// writes: they are different lines, and only this one says the panic
+	// happened after there was anything left to do about it.
+	if !bytes.Contains(res.stderr, []byte("panic while settling the event")) {
+		t.Errorf("stderr does not report a panic while settling:\n%s", res.stderr)
+	}
+	// Nothing was saved, and that is the documented outcome rather than a
+	// failure: the code that saves events is the code that panicked.
+	res.requireSpoolEmpty(t)
 }
 
 // ---------------------------------------------------------------------------

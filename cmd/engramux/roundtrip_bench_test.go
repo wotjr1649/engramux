@@ -76,8 +76,10 @@ func benchServer(b *testing.B) *sql.DB {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- pipe.Serve(ctx, l, func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
-			return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+		done <- pipe.Serve(ctx, l, pipe.Handler{
+			Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+				return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+			},
 		})
 	}()
 	b.Cleanup(func() {

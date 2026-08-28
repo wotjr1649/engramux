@@ -30,8 +30,11 @@ package spool
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,6 +93,44 @@ func Dir() (string, error) {
 	return filepath.Join(local, "engramux", "spool"), nil
 }
 
+// recordID returns the id a directory entry names, and whether it is a record
+// at all. It is the one definition of "this file is a record": [Write] produces
+// exactly these names, so a name it could not have produced is something else -
+// the temp file a write is staged in, the quarantine subdirectory, or anything
+// a human put there. Shared by [scan] and [Depth] so the drain and the status
+// count cannot disagree about what they are looking at.
+func recordID(name string) (string, bool) {
+	id, ok := strings.CutSuffix(name, ext)
+	return id, ok && canonicalUUID(id)
+}
+
+// Depth is the number of records the spool holds, which is the number a Status
+// request reports (spec 5.2).
+//
+// It counts rather than calling [scan], because scan removes every record past
+// the age bound on its way through and a read that deletes is not what a status
+// query should be. A directory that does not exist is depth 0: a spool nothing
+// has ever written to has not been created yet, and that is not an error.
+func Depth(dir string) (int, error) {
+	des, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("spool: read %s: %w", dir, err)
+	}
+	n := 0
+	for _, de := range des {
+		if de.IsDir() {
+			continue
+		}
+		if _, ok := recordID(de.Name()); ok {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // Write saves one record: payload under id, in dir, creating dir if it does
 // not exist. It writes a temp file, syncs it, and renames it over the final
 // name (spec 5.6), so a reader never sees a half-written record and a machine
@@ -105,7 +146,11 @@ func Dir() (string, error) {
 // refuses the write with [ErrRecordBound] or [ErrByteBound] rather than
 // truncating anything, and validating a payload here would be a second place
 // that can decide to drop an event.
-func Write(dir, id string, payload []byte) error {
+//
+// log is where the age sweep reports the records it drops. It is a parameter
+// rather than the package default because the relay calls this, and the relay
+// installs no handler - see [logger]. nil discards.
+func Write(dir, id string, payload []byte, log *slog.Logger) error {
 	// id becomes a file name. It is minted by uuid.NewV7 today and so is
 	// always a canonical UUID, but a "..\\.." would escape dir, and
 	// rejecting every shape that is not one removes the escape instead of
@@ -126,7 +171,7 @@ func Write(dir, id string, payload []byte) error {
 	// that it could not save them. A spool that silently discarded the
 	// oldest record to make room would turn a full disk into missing events
 	// nobody counted.
-	held, used, err := scan(dir, time.Now())
+	held, used, err := scan(dir, time.Now(), log)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -131,12 +132,12 @@ func TestWriteRefusesARecordOnceTheCountBoundIsReached(t *testing.T) {
 	// Three fit. The third one succeeding is half the assertion: a bound
 	// that fires one record early is as wrong as one that never fires.
 	for i := 1; i <= 3; i++ {
-		if err := Write(dir, idN(i), payload); err != nil {
+		if err := Write(dir, idN(i), payload, nil); err != nil {
 			t.Fatalf("Write %d of 3: %v", i, err)
 		}
 	}
 
-	err := Write(dir, idN(4), payload)
+	err := Write(dir, idN(4), payload, nil)
 	if !errors.Is(err, ErrRecordBound) {
 		t.Fatalf("Write past the count bound = %v, want ErrRecordBound", err)
 	}
@@ -157,13 +158,13 @@ func TestWriteRefusesARecordOnceTheByteBoundIsReached(t *testing.T) {
 	dir := t.TempDir()
 
 	for i := 1; i <= 2; i++ {
-		if err := Write(dir, idN(i), payload); err != nil {
+		if err := Write(dir, idN(i), payload, nil); err != nil {
 			t.Fatalf("Write %d of 2: %v", i, err)
 		}
 	}
 
 	// The spool now holds exactly the cap, so one more byte crosses it.
-	err := Write(dir, idN(3), []byte("x"))
+	err := Write(dir, idN(3), []byte("x"), nil)
 	if !errors.Is(err, ErrByteBound) {
 		t.Fatalf("Write past the byte bound = %v, want ErrByteBound", err)
 	}
@@ -175,7 +176,7 @@ func TestWriteRefusesARecordOnceTheByteBoundIsReached(t *testing.T) {
 	// One more byte of headroom and the identical write is accepted, which
 	// is what makes the refusal above the bound and not the write.
 	setBounds(t, 1000, full+1, time.Hour)
-	if err := Write(dir, idN(3), []byte("x")); err != nil {
+	if err := Write(dir, idN(3), []byte("x"), nil); err != nil {
 		t.Fatalf("Write with one byte of headroom: %v", err)
 	}
 	requireNames(t, dir, "after the accepted write", idN(1)+ext, idN(2)+ext, idN(3)+ext)
@@ -189,7 +190,7 @@ func TestARecordPastTheAgeBoundIsDropped(t *testing.T) {
 	dir := t.TempDir()
 	stale, live := idN(1), idN(2)
 	for _, id := range []string{stale, live} {
-		if err := Write(dir, id, []byte(`{"n":1}`)); err != nil {
+		if err := Write(dir, id, []byte(`{"n":1}`), nil); err != nil {
 			t.Fatalf("Write %s: %v", id, err)
 		}
 	}
@@ -213,11 +214,11 @@ func TestARecordPastTheAgeBoundIsDropped(t *testing.T) {
 	// Write sweeps too, because the relay is the only writer: a bound the
 	// writer does not enforce is a bound the disk does not have.
 	old := idN(3)
-	if err := Write(dir, old, []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, old, []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("Write %s: %v", old, err)
 	}
 	backdate(t, filepath.Join(dir, old+ext), maxAge+time.Second)
-	if err := Write(dir, idN(4), []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, idN(4), []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("Write %s: %v", idN(4), err)
 	}
 	requireNames(t, dir, "after a write swept the stale record", idN(4)+ext)
@@ -245,7 +246,7 @@ func TestDrainReplaysEveryRecordUnderTheIDItWasWrittenUnder(t *testing.T) {
 		// them, so a drain that re-marshalled the payload rewrites these
 		// bytes and the comparison below catches it.
 		p := fmt.Appendf(nil, `{"n":%d,"cmd":"a < b && c"}`, i)
-		if err := Write(dir, id, p); err != nil {
+		if err := Write(dir, id, p, nil); err != nil {
 			t.Fatalf("Write %s: %v", id, err)
 		}
 		want[id] = p
@@ -282,7 +283,7 @@ func TestDrainReplaysEveryRecordUnderTheIDItWasWrittenUnder(t *testing.T) {
 // record is never replayed as if it were whole.
 func TestDrainIgnoresAPartiallyWrittenRecord(t *testing.T) {
 	dir := t.TempDir()
-	if err := Write(dir, idN(1), []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, idN(1), []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	partial := filepath.Join(dir, ".partial-2130517550")
@@ -319,7 +320,7 @@ func TestDrainIgnoresAPartiallyWrittenRecord(t *testing.T) {
 // name in the first place. That is exactly why Write refuses it.
 func TestDrainIgnoresANameWriteCouldNotHaveProduced(t *testing.T) {
 	dir := t.TempDir()
-	if err := Write(dir, idN(1), []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, idN(1), []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	notRecords := []string{
@@ -379,7 +380,7 @@ func TestWriteNeverExposesAPartialRecordUnderTheFinalName(t *testing.T) {
 		}
 	}()
 
-	if err := Write(dir, idN(1), payload); err != nil {
+	if err := Write(dir, idN(1), payload, nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	close(stop)
@@ -405,14 +406,14 @@ func TestDrainQuarantinesAPoisonRecordAndKeepsMakingProgress(t *testing.T) {
 	dir := t.TempDir()
 	poison := idN(1)
 	poisonBytes := []byte(`{"poison":true}`)
-	if err := Write(dir, poison, poisonBytes); err != nil {
+	if err := Write(dir, poison, poisonBytes, nil); err != nil {
 		t.Fatalf("Write the poison record: %v", err)
 	}
 	// Numbered above the poison record so os.ReadDir hands them back
 	// behind it: "the records behind it" is the half that a drain aborting
 	// on the first failure would lose.
 	for i := 2; i <= 4; i++ {
-		if err := Write(dir, idN(i), []byte(`{"n":1}`)); err != nil {
+		if err := Write(dir, idN(i), []byte(`{"n":1}`), nil); err != nil {
 			t.Fatalf("Write %s: %v", idN(i), err)
 		}
 	}
@@ -444,7 +445,7 @@ func TestDrainQuarantinesAPoisonRecordAndKeepsMakingProgress(t *testing.T) {
 
 	// The pass that quarantines still makes progress on a record behind it.
 	fresh := idN(5)
-	if err := Write(dir, fresh, []byte(`{"n":5}`)); err != nil {
+	if err := Write(dir, fresh, []byte(`{"n":5}`), nil); err != nil {
 		t.Fatalf("Write %s: %v", fresh, err)
 	}
 	n, err = d.Drain(t.Context())
@@ -479,7 +480,7 @@ func TestDrainQuarantinesAPoisonRecordAndKeepsMakingProgress(t *testing.T) {
 func TestDrainKeepsARecordTheServiceRejectedWithoutAnError(t *testing.T) {
 	dir := t.TempDir()
 	id := idN(1)
-	if err := Write(dir, id, []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, id, []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -508,7 +509,7 @@ func TestDrainStopsOnContextCancellationAndLeavesTheRestIntact(t *testing.T) {
 			setBatch(t, batch, 50*time.Millisecond)
 			dir := t.TempDir()
 			for i := 1; i <= 4; i++ {
-				if err := Write(dir, idN(i), []byte(`{"n":1}`)); err != nil {
+				if err := Write(dir, idN(i), []byte(`{"n":1}`), nil); err != nil {
 					t.Fatalf("Write %s: %v", idN(i), err)
 				}
 			}
@@ -549,7 +550,7 @@ func TestDrainYieldsBetweenBatches(t *testing.T) {
 	setBatch(t, 1, pause)
 	dir := t.TempDir()
 	for i := 1; i <= 4; i++ {
-		if err := Write(dir, idN(i), []byte(`{"n":1}`)); err != nil {
+		if err := Write(dir, idN(i), []byte(`{"n":1}`), nil); err != nil {
 			t.Fatalf("Write %s: %v", idN(i), err)
 		}
 	}
@@ -570,5 +571,66 @@ func TestDrainYieldsBetweenBatches(t *testing.T) {
 	if want := 3 * pause; elapsed < want {
 		t.Fatalf("draining 4 records at a batch size of 1 took %v, want at least %v - it never paused between batches",
 			elapsed, want)
+	}
+}
+
+// TestANilLoggerNeverReachesTheDefaultLogger is the residual the service task
+// closed, and it is a claim about the relay rather than about this package.
+//
+// internal/spool is linked into the relay as well as the service, and the relay
+// installs no slog handler: slog.Default() there is the unfiltered
+// package-default one. Both of the lines below are reachable from the relay -
+// the age sweep runs inside Write - so a nil logger has to mean silence, not
+// "whatever the process happens to point slog at". Today's values would leak
+// nothing; one payload-derived field added later would leak silently.
+//
+// The second half is what stops the first from passing for the wrong reason: a
+// package that stopped logging anywhere at all would satisfy an absence
+// assertion perfectly.
+func TestANilLoggerNeverReachesTheDefaultLogger(t *testing.T) {
+	setBounds(t, 100, 1<<20, time.Hour)
+
+	var leaked bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&leaked, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	dir := t.TempDir()
+
+	// Write's age sweep: the one line the relay reaches.
+	stale := idN(1)
+	if err := Write(dir, stale, []byte(`{"n":1}`), nil); err != nil {
+		t.Fatalf("Write %s: %v", stale, err)
+	}
+	backdate(t, filepath.Join(dir, stale+ext), maxAge+time.Second)
+	live := idN(2)
+	if err := Write(dir, live, []byte(`{"n":2}`), nil); err != nil {
+		t.Fatalf("Write %s: %v", live, err)
+	}
+	requireNames(t, dir, "after the sweep", live+ext)
+
+	// The drain's line: a record the service refuses is logged per attempt.
+	c := &collector{poison: map[string]bool{live: false}}
+	d := &Drainer{Dir: dir, Ingest: c.ingest}
+	if _, err := d.Drain(t.Context()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	if leaked.Len() != 0 {
+		t.Fatalf("a nil logger reached slog.Default():\n%s", leaked.String())
+	}
+
+	// The same call with a logger produces records, so the silence above is
+	// the parameter working and not this package having gone quiet.
+	var kept bytes.Buffer
+	d.Log = slog.New(slog.NewJSONHandler(&kept, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	if _, err := d.Drain(t.Context()); err != nil {
+		t.Fatalf("Drain with a logger: %v", err)
+	}
+	if kept.Len() == 0 {
+		t.Fatal("the injected logger received nothing, so the absence assertion above proves nothing")
+	}
+	if leaked.Len() != 0 {
+		t.Fatalf("the injected logger also wrote to slog.Default():\n%s", leaked.String())
 	}
 }

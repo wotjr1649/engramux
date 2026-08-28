@@ -292,7 +292,7 @@ func TestAKillBetweenCommitAndTheAckReplaysExactlyOnce(t *testing.T) {
 
 	// Step 4. This is what the relay does when its post-dial budget expires
 	// with no valid ACK: the same id, not a fresh one (I-05).
-	if err := Write(spoolDir, id, payload); err != nil {
+	if err := Write(spoolDir, id, payload, nil); err != nil {
 		t.Fatalf("spool the undelivered event: %v", err)
 	}
 	requireNames(t, spoolDir, "after the relay spooled the event", id+ext)
@@ -363,7 +363,7 @@ func TestDrainingWhileTheServiceIngestsKeepsEveryEvent(t *testing.T) {
 		t.Fatalf("read the fixture: %v", err)
 	}
 	for i := 1; i <= spoolRecords; i++ {
-		if err := Write(spoolDir, idN(i), payload); err != nil {
+		if err := Write(spoolDir, idN(i), payload, nil); err != nil {
 			t.Fatalf("Write %s: %v", idN(i), err)
 		}
 	}

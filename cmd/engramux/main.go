@@ -11,9 +11,16 @@
 // alternative breaks constantly on Windows.
 //
 // That is enforced structurally rather than by discipline. os.Exit is not
-// called anywhere in this binary: main returns, which is exit 0, and the one
-// deferred handler that runs on the way out recovers whatever was in flight.
-// Adding an os.Exit would skip that handler, so its absence is the invariant.
+// called anywhere on the relay path: [relay] returns, main returns, and that is
+// exit 0, with one deferred handler on the way out recovering whatever was in
+// flight. Adding an os.Exit below that point would skip the handler, so its
+// absence there is the invariant.
+//
+// This binary is also the CLI, and `engramux status` has to exit non-zero when
+// the service is down (I-08). That path calls os.Exit and is chosen in main
+// before the relay's handler is ever registered, so the two cannot interfere:
+// a hook invokes this program with no arguments and reaches [relay], and
+// nothing with arguments reaches it at all.
 //
 // Two things follow from it and shape everything below:
 //
@@ -61,7 +68,28 @@ var (
 	errPanic        = errors.New("relay: panic")
 )
 
+// main picks which of the two programs in this binary is being run.
+//
+// A hook invokes it with no arguments - spec 4.2's invocation shape lets us
+// configure it that way on both hosts - and everything a person types starts
+// with a command word. The split is made here, before the relay's deferred
+// handler is registered, and that is what lets `engramux status` exit non-zero
+// while I-03 still holds.
+//
+// I-03 is a promise about the relay, and the relay is the argument-free path:
+// it registers settle and calls os.Exit nowhere, so nothing can skip the
+// handler that makes a panic exit 0. The CLI path registers no handler and is
+// the only place os.Exit appears. Adding an os.Exit below the split would
+// break I-03; adding one here cannot.
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(cli(os.Args[1:]))
+	}
+	relay()
+}
+
+// relay is the hook path: read stdin, deliver or spool, exit 0 (I-03).
+func relay() {
 	// Started before anything else, because the budget it anchors is the
 	// wall clock this process is allowed, not the wall clock of the part
 	// that talks to the service.
@@ -188,7 +216,7 @@ func (e *event) settle() {
 	// timeout around it.
 	dir, err := spool.Dir()
 	if err == nil {
-		err = spool.Write(dir, e.id, e.payload)
+		err = spoolWrite(dir, e.id, e.payload)
 	}
 	if err != nil {
 		warn("spool %s: %v", e.id, err)
@@ -197,7 +225,33 @@ func (e *event) settle() {
 	warn("spooled %s", e.id)
 }
 
-// warn writes one line to stderr. Stdout is never written to (spec 4.5).
+// warn writes one line to stderr. The relay writes nothing on stdout, on any
+// event (spec 4.5); the CLI path does, because a person asked it to.
+//
+// # These lines are not an I-10 egress, and this is the reasoning
+//
+// Some of them carry the spool path, which is under %LOCALAPPDATA% and so
+// contains a Windows user name - a value internal/secret would tag
+// ClassUserPath if it ever saw it. It never does: this is fmt.Fprintf to
+// os.Stderr and not slog, so secret.NewLogHandler is not in the path, and that
+// is deliberate rather than an oversight.
+//
+// I-10 says a secret "never leaves the machine". Spec 2 puts a single Windows
+// SID inside the trust boundary. The relay's stderr goes to the process that
+// invoked the hook - the host, running as that same SID, on this machine - so
+// nothing leaves anything. Routing these through slog would buy nothing and
+// cost the relay a regex compile per hook event in a process that lives about
+// 11 ms (spec 5.1).
+//
+// Two things would invalidate it, and either one means this has to change
+// rather than be re-argued:
+//
+//   - spec 2's trust boundary stops being one SID. A second user, a service
+//     account, or a shared machine makes the host a different principal.
+//   - a host starts forwarding hook stderr off the machine - into an uploaded
+//     transcript, a telemetry channel, a support bundle. Then this is an
+//     egress with no filter on it, and the fix is a filtered handler here, not
+//     a quieter message.
 func warn(format string, args ...any) {
 	_, _ = fmt.Fprintf(os.Stderr, "engramux: "+format+"\n", args...)
 }

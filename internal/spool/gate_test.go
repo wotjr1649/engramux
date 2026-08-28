@@ -330,9 +330,11 @@ func relayOverTheWire(t *testing.T, bin string, raw []byte, db *sql.DB) string {
 	ids := make(chan string, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- pipe.Serve(t.Context(), l, func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
-			ids <- env.IngestID
-			return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+		done <- pipe.Serve(t.Context(), l, pipe.Handler{
+			Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+				ids <- env.IngestID
+				return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+			},
 		})
 	}()
 	defer func() {
@@ -500,7 +502,7 @@ func gateKillReplaysExactlyOnce(t *testing.T, dbPath, spoolDir string) {
 	killAfterCommit(t, dbPath, id)
 
 	// Step 4.
-	if err := Write(spoolDir, id, payload); err != nil {
+	if err := Write(spoolDir, id, payload, nil); err != nil {
 		t.Fatalf("spool the undelivered event: %v", err)
 	}
 	requireNames(t, spoolDir, "after the relay spooled the event", id+ext)

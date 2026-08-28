@@ -34,7 +34,7 @@ func TestWriteNamesTheRecordAfterTheID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "spool")
 	payload := []byte(`{ "hook_event_name": "SessionEnd", "cwd": "C:\\Users\\x" }`)
 
-	if err := Write(dir, testID, payload); err != nil {
+	if err := Write(dir, testID, payload, nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -68,7 +68,7 @@ func TestWritePreservesBytesExactly(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := Write(dir, testID, payload); err != nil {
+			if err := Write(dir, testID, payload, nil); err != nil {
 				t.Fatalf("Write: %v", err)
 			}
 			//nolint:gosec // G304: reading a record this test just wrote into its own t.TempDir
@@ -110,12 +110,12 @@ func TestWriteRejectsAnIDThatIsNotAUUID(t *testing.T) {
 	} {
 		t.Run(id, func(t *testing.T) {
 			dir := t.TempDir()
-			err := Write(dir, id, []byte(`{}`))
+			err := Write(dir, id, []byte(`{}`), nil)
 			if !errors.Is(err, ErrID) {
-				t.Fatalf("Write(%q) error = %v, want ErrID", id, err)
+				t.Fatalf("Write(%q, nil) error = %v, want ErrID", id, err)
 			}
 			if names := entries(t, dir); len(names) != 0 {
-				t.Errorf("Write(%q) left %q behind, want nothing", id, names)
+				t.Errorf("Write(%q, nil) left %q behind, want nothing", id, names)
 			}
 		})
 	}
@@ -126,7 +126,7 @@ func TestWriteRejectsAnIDThatIsNotAUUID(t *testing.T) {
 // must not also fail to be saved because a directory was missing (I-04).
 func TestWriteCreatesTheSpoolDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "a", "b", "spool")
-	if err := Write(dir, testID, []byte(`{}`)); err != nil {
+	if err := Write(dir, testID, []byte(`{}`), nil); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	if names := entries(t, dir); len(names) != 1 {
@@ -139,10 +139,10 @@ func TestWriteCreatesTheSpoolDirectory(t *testing.T) {
 // would replay twice.
 func TestWriteTwiceUnderOneIDLeavesOneRecord(t *testing.T) {
 	dir := t.TempDir()
-	if err := Write(dir, testID, []byte(`{"n":1}`)); err != nil {
+	if err := Write(dir, testID, []byte(`{"n":1}`), nil); err != nil {
 		t.Fatalf("first Write: %v", err)
 	}
-	if err := Write(dir, testID, []byte(`{"n":2}`)); err != nil {
+	if err := Write(dir, testID, []byte(`{"n":2}`), nil); err != nil {
 		t.Fatalf("second Write: %v", err)
 	}
 	if names := entries(t, dir); len(names) != 1 {

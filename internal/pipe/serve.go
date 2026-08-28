@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	errNoIngest    = errors.New("pipe: Serve was given a nil IngestFunc")
+	errNoIngest    = errors.New("pipe: Serve was given a Handler with no Ingest")
 	errVersion     = errors.New("pipe: unsupported protocol version")
 	errRequestType = errors.New("pipe: unknown request type")
 	errIngestID    = errors.New("pipe: IngestEvent carries no ingest id")
@@ -50,6 +50,31 @@ var requestTimeout = 2 * time.Second
 // says.
 type IngestFunc func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error)
 
+// StatusFunc answers a Status request with the numbers only the service can
+// see (I-08). Version and Type are not its business: [Serve] stamps both, so
+// the protocol fields on the wire cannot disagree with the protocol this
+// package speaks.
+//
+// An error answers ipc.Rejected, which the CLI reports as a failure. There is
+// no partial status: half-read numbers presented as a service's state are
+// worse than a refusal.
+type StatusFunc func(ctx context.Context) (ipc.StatusReply, error)
+
+// Handler is what [Serve] answers requests with - one function per request
+// type it implements.
+//
+// A struct rather than a parameter per type, because spec 5.2's five types
+// arrive over several phases and a handler that is not supplied has one
+// behaviour: the request is refused. Ingest is the exception and is required,
+// because a service that cannot store an event has nothing to serve.
+type Handler struct {
+	// Ingest stores one event. Required.
+	Ingest IngestFunc
+	// Status answers a Status request. A nil Status refuses one, exactly
+	// as the three types Phase 1 does not implement are refused.
+	Status StatusFunc
+}
+
 // Serve accepts connections on l and answers each one, until l is closed or
 // ctx is cancelled.
 //
@@ -62,11 +87,11 @@ type IngestFunc func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, erro
 // whose client stalls is bounded by requestTimeout rather than by the client,
 // so that promise does not depend on the other end behaving.
 //
-// One connection carries one request and one ACK. That is the relay's shape -
+// One connection carries one request and one reply. That is the relay's shape -
 // a transient process per hook event, alive about 11 ms (spec 5.1) - and
 // keeping it means a client cannot hold a connection between events.
-func Serve(ctx context.Context, l net.Listener, ingest IngestFunc) error {
-	if ingest == nil {
+func Serve(ctx context.Context, l net.Listener, h Handler) error {
+	if h.Ingest == nil {
 		return errNoIngest
 	}
 
@@ -92,7 +117,7 @@ func Serve(ctx context.Context, l net.Listener, ingest IngestFunc) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serveConn(ctx, conn, ingest)
+			serveConn(ctx, conn, h)
 		}()
 	}
 }
@@ -102,9 +127,10 @@ func Serve(ctx context.Context, l net.Listener, ingest IngestFunc) error {
 // Every failure here is logged and dropped rather than returned: there is
 // nobody to return it to, and taking the accept loop down over one bad client
 // is the failure mode gate clause 3 exists to catch. The client is not left
-// guessing either - it either gets an ACK it can check with ipc.Ack.Verify,
-// or it gets a closed connection, and both make its own timeout fire.
-func serveConn(ctx context.Context, conn net.Conn, ingest IngestFunc) {
+// guessing either - it either gets a reply it can check with ipc.Ack.Verify or
+// ipc.StatusReply.Verify, or it gets a closed connection, and both make its
+// own timeout fire.
+func serveConn(ctx context.Context, conn net.Conn, h Handler) {
 	defer func() { _ = conn.Close() }()
 
 	if err := conn.SetDeadline(time.Now().Add(requestTimeout)); err != nil {
@@ -114,7 +140,7 @@ func serveConn(ctx context.Context, conn net.Conn, ingest IngestFunc) {
 
 	payload, err := ipc.ReadFrame(conn)
 	if err != nil {
-		// No ACK: the frame never arrived, so there is no ingest id to
+		// No reply: the frame never arrived, so there is no ingest id to
 		// echo and nothing to have an opinion about. The relay's own
 		// post-dial budget covers this and it spools (I-04).
 		slog.WarnContext(ctx, "pipe: read request frame", "error", err)
@@ -122,64 +148,101 @@ func serveConn(ctx context.Context, conn net.Conn, ingest IngestFunc) {
 	}
 
 	var env ipc.Envelope
-	status := ipc.Rejected
+	var reply []byte
 	if err := json.Unmarshal(payload, &env); err != nil {
 		// Reset rather than keep what a partial decode left behind: the
 		// ACK echoes IngestID back, and echoing bytes out of a document
 		// that did not parse is reflecting unvalidated input.
 		env = ipc.Envelope{}
 		slog.WarnContext(ctx, "pipe: decode request envelope", "error", err)
+		reply = encodeAck(ctx, ipc.Rejected, "")
 	} else {
-		status = route(ctx, env, ingest)
+		reply = route(ctx, env, h)
 	}
-
-	ack, err := json.Marshal(ipc.Ack{
-		Version:  ipc.Version,
-		Status:   status,
-		IngestID: env.IngestID,
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "pipe: encode ack", "error", err)
+	if reply == nil {
+		// The reply could not be encoded, which is already logged. There
+		// is nothing to send that would be better than silence: the
+		// client's own deadline is what covers it.
 		return
 	}
-	if err := ipc.WriteFrame(conn, ack); err != nil {
-		slog.WarnContext(ctx, "pipe: write ack", "error", err)
+	if err := ipc.WriteFrame(conn, reply); err != nil {
+		slog.WarnContext(ctx, "pipe: write reply", "error", err)
 	}
 }
 
-// route decides the ACK status for one decoded envelope.
-func route(ctx context.Context, env ipc.Envelope, ingest IngestFunc) ipc.AckStatus {
+// route decides the reply document for one decoded envelope. It returns the
+// encoded bytes, or nil when encoding failed and there is nothing to send.
+//
+// The reply document is chosen by the request type, not by the outcome: an
+// IngestEvent is answered with an ipc.Ack and a served Status with an
+// ipc.StatusReply. A request this build will not serve is answered with a
+// rejected ipc.Ack whatever it asked for, which ipc.StatusReply.Verify
+// recognises as not being a status reply.
+func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	if err := validate(env); err != nil {
 		slog.WarnContext(ctx, "pipe: rejected a malformed request", "error", err)
-		return ipc.Rejected
+		return encodeAck(ctx, ipc.Rejected, env.IngestID)
 	}
 
-	if env.Type != ipc.IngestEvent {
-		// The other four types belong to the CLI reads I-08 routes over
-		// this pipe, and Phase 1 implements none of them. Rejected is the
+	switch env.Type {
+	case ipc.IngestEvent:
+		status, err := h.Ingest(ctx, env)
+		if err != nil {
+			// The status is the handler's to decide, except here. A
+			// handler answering Committed alongside an error is
+			// wrong one way or the other, and Rejected is the wrong
+			// answer that cannot lose the event: the relay spools
+			// it, the drain replays it, and I-05 makes the replay of
+			// an event that did commit a no-op.
+			slog.ErrorContext(ctx, "pipe: ingest failed", "error", err)
+			status = ipc.Rejected
+		}
+		return encodeAck(ctx, status, env.IngestID)
+
+	case ipc.Status:
+		if h.Status == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no Status handler")
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply, err := h.Status(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: status failed", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		// Stamped here rather than trusted from the handler: the wire
+		// protocol is this package's, and a handler that left them
+		// empty would produce a reply no client could accept.
+		reply.Version, reply.Type = ipc.Version, ipc.Status
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode status reply", "error", err)
+			return nil
+		}
+		return b
+
+	default:
+		// Doctor, Search and Drain are the CLI reads I-08 routes over
+		// this pipe that Phase 1 does not implement. Rejected is the
 		// honest answer, and because ipc.Ack.Verify accepts only
 		// Committed it cannot be mistaken for success.
 		//
-		// It carries no reason, because ipc.Ack has no field for one, and
-		// inventing that reply schema now would freeze it before the
-		// phase that adds a caller has seen the problem. env.Type is safe
-		// to log verbatim here and only here: validate has already
-		// confirmed it is one of the five constants.
+		// It carries no reason, because ipc.Ack has no field for one.
+		// env.Type is safe to log verbatim here and only here: validate
+		// has already confirmed it is one of the five constants.
 		slog.WarnContext(ctx, "pipe: request type is not implemented in phase 1", "type", env.Type)
-		return ipc.Rejected
+		return encodeAck(ctx, ipc.Rejected, env.IngestID)
 	}
+}
 
-	status, err := ingest(ctx, env)
+// encodeAck marshals one ACK, returning nil when it cannot - which for three
+// strings is a condition that does not occur, and is still not swallowed.
+func encodeAck(ctx context.Context, status ipc.AckStatus, ingestID string) []byte {
+	b, err := json.Marshal(ipc.Ack{Version: ipc.Version, Status: status, IngestID: ingestID})
 	if err != nil {
-		// The status is the handler's to decide, except here. A handler
-		// answering Committed alongside an error is wrong one way or the
-		// other, and Rejected is the wrong answer that cannot lose the
-		// event: the relay spools it, the drain replays it, and I-05
-		// makes the replay of an event that did commit a no-op.
-		slog.ErrorContext(ctx, "pipe: ingest failed", "error", err)
-		return ipc.Rejected
+		slog.ErrorContext(ctx, "pipe: encode ack", "error", err)
+		return nil
 	}
-	return status
+	return b
 }
 
 // validate is the routing boundary's envelope check, and it is the only one

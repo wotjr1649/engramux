@@ -53,6 +53,13 @@ func (r *recorder) seen() []ipc.Envelope {
 // test that ends early still tears the server down.
 func startServer(t *testing.T, ingest IngestFunc) (name string, stop func() error) {
 	t.Helper()
+	return startHandler(t, Handler{Ingest: ingest})
+}
+
+// startHandler is startServer for a test that needs more of the Handler than
+// the ingest seam.
+func startHandler(t *testing.T, h Handler) (name string, stop func() error) {
+	t.Helper()
 
 	name = uniquePipeName(t)
 	l, err := Listen(name, currentSID(t))
@@ -61,7 +68,7 @@ func startServer(t *testing.T, ingest IngestFunc) (name string, stop func() erro
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- Serve(t.Context(), l, ingest) }()
+	go func() { done <- Serve(t.Context(), l, h) }()
 
 	var (
 		once     sync.Once
@@ -128,6 +135,18 @@ func request(t *testing.T, version string, typ ipc.RequestType, id string, paylo
 // exchange dials, sends one frame, reads one frame back and decodes the ACK.
 func exchange(t *testing.T, name string, req []byte) ipc.Ack {
 	t.Helper()
+	raw := exchangeRaw(t, name, req)
+	var ack ipc.Ack
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		t.Fatalf("decode ack %q: %v", raw, err)
+	}
+	return ack
+}
+
+// exchangeRaw is exchange without an opinion about what came back, for the
+// reply documents that are not an ACK.
+func exchangeRaw(t *testing.T, name string, req []byte) []byte {
+	t.Helper()
 	conn := dial(t, name)
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -143,13 +162,9 @@ func exchange(t *testing.T, name string, req []byte) ipc.Ack {
 	}
 	raw, err := ipc.ReadFrame(conn)
 	if err != nil {
-		t.Fatalf("read ack: %v", err)
+		t.Fatalf("read reply: %v", err)
 	}
-	var ack ipc.Ack
-	if err := json.Unmarshal(raw, &ack); err != nil {
-		t.Fatalf("decode ack %q: %v", raw, err)
-	}
-	return ack
+	return raw
 }
 
 // TestFrameRoundTripsAndRoutesToIngest is gate clause 2. The payload is
@@ -581,7 +596,7 @@ func TestCancellingTheContextStopsServe(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, l, (&recorder{status: ipc.Committed}).ingest) }()
+	go func() { done <- Serve(ctx, l, Handler{Ingest: (&recorder{status: ipc.Committed}).ingest}) }()
 
 	cancel()
 	select {
@@ -645,8 +660,129 @@ func TestAStalledClientDoesNotHoldServeOpen(t *testing.T) {
 // instead of a nil-pointer panic inside a goroutine on the first real event.
 func TestServeRefusesANilIngestFunc(t *testing.T) {
 	l, _ := listen(t)
-	err := Serve(t.Context(), l, nil)
+	err := Serve(t.Context(), l, Handler{})
 	if !errors.Is(err, errNoIngest) {
-		t.Errorf("Serve(nil) = %v, want errNoIngest", err)
+		t.Errorf("Serve with no Ingest = %v, want errNoIngest", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+// statusRequest is the frame a CLI sends. Status carries no ingest id and no
+// payload - the id is meaningful only for IngestEvent (see ipc.Envelope).
+func statusRequest(t *testing.T) []byte {
+	t.Helper()
+	return request(t, ipc.Version, ipc.Status, "", []byte("null"))
+}
+
+// TestStatusIsAnsweredWithAStatusReply. The handler's numbers come back
+// unchanged and the two protocol fields are the server's, not the handler's:
+// the reply below is built with a wrong version and a wrong type on purpose, so
+// that "Serve stamps them" is asserted rather than assumed from a handler that
+// happened to fill them in correctly.
+func TestStatusIsAnsweredWithAStatusReply(t *testing.T) {
+	want := ipc.StatusReply{
+		Version:      "not the wire version",
+		Type:         "not a status reply",
+		SpoolDepth:   7,
+		Events:       9001,
+		UptimeMS:     1234,
+		DatabasePath: `Z:\service\engramux.db`,
+	}
+	name, _ := startHandler(t, Handler{
+		Ingest: (&recorder{status: ipc.Committed}).ingest,
+		Status: func(context.Context) (ipc.StatusReply, error) { return want, nil },
+	})
+
+	raw := exchangeRaw(t, name, statusRequest(t))
+	var got ipc.StatusReply
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if err := got.Verify(); err != nil {
+		t.Fatalf("Verify: %v (reply = %q)", err, raw)
+	}
+	if got.SpoolDepth != want.SpoolDepth || got.Events != want.Events ||
+		got.UptimeMS != want.UptimeMS || got.DatabasePath != want.DatabasePath {
+		t.Errorf("the reply is not the handler's numbers\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestAStatusReplyIsNotAnAck is the other half of choosing a second reply
+// document: a caller that verifies it as an ACK must not be able to accept it.
+// ipc.Ack.Verify's three-way check is what the relay's delivery decision rests
+// on (spec 5.3), and it has to stay exactly that whatever else travels on this
+// pipe.
+func TestAStatusReplyIsNotAnAck(t *testing.T) {
+	name, _ := startHandler(t, Handler{
+		Ingest: (&recorder{status: ipc.Committed}).ingest,
+		Status: func(context.Context) (ipc.StatusReply, error) { return ipc.StatusReply{Events: 3}, nil },
+	})
+
+	raw := exchangeRaw(t, name, statusRequest(t))
+	var ack ipc.Ack
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if err := ack.Verify(""); err == nil {
+		t.Errorf("a status reply verified as a committed ACK: %q", raw)
+	}
+}
+
+// TestStatusWithoutAHandlerIsRejected. A Handler that does not implement Status
+// refuses it exactly as the three types Phase 1 does not implement are refused,
+// and the refusal is an ACK - which is not a status reply, so a client cannot
+// read zeroes out of it and print them.
+func TestStatusWithoutAHandlerIsRejected(t *testing.T) {
+	name, _ := startServer(t, (&recorder{status: ipc.Committed}).ingest)
+
+	raw := exchangeRaw(t, name, statusRequest(t))
+	var ack ipc.Ack
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if ack.Status != ipc.Rejected {
+		t.Errorf("status = %q, want %q", ack.Status, ipc.Rejected)
+	}
+	var reply ipc.StatusReply
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		t.Fatalf("decode as a status reply: %v", err)
+	}
+	if err := reply.Verify(); !errors.Is(err, ipc.ErrStatusType) {
+		t.Errorf("StatusReply.Verify = %v, want ErrStatusType", err)
+	}
+}
+
+// TestAFailingStatusHandlerIsRejected. Half a status is worse than none: a
+// caller cannot tell a zero that was read from a zero that was never filled in,
+// so a handler that could not answer produces a refusal and not a reply.
+func TestAFailingStatusHandlerIsRejected(t *testing.T) {
+	boom := errors.New("the database is not answering")
+	name, _ := startHandler(t, Handler{
+		Ingest: (&recorder{status: ipc.Committed}).ingest,
+		Status: func(context.Context) (ipc.StatusReply, error) {
+			return ipc.StatusReply{Events: 9001}, boom
+		},
+	})
+
+	raw := exchangeRaw(t, name, statusRequest(t))
+	var reply ipc.StatusReply
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if err := reply.Verify(); err == nil {
+		t.Fatalf("a failed status was answered with an acceptable status reply: %q", raw)
+	}
+	if reply.Events != 0 {
+		t.Errorf("the failed handler's numbers reached the wire: %q", raw)
+	}
+	var ack ipc.Ack
+	if err := json.Unmarshal(raw, &ack); err != nil {
+		t.Fatalf("decode as an ack: %v", err)
+	}
+	if ack.Status != ipc.Rejected {
+		t.Errorf("status = %q, want %q", ack.Status, ipc.Rejected)
 	}
 }

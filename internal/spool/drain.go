@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
@@ -117,8 +116,40 @@ type Drainer struct {
 	// same reason in the other direction - that package pulls in go-winio.
 	Ingest func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error)
 
+	// Log is where this Drainer's records go. Optional; nil discards them.
+	//
+	// The service passes its own logger, which is the one wrapped in
+	// secret.NewLogHandler (I-10). See [logger] for why nil is not
+	// slog.Default().
+	Log *slog.Logger
+
 	// failures counts consecutive failed replays per record id.
 	failures map[string]int
+}
+
+// discard is the handler a nil logger resolves to.
+var discard = slog.New(slog.DiscardHandler)
+
+// logger returns l, or a logger that throws records away - never
+// [slog.Default].
+//
+// Falling back to the package default is precisely what this package must not
+// do, and the reason is which binaries link it. internal/spool is linked into
+// the relay as well as the service (see [Drainer.Ingest]), and the relay
+// installs no handler at all: slog.Default() there is the unfiltered
+// package-default handler, so a record built from a payload would leave through
+// it with none of I-10's masking. The values logged today are a UUID and two
+// durations and none of them is payload-derived - but the channel is what is
+// being closed, not one line's values.
+//
+// So a caller that wants its records kept passes a logger, and a caller that
+// passes nil has said it does not want them. Silence is the safe default here
+// in a way that "wherever the process happens to point slog" is not.
+func logger(l *slog.Logger) *slog.Logger {
+	if l == nil {
+		return discard
+	}
+	return l
 }
 
 // Drain replays every record in the spool through Ingest and removes each one
@@ -142,7 +173,7 @@ func (d *Drainer) Drain(ctx context.Context) (int, error) {
 		d.failures = make(map[string]int)
 	}
 
-	ids, _, err := scan(d.Dir, time.Now())
+	ids, _, err := scan(d.Dir, time.Now(), d.Log)
 	if err != nil {
 		return 0, err
 	}
@@ -214,7 +245,7 @@ func (d *Drainer) replay(ctx context.Context, id string) (bool, error) {
 	// delivery failure, not a drop (I-04), and a drain that only looked at
 	// err would delete a record the service never stored.
 	d.failures[id]++
-	slog.Warn("spool: a replayed record was not stored",
+	logger(d.Log).Warn("spool: a replayed record was not stored",
 		"id", id, "status", status, "attempt", d.failures[id], "error", err)
 	if d.failures[id] < maxAttempts {
 		return false, nil
@@ -232,7 +263,7 @@ func (d *Drainer) quarantine(id string) error {
 		return fmt.Errorf("spool: quarantine %s: %w", id, err)
 	}
 	delete(d.failures, id)
-	slog.Warn("spool: quarantined a record the service would not store",
+	logger(d.Log).Warn("spool: quarantined a record the service would not store",
 		"id", id, "attempts", maxAttempts, "dir", quarantineDir)
 	return nil
 }
@@ -269,7 +300,7 @@ func yield(ctx context.Context) error {
 // os.ReadDir sorts by name, and a UUIDv7's text sorts in the order it was
 // minted, so records come back oldest first. That is a convenience, not a
 // promise: I-06 makes ordering partial.
-func scan(dir string, now time.Time) ([]string, int64, error) {
+func scan(dir string, now time.Time, log *slog.Logger) ([]string, int64, error) {
 	des, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, 0, nil
@@ -284,8 +315,8 @@ func scan(dir string, now time.Time) ([]string, int64, error) {
 		if de.IsDir() {
 			continue
 		}
-		id, ok := strings.CutSuffix(de.Name(), ext)
-		if !ok || !canonicalUUID(id) {
+		id, ok := recordID(de.Name())
+		if !ok {
 			continue
 		}
 		info, err := de.Info()
@@ -299,22 +330,18 @@ func scan(dir string, now time.Time) ([]string, int64, error) {
 				return nil, 0, fmt.Errorf("spool: drop the expired record %s: %w", id, err)
 			}
 			// This is the one log line in this package the *relay*
-			// reaches: scan runs inside Write, and cmd/engramux
-			// configures no logger, so it leaves through the package
-			// default handler in the log package's format rather than
-			// through the relay's own warn().
+			// reaches: scan runs inside Write. It goes to the logger
+			// the caller injected and to no other, which is the whole
+			// point of the parameter - the relay installs no handler,
+			// so reaching slog.Default() there would be reaching an
+			// unfiltered one (I-10, and see [logger]).
 			//
-			// That is not an I-10 filtering hole, and the reason is the
-			// values rather than the destination. An id is a UUID the
-			// relay minted, and an age and a bound are durations; none
-			// of the three is derived from a payload, so there is
-			// nothing here for secret.NewLogHandler to filter. The
-			// destination is the relay's own stderr, which spec 2 puts
-			// inside the trust boundary along with the rest of one
-			// Windows SID. Adding a payload-derived value to this line
-			// would change that answer and would need the handler
-			// installed first.
-			slog.Warn("spool: dropped a record past the age bound",
+			// The relay passes nil, so on that path the drop is not
+			// reported. It is the service that sweeps in practice: it
+			// scans on every drain pass, and the relay scans only when
+			// it has an event to spool. Nothing is silently dropped
+			// that the service would not itself have reported.
+			logger(log).Warn("spool: dropped a record past the age bound",
 				"id", id, "age", now.Sub(info.ModTime()).Round(time.Second), "bound", maxAge)
 			continue
 		}

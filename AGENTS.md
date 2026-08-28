@@ -92,6 +92,7 @@ row on its own, delete the row — the test is the better owner.
 | Symptom | What is actually happening |
 |---|---|
 | `database is locked` during tests, doctor, or migrations | A development service is running and holds the database exclusively. This is almost never a DSN or pragma bug |
+| Tests fail with *"something is already listening on `\\.\pipe\engramux.v1-…`"*, or a relay delivers when the test expected it to spool | The same cause as the row above, through the other door: a development service is running. The pipe name is derived from the **user SID, not the data directory**, so pointing `LOCALAPPDATA` somewhere else does not isolate anything — a relay reaches whichever service currently owns the pipe. One machine, one instance, by design (I-01, I-09). Stop the service before running the suite; the tests say so themselves rather than failing obscurely |
 | `Access is denied` from `go build -o` | You are overwriting a running `.exe` |
 | A Windows CLI flag is mangled into a path — `schtasks /query` becomes `C:/Program Files/Git/query` | MSYS path conversion. Set `MSYS_NO_PATHCONV=1`, or use `//query` |
 | A DSN pragma silently has no effect | Only `_pragma` values skip validation — a typo returns `err=nil` and SQLite ignores it. The answer is I-11, not a retry |
