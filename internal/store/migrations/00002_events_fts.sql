@@ -13,6 +13,11 @@
 -- raw event bytes, unmasked, and that is I-10 working as designed: the database
 -- keeps the original and masking happens at egress. An index of masked text
 -- could not be kept in sync with the table `rebuild` reads.
+--
+-- One column, and no `project_id UNINDEXED` beside it. It looked like it would
+-- let a project-scoped search filter inside the MATCH; the query plan says it
+-- does not. A project-scoped search joins events on rowid and filters
+-- events.project_id instead (spec 5.7).
 
 -- +goose Up
 
@@ -22,7 +27,6 @@
 -- real workload ever wants it back.
 CREATE VIRTUAL TABLE events_fts USING fts5(
     payload,
-    project_id UNINDEXED,
     content = 'events',
     tokenize = 'porter unicode61 remove_diacritics 2'
 );
@@ -45,29 +49,26 @@ INSERT INTO events_fts(events_fts, rank) VALUES('secure-delete', 1);
 -- index would then keep tokens for text that no longer exists, which is what
 -- `integrity-check` with rank=1 catches.
 --
--- Values are supplied for project_id too. It is UNINDEXED and its value is
--- ignored, but the command takes one value per column.
+-- The delete command takes one value per column, which here is one value.
 --
 -- +goose StatementBegin
 CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN
-    INSERT INTO events_fts(rowid, payload, project_id)
-    VALUES (new.rowid, new.payload, new.project_id);
+    INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
 END;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
 CREATE TRIGGER events_ad AFTER DELETE ON events BEGIN
-    INSERT INTO events_fts(events_fts, rowid, payload, project_id)
-    VALUES ('delete', old.rowid, old.payload, old.project_id);
+    INSERT INTO events_fts(events_fts, rowid, payload)
+    VALUES ('delete', old.rowid, old.payload);
 END;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
 CREATE TRIGGER events_au AFTER UPDATE ON events BEGIN
-    INSERT INTO events_fts(events_fts, rowid, payload, project_id)
-    VALUES ('delete', old.rowid, old.payload, old.project_id);
-    INSERT INTO events_fts(rowid, payload, project_id)
-    VALUES (new.rowid, new.payload, new.project_id);
+    INSERT INTO events_fts(events_fts, rowid, payload)
+    VALUES ('delete', old.rowid, old.payload);
+    INSERT INTO events_fts(rowid, payload) VALUES (new.rowid, new.payload);
 END;
 -- +goose StatementEnd
 

@@ -18,8 +18,14 @@ import (
 //
 // Two indexes over one set of rows: the one the migration created, and one this
 // benchmark creates with the opposite prefix setting. Same events, same
-// tokenizer, same queries, so the only difference between the two numbers is
-// the clause.
+// tokenizer, same queries, so the only difference the numbers can carry is the
+// clause.
+//
+// One thing does differ and is inert here: the migration sets `secure-delete`
+// on its table and this benchmark does not set it on the alternate. That option
+// only changes what a delete leaves behind, nothing is deleted from either
+// index inside the timed window, and both are rebuilt at every scale - so it
+// cannot reach either the latency or the size figures.
 //
 // The queries are two-character Korean prefixes derived from the corpus by the
 // gate's own rule, so they are the shapes real captures actually carry.
@@ -138,7 +144,6 @@ func alternateIndex(b *testing.B, db *sql.DB) (table, prodLabel, altLabel string
 
 	if _, err := db.ExecContext(b.Context(), `CREATE VIRTUAL TABLE `+altTable+` USING fts5(
     payload,
-    project_id UNINDEXED,
     content = 'events',
     `+tokenizeClause+altClause+`
 )`); err != nil {

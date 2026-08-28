@@ -271,6 +271,43 @@ func TestMigrateCreatesTheDeclaredTables(t *testing.T) {
 	}
 }
 
+// TestEventsFTSCarriesExactlyTheDecidedOptions. Everything inside events_fts's
+// argument list is a spec 5.7 decision, and until this existed nothing in the
+// normal suite held any of them: the tokenizer was compared only by the corpus
+// benchmark, which skips without .capture/, and the two absences - no prefix
+// index, no second column - were held by nothing at all.
+//
+// The whole argument list is compared, not a substring. A substring check for
+// "porter" passes on a tokenizer that also lost remove_diacritics, and no
+// substring check can assert that a clause is *absent* without naming every
+// clause anyone might add. Splitting on commas is safe because no clause this
+// table may carry contains one; a clause that did would land here as an
+// unreadable diff, which is the right way to find out.
+func TestEventsFTSCarriesExactlyTheDecidedOptions(t *testing.T) {
+	db := migrated(t)
+	var ddl string
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT sql FROM sqlite_schema WHERE name = 'events_fts'`).Scan(&ddl); err != nil {
+		t.Fatalf("read the events_fts DDL: %v", err)
+	}
+	lparen, rparen := strings.Index(ddl, "("), strings.LastIndex(ddl, ")")
+	if lparen < 0 || rparen < lparen {
+		t.Fatalf("the events_fts DDL has no argument list: %s", ddl)
+	}
+	var got []string
+	for _, clause := range strings.Split(ddl[lparen+1:rparen], ",") {
+		got = append(got, strings.Join(strings.Fields(clause), " "))
+	}
+	want := []string{
+		"payload",
+		"content = 'events'",
+		"tokenize = 'porter unicode61 remove_diacritics 2'",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events_fts options = %q, want %q\nfull DDL: %s", got, want, ddl)
+	}
+}
+
 // TestForeignKeyCheckIsEmpty is Phase 1 gate clause 2. It only means anything
 // alongside TestForeignKeyCheckReportsADanglingRow, which proves the pragma
 // reports a violation when there is one; on its own an empty result set cannot

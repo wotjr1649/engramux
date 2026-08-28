@@ -286,9 +286,19 @@ func TestTheWALStaysBoundedAcrossALongRun(t *testing.T) {
 	}
 	// The loop is asynchronous, so the WAL crosses the threshold before the
 	// next poll sees it. What it may not do is follow the uncheckpointed
-	// curve.
-	if peak > 4*threshold {
-		t.Errorf("the WAL peaked at %d bytes against a %d byte threshold", peak, int64(threshold))
+	// curve, and that is what the bound is written against - a quarter of the
+	// curve this same workload produces with no checkpointer, rather than a
+	// multiple of the threshold.
+	//
+	// It used to be 4*threshold, which was a comfortable bound until every
+	// ingest also started writing FTS index pages: the peak then ran
+	// 420,272-510,912 B across six runs against a bound of 524,288 B, and the
+	// next thing to make an ingest heavier would have turned a real test into
+	// a flaky one. The guard above keeps automatic above 4*threshold, so this
+	// bound is always above the threshold itself.
+	if bound := automatic / 4; peak > bound {
+		t.Errorf("the WAL peaked at %d bytes against a bound of %d - a quarter of the %d bytes the "+
+			"same workload reached with no checkpointer", peak, bound, automatic)
 	}
 }
 
