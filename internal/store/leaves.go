@@ -10,11 +10,45 @@ import (
 
 // leafSeparator joins two string leaves in the indexed text.
 //
-// A newline rather than a space, because unicode61 splits on both but a phrase
-// query does not: with a space, "alpha beta" would match a document whose only
-// connection between the two words is that one leaf ended and the next began.
-// The newline keeps two leaves from being read as adjacent text.
+// Some separator is required: without one, the last token of a leaf and the
+// first token of the next fuse into a single token that is in neither.
+//
+// That it is a newline rather than a space is the migration: the backfill joins
+// with char(10), and the two walks must produce byte-identical text. It is not a
+// tokenizer decision and buys nothing there - unicode61 drops a newline exactly
+// as it drops a space, so the two leaves' tokens are adjacent by position and a
+// phrase query spans them. `"alpha beta"` matches a document indexed as
+// `alpha\nbeta`. TestANewlineIsNotAPhraseBoundary measures both halves.
+//
+// The exposure that leaves, and why it is accepted for 1.0: matchExpression in
+// internal/search never emits a multi-token phrase out of separate words a
+// person typed - one quoted prefix phrase per whitespace-delimited token. A
+// phrase of more than one token arises only from a single typed token the
+// tokenizer splits on internal punctuation, `main_test.go` into `main` `test`
+// `go`. Such a phrase can span a leaf boundary, and that cross-leaf false
+// positive is the whole of it.
 const leafSeparator = "\n"
+
+// sqliteJSONDepthLimit is how many containers may be open at once in a payload
+// this walk will read. It is SQLite's number and not Go's: encoding/json accepts
+// ten times as much, so nothing on this side fails on its own at the depth that
+// matters.
+//
+// Measured on SQLite 3.53.3 through modernc.org/sqlite v1.57.0, identically for
+// nested objects, nested arrays and the two alternating - json_valid answers 1
+// at a depth of 1000 open containers and 0 at 1001, where json.Valid answers
+// true at 10000 and false only at 10001. A bare scalar is depth 0.
+//
+// Past the limit the migration's backfill stores the empty string, because its
+// CASE tests json_valid first, so this answers "" for the same payload too.
+// Without the guard the two walks disagree over the whole range between the two
+// limits. The guard cannot be moved into the backfill instead: json_tree over
+// such a payload raises `malformed JSON` rather than returning no rows.
+//
+// Re-verify when the driver moves - TestSQLiteRefusesJSONNestedPastTheDepthGuard
+// asks SQLite for both sides of this number, and TestTheTwoWalksAgree carries a
+// payload on each side of it in all three shapes.
+const sqliteJSONDepthLimit = 1000
 
 // Leaves is what a payload contributes to the search index: every JSON string
 // leaf, in document order, joined by [leafSeparator]. Object keys are structure
@@ -66,6 +100,13 @@ func Leaves(payload []byte) string {
 		return ""
 	}
 	dec := json.NewDecoder(bytes.NewReader(payload))
+	// Numbers as text, so that a number this walk never looks at cannot end
+	// it. Without this the decoder converts every number to float64 on the
+	// way past, and `1e400` - which json_valid and json.Valid both accept,
+	// and which json_tree walks straight over - overflows and fails the
+	// whole stream. The switch below only ever reads string tokens, so
+	// json.Number in place of float64 changes nothing else.
+	dec.UseNumber()
 
 	// One entry per open container. atKey is true while the next string
 	// token in an object is its key; inside an object the two alternate, and
@@ -81,12 +122,22 @@ func Leaves(payload []byte) string {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			// Unreachable as written - json.Valid above has
-			// already ruled out every input the token stream can
-			// fail on. It returns the same empty answer anyway,
-			// because the alternative is a partial walk, and a
-			// partial walk is the shape that would disagree with
-			// the backfill.
+			// No input is known to reach this, and "unreachable"
+			// is what the comment here used to claim: json.Valid
+			// above was said to have ruled out every failure the
+			// token stream has. It had not. `{"a":"alpha",
+			// "n":1e400,"b":"beta"}` is valid to json.Valid and to
+			// json_valid, and the decoder failed on it anyway,
+			// converting a number this walk never reads into a
+			// float64 that overflows - so the branch ran, returned
+			// "", and the backfill answered `alpha\nbeta` for the
+			// same bytes. UseNumber above is what closed that.
+			//
+			// So the branch stays: what is left is a claim about a
+			// dependency's behaviour and not a proof, and the empty
+			// answer is the right one either way, because the
+			// alternative is a partial walk and a partial walk is
+			// the shape that disagrees with the backfill.
 			return ""
 		}
 
@@ -105,6 +156,11 @@ func Leaves(payload []byte) string {
 				stack = append(stack, frame{})
 			default: // '}' or ']', which only close a frame this loop opened
 				stack = stack[:len(stack)-1]
+			}
+			// One check for both openers, because SQLite counts them
+			// together - see [sqliteJSONDepthLimit].
+			if len(stack) > sqliteJSONDepthLimit {
+				return ""
 			}
 		case string:
 			if !isKey {

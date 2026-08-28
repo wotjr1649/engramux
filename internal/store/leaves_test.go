@@ -235,16 +235,125 @@ func TestTheTokenizerReadsBothIllFormedShapesTheSameWay(t *testing.T) {
 	}
 }
 
-// TestLeavesSeparatesLeavesThatWereNotAdjacent. Two leaves joined by a space
-// would let a phrase query match across a boundary the document never had. The
-// newline is what stops that, and unicode61 splits on it.
+// TestLeavesSeparatesLeavesThatWereNotAdjacent. Something has to go between two
+// leaves or the last token of one and the first of the next fuse into a single
+// token; that it is a newline rather than a space is the migration's char(10)
+// and nothing else. What the newline does *not* buy is a phrase boundary -
+// unicode61 drops it exactly as it drops a space, so a phrase query spans two
+// leaves. [TestANewlineIsNotAPhraseBoundary] measures both halves of that
+// against the index.
 func TestLeavesSeparatesLeavesThatWereNotAdjacent(t *testing.T) {
-	got := Leaves([]byte(`{"a":"alpha","b":"beta"}`))
-	if strings.Contains(got, "alpha beta") {
-		t.Errorf("Leaves joined two leaves into one phrase: %q", got)
-	}
-	if got != "alpha\nbeta" {
+	if got := Leaves([]byte(`{"a":"alpha","b":"beta"}`)); got != "alpha\nbeta" {
 		t.Errorf("Leaves = %q, want %q", got, "alpha\nbeta")
+	}
+}
+
+// nestedJSON wraps the string leaf "deep" in depth containers. shape is the
+// sequence of container characters to cycle through: "{" nests objects all the
+// way down, "[" arrays, "{[" alternates the two. Depth 0 is the bare string.
+//
+// Built here rather than written as a literal because at these depths a literal
+// is two kilobytes of punctuation, and because every caller's boundary has to
+// move with [sqliteJSONDepthLimit] rather than being retyped beside it.
+func nestedJSON(depth int, shape string) []byte {
+	var b strings.Builder
+	for i := range depth {
+		if shape[i%len(shape)] == '{' {
+			b.WriteString(`{"k":`)
+		} else {
+			b.WriteByte('[')
+		}
+	}
+	b.WriteString(`"deep"`)
+	for i := depth - 1; i >= 0; i-- {
+		if shape[i%len(shape)] == '{' {
+			b.WriteByte('}')
+		} else {
+			b.WriteByte(']')
+		}
+	}
+	return []byte(b.String())
+}
+
+// goJSONDepthLimit is encoding/json's own nesting limit, which is nowhere in
+// the production code: it is here only so that the gap between it and
+// [sqliteJSONDepthLimit] - the whole reason the guard exists - is a measured
+// number rather than a remark. Go accepts ten times what SQLite does.
+const goJSONDepthLimit = 10000
+
+// jsonValid asks SQLite, so that the number in [sqliteJSONDepthLimit] is the
+// linked-in driver's answer and not this file's opinion of it.
+func jsonValid(t *testing.T, db *sql.DB, payload []byte) int64 {
+	t.Helper()
+	var v int64
+	if err := db.QueryRowContext(t.Context(), `SELECT json_valid(?)`, string(payload)).Scan(&v); err != nil {
+		t.Fatalf("json_valid: %v", err)
+	}
+	return v
+}
+
+// TestSQLiteRefusesJSONNestedPastTheDepthGuard re-derives [sqliteJSONDepthLimit]
+// against the driver actually linked in, which is what that constant's doc
+// comment promises happens when the driver moves. It is asserted from the
+// constant rather than from a literal, so moving the constant moves the payloads
+// and this fails rather than quietly measuring somewhere else.
+//
+// Three things per shape, and the third is why the guard is in [Leaves] and not
+// only in the migration: json_tree over a payload json_valid refuses does not
+// return zero rows, it raises. The backfill never reaches it because its CASE
+// tests json_valid first; a Go walk with no guard reaches its own limit ten
+// times further down and indexes text no upgrade could reproduce.
+func TestSQLiteRefusesJSONNestedPastTheDepthGuard(t *testing.T) {
+	db := migrated(t)
+	for _, shape := range []struct{ name, chars string }{
+		{"objects", "{"},
+		{"arrays", "["},
+		{"objects and arrays alternating", "{["},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			at := nestedJSON(sqliteJSONDepthLimit, shape.chars)
+			past := nestedJSON(sqliteJSONDepthLimit+1, shape.chars)
+
+			if got := jsonValid(t, db, at); got != 1 {
+				t.Errorf("json_valid at depth %d = %d, want 1", sqliteJSONDepthLimit, got)
+			}
+			if got := jsonValid(t, db, past); got != 0 {
+				t.Errorf("json_valid at depth %d = %d, want 0", sqliteJSONDepthLimit+1, got)
+			}
+			// Go's own limit is ten times SQLite's, so encoding/json
+			// accepts both of these. That gap is the divergence the
+			// guard closes and there is no Go-side error to lean on.
+			// Its own boundary is measured here too, because the
+			// constant's doc comment states it.
+			if !json.Valid(at) || !json.Valid(past) {
+				t.Errorf("encoding/json refused depth %d/%d itself; the guard has nothing to close",
+					sqliteJSONDepthLimit, sqliteJSONDepthLimit+1)
+			}
+			if !json.Valid(nestedJSON(goJSONDepthLimit, shape.chars)) {
+				t.Errorf("encoding/json refused depth %d, want accepted", goJSONDepthLimit)
+			}
+			if json.Valid(nestedJSON(goJSONDepthLimit+1, shape.chars)) {
+				t.Errorf("encoding/json accepted depth %d, want refused", goJSONDepthLimit+1)
+			}
+
+			var n int64
+			err := db.QueryRowContext(t.Context(),
+				`SELECT count(*) FROM json_tree(?)`, string(past)).Scan(&n)
+			if err == nil {
+				t.Fatalf("json_tree at depth %d returned %d rows, want an error", sqliteJSONDepthLimit+1, n)
+			}
+			if !strings.Contains(err.Error(), "malformed JSON") {
+				t.Errorf("json_tree at depth %d failed with %v, want malformed JSON",
+					sqliteJSONDepthLimit+1, err)
+			}
+
+			if got := Leaves(at); got != "deep" {
+				t.Errorf("Leaves at depth %d = %q, want %q", sqliteJSONDepthLimit, got, "deep")
+			}
+			if got := Leaves(past); got != "" {
+				t.Errorf("Leaves at depth %d = %q, want %q", sqliteJSONDepthLimit+1, got, "")
+			}
+		})
 	}
 }
 
@@ -327,6 +436,15 @@ func corpusPayloads(t *testing.T) []namedPayload {
 // the easy half of that path and not the hard half. The two walks agree on it -
 // measured, both sides answer the same four bytes for U+1F600. They do not agree
 // on a *lone* surrogate; that is [TestLeavesCoercesWhatIsNotWellFormed].
+//
+// The overflowing number is a value both json_valid and json.Valid accept and
+// json.Decoder.Token does not, which took the whole Go walk to "" until it read
+// numbers as [json.Number].
+//
+// The nested payloads sit one on each side of [sqliteJSONDepthLimit], in all
+// three shapes, and both sides of each pair are needed: the shallower one alone
+// passes with a guard that is one too tight, the deeper one alone with a guard
+// that is one too loose.
 var agreementPayloads = []namedPayload{
 	{"a bare number", []byte(`42`)},
 	{"a bare string", []byte(`"only a string"`)},
@@ -339,6 +457,13 @@ var agreementPayloads = []namedPayload{
 	{"a stream of two objects", []byte(`{"a":"x"}{"b":"y"}`)},
 	{"two bare values in a row", []byte(`"a" "b"`)},
 	{"a value followed by a number", []byte(`{"a":"x"} 42`)},
+	{"a number too large for float64, between two leaves", []byte(`{"a":"alpha","n":1e400,"b":"beta"}`)},
+	{"objects nested to SQLite's limit", nestedJSON(sqliteJSONDepthLimit, "{")},
+	{"objects nested one past it", nestedJSON(sqliteJSONDepthLimit+1, "{")},
+	{"arrays nested to SQLite's limit", nestedJSON(sqliteJSONDepthLimit, "[")},
+	{"arrays nested one past it", nestedJSON(sqliteJSONDepthLimit+1, "[")},
+	{"objects and arrays alternating to SQLite's limit", nestedJSON(sqliteJSONDepthLimit, "{[")},
+	{"objects and arrays alternating one past it", nestedJSON(sqliteJSONDepthLimit+1, "{[")},
 	{"a surrogate-pair escape", []byte(`{"k":"\uD55C\uAE00 \u0041 \uD83D\uDE00"}`)},
 }
 

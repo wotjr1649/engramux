@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
+	"github.com/wotjr1649/engramux/internal/secret"
 )
 
 // sqliteCorruptVTab is SQLITE_CORRUPT_VTAB, `SQLITE_CORRUPT | (1<<8)`. It is
@@ -143,6 +144,69 @@ func TestTheIntegrityCheckPassesOnAFreshlyIndexedDatabase(t *testing.T) {
 		[]int64{rowids[fixtures.CodexPostToolUseString]}, "after ingest")
 	requireMatch(t, db, objectOnlyToken,
 		[]int64{rowids[fixtures.ClaudePostToolUseObject]}, "after ingest")
+}
+
+// TestANewlineIsNotAPhraseBoundary measures what [leafSeparator] buys and what
+// it does not. Both halves were claimed in a doc comment and neither had been
+// measured; the second one was false.
+//
+// Four rows, differing only in what sits between the same two tokens, and the
+// queries are run against the index rather than against a belief about
+// unicode61:
+//
+//   - nothing between them, and they are one token that is neither. That is what
+//     the separator is for.
+//   - a newline, which is what [Leaves] writes.
+//   - a space, the counterfactual the old comment ruled out.
+//   - a third token before the newline, which is the only thing that actually
+//     stops the phrase.
+//
+// The newline row and the space row answer a phrase query identically, and
+// identically again under NEAR/0, which asks the same question about token
+// positions directly. So the newline is not a phrase boundary: unicode61 drops
+// it exactly as it drops a space and the tokens are adjacent by position across
+// the join. The third row is the control that says the phrase query is doing
+// anything at all.
+func TestANewlineIsNotAPhraseBoundary(t *testing.T) {
+	ctx := t.Context()
+	db := migrated(t)
+	seed(t, db)
+
+	const first, second, between = "alphaPhraseOne", "betaPhraseTwo", "gammaPhraseMid"
+	rows := []struct{ name, leaves string }{
+		{"no separator at all", first + second},
+		{"the newline Leaves writes", first + "\n" + second},
+		{"a space instead", first + " " + second},
+		{"a third token before the newline", first + " " + between + "\n" + second},
+	}
+	rowids := make([]int64, len(rows))
+	for i, r := range rows {
+		id := fmt.Sprintf("phrase-%d", i)
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (id, project_id, session_id, host, source, event_name,
+			                    payload, leaves, privacy_class, redaction_version, received_at)
+			VALUES (?, ?, ?, 'codex', 'pipe', 'PostToolUse', '{}', ?, '', ?, ?)`,
+			id, seedProject, seedSession, r.leaves, int64(secret.Version), int64(4000+i)); err != nil {
+			t.Fatalf("INSERT %s: %v", r.name, err)
+		}
+		rowids[i] = rowidOf(t, db, id)
+	}
+	separated := []int64{rowids[1], rowids[2], rowids[3]}
+	spanned := []int64{rowids[1], rowids[2]}
+
+	// What the separator is for: with nothing between them the two words are
+	// a third token, so neither of them finds that row and the fused token
+	// finds nothing else.
+	requireMatch(t, db, first, separated, "the first token alone")
+	requireMatch(t, db, second, separated, "the second token alone")
+	requireMatch(t, db, first+second, []int64{rowids[0]}, "the token the two fused into")
+
+	// What it is not: a phrase boundary. The newline row and the space row
+	// answer the same, and only a token actually standing between them ends
+	// the phrase.
+	requireMatch(t, db, `"`+first+` `+second+`"`, spanned, "a phrase query across the separator")
+	requireMatch(t, db, fmt.Sprintf(`NEAR("%s" "%s", 0)`, first, second), spanned,
+		"NEAR/0 across the separator")
 }
 
 // TestTheIndexSecureDeletes. The index holds the same unredacted text the table
