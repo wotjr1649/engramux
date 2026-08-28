@@ -18,8 +18,17 @@ const (
 	// the idempotency key (I-05) already exists — also ACKs Committed; it
 	// is not an error, and Verify accepts it exactly like a first commit.
 	Committed AckStatus = "committed"
-	// Rejected means the event was not stored. Unlike Committed, this is
-	// permanent loss: nothing about this protocol retries a Rejected ACK.
+	// Rejected means the event was not stored, and the relay must treat it
+	// as a failed send: it spools the event and exits 0. I-04 is explicit -
+	// "if it cannot be delivered it is spooled" - and spec 5.3 accepts only
+	// Committed as success, so Rejected is a delivery failure like any
+	// other. The spool retries it and eventually quarantines it, which is
+	// not the same as dropping it.
+	//
+	// rev.2's bug was the opposite reading: it unmarshalled the ACK without
+	// checking status, a Rejected reply counted as success, and nothing
+	// spooled the event - THAT is what made it permanently lost. Rejected
+	// itself loses nothing.
 	Rejected AckStatus = "rejected"
 )
 

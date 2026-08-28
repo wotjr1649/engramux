@@ -45,9 +45,15 @@ const (
 // env.IngestID is the relay-minted UUIDv7, and it *is* the idempotency key
 // (I-05): idempotency is the INSERT on that primary key and nothing else. The
 // same event ingested twice therefore leaves one row and answers
-// [ipc.Committed] both times. [ipc.Rejected] means permanent loss - the relay
-// will not spool an event the service rejected - so answering it to a duplicate
-// throws away an event that was already safe, which is the bug rev.2 shipped.
+// [ipc.Committed] both times.
+//
+// [ipc.Rejected] is a delivery failure, not a drop: the relay spools a rejected
+// send and retries it (I-04), and a record that keeps failing is quarantined
+// rather than retried forever. So answering Rejected to a duplicate is not data
+// loss - it is a lie. The row is already there, and the relay would spool,
+// replay and finally quarantine an event that was safely stored all along.
+// rev.2's related bug was on the other side of the wire: it accepted a Rejected
+// ACK as success, so nothing spooled the event and it really was lost.
 //
 // The corollary is that this function trusts the id it is handed. Two events
 // sent under one id are one event by definition, because the key is the only
