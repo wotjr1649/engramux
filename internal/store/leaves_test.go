@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,6 +104,23 @@ func TestLeaves(t *testing.T) {
 		payload: `{"a":"kept"} and then some`,
 		want:    "",
 	}, {
+		// A *stream* of values, which is the shape json.Decoder is
+		// happiest with and json_valid rejects outright. Without the
+		// json.Valid check in front of the walk the decoder reads
+		// straight on into the second value and answers "x\ny" where
+		// the backfill answers nothing.
+		name:    "a stream of two objects is not one JSON value",
+		payload: `{"a":"x"}{"b":"y"}`,
+		want:    "",
+	}, {
+		name:    "a stream of two bare strings is not one JSON value",
+		payload: `"a" "b"`,
+		want:    "",
+	}, {
+		name:    "a value followed by another value is not one JSON value",
+		payload: `{"a":"x"} 42`,
+		want:    "",
+	}, {
 		name:    "empty bytes have no leaves",
 		payload: ``,
 		want:    "",
@@ -115,25 +133,105 @@ func TestLeaves(t *testing.T) {
 	}
 }
 
-// TestLeavesCoercesInvalidUTF8 is a measured divergence between the two walks,
-// pinned here so that it is a known boundary rather than a surprise.
+// TestLeavesCoercesWhatIsNotWellFormed pins two measured divergences between
+// the two walks, so that each is a known boundary rather than a surprise.
 //
-// encoding/json coerces a byte sequence that is not valid UTF-8 to U+FFFD, one
-// per bad byte; SQLite's json_tree hands the raw bytes back unchanged. So for a
-// payload carrying invalid UTF-8 inside a string, Ingest indexes replacement
-// characters where the migration's backfill would index the original bytes.
+// encoding/json coerces what is not well formed to U+FFFD; SQLite's json_tree
+// hands the original through. Measured on modernc.org/sqlite v1.57.0, SQLite
+// 3.53.3:
 //
-// It is not reachable from the corpus: all 902 captured payloads are valid
-// UTF-8, so no live row can hit it, and TestTheTwoWalksAgree runs over exactly
-// those bytes. It is also immaterial to search - unicode61 treats both the bad
-// bytes and U+FFFD as separators, so the tokens on either side are the same
-// either way. Both halves are why this is pinned rather than fixed: making the
-// Go walk preserve raw bytes means hand-writing a JSON string unquoter.
-func TestLeavesCoercesInvalidUTF8(t *testing.T) {
-	payload := []byte("{\"k\":\"a\xff\xfeb\"}")
-	const want = "a\uFFFD\uFFFDb"
-	if got := Leaves(payload); got != want {
-		t.Errorf("Leaves(%q) = % x, want % x", payload, got, want)
+//   - Invalid UTF-8 inside a string. Go answers one U+FFFD per bad byte,
+//     61 ef bf bd ef bf bd 62; json_tree answers the bytes, 61 ff fe 62.
+//   - A lone surrogate escape. Go answers U+FFFD, ef bf bd; json_tree answers
+//     the surrogate itself encoded as three bytes, ed a0 80.
+//
+// Neither is reachable from the corpus. All 902 captured payloads are valid
+// UTF-8, and while 656 of them carry a \uXXXX escape, none carries a surrogate
+// one - a surrogate *pair* is in agreementPayloads and the two walks agree on it
+// exactly. TestTheTwoWalksAgree runs over those same bytes.
+//
+// Fixing either would mean hand-writing a JSON string unquoter that preserves
+// ill-formed input. What makes pinning them acceptable rather than merely
+// cheaper is TestTheTokenizerReadsBothIllFormedShapesTheSameWay below, which
+// measures that the index cannot tell the two spellings apart.
+func TestLeavesCoercesWhatIsNotWellFormed(t *testing.T) {
+	for _, tc := range []struct{ name, payload, want string }{
+		{"invalid UTF-8 bytes", "{\"k\":\"a\xff\xfeb\"}", "a\uFFFD\uFFFDb"},
+		{"a lone high surrogate escape", `{"k":"a\uD800b"}`, "a\uFFFDb"},
+		{"a lone low surrogate escape", `{"k":"a\uDC00b"}`, "a\uFFFDb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Leaves([]byte(tc.payload)); got != tc.want {
+				t.Errorf("Leaves(%q) = % x, want % x", tc.payload, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheTokenizerReadsBothIllFormedShapesTheSameWay is the measurement behind
+// the "immaterial to search" half of the comment above, which was an assertion
+// until this existed.
+//
+// Three rows are indexed whose text differs only in how the ill-formed run
+// between two words is spelled - one per side of each divergence - and
+// fts5vocab in instance mode is asked what tokens each row actually
+// contributed. Equal term lists mean the index cannot tell the divergences
+// apart, which is the claim.
+//
+// The count is asserted too, and separately: two equal one-token lists would
+// also satisfy equality, and that is the failure where the ill-formed run
+// joined the words instead of separating them. The stems themselves are not
+// asserted - porter decides those, and pinning them here would be a test of the
+// stemmer rather than of the separator.
+func TestTheTokenizerReadsBothIllFormedShapesTheSameWay(t *testing.T) {
+	ctx := t.Context()
+	db := migrated(t)
+	seed(t, db)
+
+	// One spelling per side of each divergence above: the invalid bytes and
+	// the lone surrogate as json_tree hands them over, and the U+FFFD run
+	// Leaves hands over in place of either.
+	const first, second = "alphaTokenOne", "betaTokenTwo"
+	spellings := []struct{ name, leaves string }{
+		{"the invalid bytes json_tree would index", first + "\xff\xfe" + second},
+		{"the lone surrogate json_tree would index", first + "\xed\xa0\x80" + second},
+		{"the U+FFFD run Leaves indexes", first + "\uFFFD" + second},
+	}
+
+	rowids := make([]int64, len(spellings))
+	for i, sp := range spellings {
+		id := fmt.Sprintf("tok-%d", i)
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (id, project_id, session_id, host, source, event_name,
+			                    payload, leaves, privacy_class, redaction_version, received_at)
+			VALUES (?, ?, ?, 'codex', 'pipe', 'PostToolUse', '{}', ?, '', ?, ?)`,
+			id, seedProject, seedSession, sp.leaves, int64(secret.Version), int64(3000+i)); err != nil {
+			t.Fatalf("INSERT %s: %v", sp.name, err)
+		}
+		rowids[i] = rowidOf(t, db, id)
+	}
+
+	// fts5vocab reads the index, so this reports the tokens FTS5 actually
+	// stored rather than the tokens this test believes it should have.
+	if _, err := db.ExecContext(ctx,
+		`CREATE VIRTUAL TABLE tokens USING fts5vocab('events_fts', 'instance')`); err != nil {
+		t.Fatalf("CREATE VIRTUAL TABLE ... fts5vocab: %v", err)
+	}
+	terms := func(rowid int64) []string {
+		return queryStrings(t, db, fmt.Sprintf(
+			`SELECT term FROM tokens WHERE doc = %d ORDER BY offset`, rowid))
+	}
+
+	want := terms(rowids[0])
+	if len(want) != 2 {
+		t.Fatalf("%s produced %d tokens %q, want 2 - the ill-formed run did not separate the words",
+			spellings[0].name, len(want), want)
+	}
+	for i, sp := range spellings[1:] {
+		if got := terms(rowids[i+1]); !slices.Equal(got, want) {
+			t.Errorf("%s indexed %q where %s indexed %q; the tokenizer can tell the two apart",
+				sp.name, got, spellings[0].name, want)
+		}
 	}
 }
 
@@ -167,9 +265,13 @@ type namedPayload struct {
 	payload []byte
 }
 
-// corpusPayloads returns every capture's payload, skipping the whole test when
-// the corpus is absent. Spec 7.5's synthetic self-test is filtered, so "the
-// corpus" means the same 901 documents here as it does in internal/search.
+// corpusPayloads returns every capture's payload, and nil when the corpus is
+// absent - the caller keeps running over the fixtures and the hand-written
+// shapes, which is why nothing here skips. The payload count the agreement test
+// logs is therefore 16 on a machine without .capture/ and 917 with it.
+//
+// Spec 7.5's synthetic self-test is filtered, so "the corpus" means the same 901
+// documents here as it does in internal/search.
 func corpusPayloads(t *testing.T) []namedPayload {
 	t.Helper()
 	entries, err := os.ReadDir(corpusDir)
@@ -211,9 +313,20 @@ func corpusPayloads(t *testing.T) []namedPayload {
 }
 
 // agreementPayloads are the shapes the corpus does not have, so that the two
-// walks are compared on them too. Each one is a boundary in the SQL half:
-// group_concat over no rows is NULL rather than the empty string, and json_tree
-// raises `malformed JSON` rather than returning nothing.
+// walks are compared on them too. Each one is a boundary in one half or the
+// other: group_concat over no rows is NULL rather than the empty string,
+// json_tree raises `malformed JSON` rather than returning nothing, and
+// json.Decoder streams where json_valid demands exactly one value.
+//
+// The three stream shapes are the ones that measured as a real divergence
+// before [Leaves] checked json.Valid first: the decoder read on into the second
+// value and answered text where the backfill answered nothing.
+//
+// The surrogate-pair escape is here because 656 of 902 captures carry a
+// backslash-u escape and *none* carries a surrogate one, so the corpus exercises
+// the easy half of that path and not the hard half. The two walks agree on it -
+// measured, both sides answer the same four bytes for U+1F600. They do not agree
+// on a *lone* surrogate; that is [TestLeavesCoercesWhatIsNotWellFormed].
 var agreementPayloads = []namedPayload{
 	{"a bare number", []byte(`42`)},
 	{"a bare string", []byte(`"only a string"`)},
@@ -223,6 +336,10 @@ var agreementPayloads = []namedPayload{
 	{"an empty leaf between two others", []byte(`{"a":"one","e":"","b":"two"}`)},
 	{"a nested mixture", []byte(`{"b":"beta","a":["a1",{"deep":"d1"},["a2"]],"c":"gamma"}`)},
 	{"not JSON at all", []byte(`{"a":"kept", garbage`)},
+	{"a stream of two objects", []byte(`{"a":"x"}{"b":"y"}`)},
+	{"two bare values in a row", []byte(`"a" "b"`)},
+	{"a value followed by a number", []byte(`{"a":"x"} 42`)},
+	{"a surrogate-pair escape", []byte(`{"k":"\uD55C\uAE00 \u0041 \uD83D\uDE00"}`)},
 }
 
 // TestTheTwoWalksAgree is the whole reason the walk is allowed to exist in two

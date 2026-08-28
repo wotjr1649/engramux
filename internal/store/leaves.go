@@ -21,17 +21,22 @@ const leafSeparator = "\n"
 // rather than content and are skipped.
 //
 // This is the whole answer to a precision problem the recall gate could not
-// see. Indexing the raw payload bytes makes `session`, `id`, `hook`, `event`,
-// `name` and `cwd` tokens of 901 of 902 captured documents, against 76-277 for
-// any word a person wrote, so a search for one of those keys returns the entire
-// corpus (spec 5.7). The structure only ever raises recall, and it destroys
-// precision to do it.
+// see: indexing the raw payload bytes indexes the structure, and a JSON key is
+// then a token of nearly every document. Spec 5.7 holds the measurement.
 //
 // A payload that is valid JSON but not a container yields the leaf itself - a
-// bare string - or nothing - a bare number, `true`, `null`. A payload that is
-// not JSON at all yields nothing, which is what the migration's backfill also
-// answers for it: json_tree raises `malformed JSON`, so the backfill guards
-// with json_valid and stores the empty string.
+// bare string - or nothing - a bare number, `true`, `null`. Anything that is
+// not exactly one JSON value yields nothing, which is what the migration's
+// backfill also answers for it: json_tree raises `malformed JSON`, so the
+// backfill guards with json_valid and stores the empty string.
+//
+// "Exactly one" is why this checks [json.Valid] before walking rather than
+// relying on the decode to fail. A [json.Decoder] streams: it reads
+// `{"a":"x"}{"b":"y"}` as two values and never errors, where json_valid answers
+// 0 for the same bytes. Without the check in front, that payload - and `"a" "b"`,
+// and `{"a":"x"} 42` - would index text on the way in and nothing on upgrade,
+// which is the one divergence TestTheTwoWalksAgree exists to prevent. The check
+// costs a second scan of the same bytes and no second decode.
 //
 // The empty string means "this payload has no string leaves" and is a different
 // answer from SQL NULL, which means "not computed" and only the migration's
@@ -54,6 +59,12 @@ const leafSeparator = "\n"
 // the token stream instead, tracking whether the next string inside an object
 // is a key or a value.
 func Leaves(payload []byte) string {
+	// Exactly one JSON value, or nothing - see the doc comment. This is the
+	// same predicate json_valid applies in the backfill, and it has to be
+	// applied here because the decoder below would not.
+	if !json.Valid(payload) {
+		return ""
+	}
 	dec := json.NewDecoder(bytes.NewReader(payload))
 
 	// One entry per open container. atKey is true while the next string
@@ -70,11 +81,12 @@ func Leaves(payload []byte) string {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			// Not JSON, truncated, or carrying trailing bytes. Any
-			// leaf collected so far is discarded rather than
-			// returned: json_valid answers 0 for the same bytes and
-			// the backfill then stores '', so a partial walk would
-			// index one thing on the way in and another on upgrade.
+			// Unreachable as written - json.Valid above has
+			// already ruled out every input the token stream can
+			// fail on. It returns the same empty answer anyway,
+			// because the alternative is a partial walk, and a
+			// partial walk is the shape that would disagree with
+			// the backfill.
 			return ""
 		}
 

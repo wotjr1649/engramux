@@ -19,14 +19,12 @@
 -- column names, which is why the indexed column is called `leaves` on both
 -- sides.
 --
--- What it holds is the *string leaves* of the payload and not the payload, and
--- that is a precision decision the recall gate could not see (spec 5.7).
--- Indexing the raw JSON makes `session`, `id`, `hook`, `event`, `name` and
--- `cwd` tokens of 901 of 902 captured documents, against 76-277 for any word a
--- person wrote: a search for a key returned the whole corpus. The text is the
--- original and unmasked, which is I-10 working as designed - the database keeps
--- the original and masking happens at egress - and an index of masked text
--- could not be kept in sync with the table `rebuild` reads anyway.
+-- What it holds is the *string leaves* of the payload and not the payload,
+-- because indexing the raw JSON indexes the structure and a key is then a token
+-- of nearly every document. Spec 5.7 holds that measurement and the numbers.
+-- The text is the original and unmasked, which is I-10 working as designed - the
+-- database keeps the original and masking happens at egress - and an index of
+-- masked text could not be kept in sync with the table `rebuild` reads anyway.
 --
 -- One column, and no `project_id UNINDEXED` beside it. It looked like it would
 -- let a project-scoped search filter inside the MATCH; the query plan says it

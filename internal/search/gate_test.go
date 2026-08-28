@@ -507,6 +507,12 @@ func gatePrecision(t *testing.T, db *sql.DB, mode string, docs []doc) {
 	if err != nil {
 		t.Fatalf("%s / precision: Search(%q): %v", mode, precisionKey, err)
 	}
+	// Logged on the passing path as well as the failing one, so the number
+	// spec 5.7 cites comes out of this harness rather than out of a probe
+	// nobody kept. It is below the bound rather than equal to it because the
+	// bound counts a substring of a leaf and the index matches a token.
+	t.Logf("%s / precision: MATCH %q returned %d documents, bound %d",
+		mode, precisionKey, len(hits), inLeaves)
 	if len(hits) > inLeaves {
 		t.Errorf("%s / precision: %q matched %d documents, want at most %d - the documents that carry it in a "+
 			"string leaf. A key matching more than that is the index storing structure as content",
