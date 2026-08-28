@@ -233,7 +233,20 @@ func TestTheMigrationIndexesRowsThatWereAlreadyThere(t *testing.T) {
 	if _, err := p.UpTo(ctx, 1); err != nil {
 		t.Fatalf("UpTo(1): %v", err)
 	}
-	rowids := ingestFixtures(t, db)
+	// Straight into events rather than through Ingest, because at version 1
+	// there is no leaves column for Ingest to fill and it would fail on the
+	// way in. That is the situation this test is about: these rows predate
+	// the column as well as the index, so the migration's backfill and its
+	// rebuild are the only things that will ever reach them.
+	seed(t, db)
+	rowids := make(map[string]int64, len(fixtures.All()))
+	for i, f := range fixtures.All() {
+		b, err := f.Bytes()
+		if err != nil {
+			t.Fatalf("%s: Bytes: %v", f.File, err)
+		}
+		rowids[f.File] = rowidOf(t, db, insertAtVersionOne(t, db, i, b))
+	}
 
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatalf("Migrate the rest of the way up: %v", err)
@@ -285,6 +298,12 @@ func TestACascadingDeleteKeepsTheIndexConsistent(t *testing.T) {
 //
 // Nothing in 1.0 updates events. The trigger exists because the index would be
 // silently wrong the first time something does.
+//
+// leaves is written alongside payload, which is what any future updater has to
+// do: it is a derived column and no trigger recomputes it, so an update that
+// touched payload alone would leave the index correct about leaves and both of
+// them stale about the payload. [Leaves] is called rather than a literal, so
+// the test and the ingest path derive it the same way.
 func TestAnUpdateKeepsTheIndexConsistent(t *testing.T) {
 	ctx := t.Context()
 	db := migrated(t)
@@ -292,8 +311,9 @@ func TestAnUpdateKeepsTheIndexConsistent(t *testing.T) {
 	target := rowids[fixtures.CodexPostToolUseString]
 
 	const afterToken = "rewrittenByAnUpdateTrigger"
-	if _, err := db.ExecContext(ctx, `UPDATE events SET payload = ? WHERE rowid = ?`,
-		`{"hook_event_name":"PostToolUse","note":"`+afterToken+`"}`, target); err != nil {
+	after := []byte(`{"hook_event_name":"PostToolUse","note":"` + afterToken + `"}`)
+	if _, err := db.ExecContext(ctx, `UPDATE events SET payload = ?, leaves = ? WHERE rowid = ?`,
+		string(after), Leaves(after), target); err != nil {
 		t.Fatalf("UPDATE events: %v", err)
 	}
 

@@ -108,6 +108,12 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	// consulting the service's own working directory - see its doc comment.
 	p := project.Identify(field(fields, "cwd"))
 	privacyClass := secret.Detect(env.Payload).String()
+	// The third decode of the same bytes - the fields map above, Detect, and
+	// this - and deliberately not shared with either. Detect walks a decoded
+	// map, which loses document order, and Leaves needs it (see its doc). At
+	// spec 7.4's payload sizes a third pass is microseconds, and it is not
+	// to be optimised into one without a measurement saying it was worth it.
+	leaves := Leaves(env.Payload)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -156,13 +162,13 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	// before either delivery path exists.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO events (id, project_id, session_id, host, source, event_name,
-		                    tool_name, tool_use_id, payload, privacy_class,
+		                    tool_name, tool_use_id, payload, leaves, privacy_class,
 		                    redaction_version, received_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO NOTHING`,
 		env.IngestID, projectID, sessionID, h, string(src), eventName,
 		nullable(fields, "tool_name"), nullable(fields, "tool_use_id"),
-		string(env.Payload), privacyClass,
+		string(env.Payload), leaves, privacyClass,
 		int64(secret.Version), now.UnixMilli()); err != nil {
 		return ipc.Rejected, fmt.Errorf("store: insert event %s: %w", env.IngestID, err)
 	}

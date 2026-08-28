@@ -299,7 +299,7 @@ func TestEventsFTSCarriesExactlyTheDecidedOptions(t *testing.T) {
 		got = append(got, strings.Join(strings.Fields(clause), " "))
 	}
 	want := []string{
-		"payload",
+		"leaves",
 		"content = 'events'",
 		"tokenize = 'porter unicode61 remove_diacritics 2'",
 	}
@@ -350,6 +350,50 @@ func TestMigrateDownUpRestoresTheSameSchema(t *testing.T) {
 	}
 	if after := schemaSnapshot(t, db); after != before {
 		t.Fatalf("schema after down-up:\n%s\nwant:\n%s", after, before)
+	}
+}
+
+// TestMigrateDownToOneLeavesVersionOneExactly. TestMigrateDownUpRestoresTheSameSchema
+// goes all the way to 0, where 00001's `DROP TABLE events` removes the events
+// row that carries the leaves column and, with it, the evidence that 00002's
+// Down forgot to drop something. Every one of 00002's objects hangs off events:
+// a missing DROP is invisible one step further down.
+//
+// So this stops at 1 and names what may remain. The trigger and column checks
+// are separate from the table list because sqlite_schema lists them under
+// different types, and a trigger left behind would otherwise be reported as
+// "the tables are fine".
+func TestMigrateDownToOneLeavesVersionOneExactly(t *testing.T) {
+	ctx := t.Context()
+	db := migrated(t)
+
+	p, err := provider(db)
+	if err != nil {
+		t.Fatalf("provider: %v", err)
+	}
+	if _, err := p.DownTo(ctx, 1); err != nil {
+		t.Fatalf("DownTo(1): %v", err)
+	}
+	if v, err := p.GetDBVersion(ctx); err != nil || v != 1 {
+		t.Fatalf("db version after DownTo(1) = %d (err %v), want 1", v, err)
+	}
+
+	got := queryStrings(t, db,
+		`SELECT name FROM sqlite_schema
+		 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	want := []string{
+		"events", "goose_db_version", "memory_items", "observations", "projects", "sessions",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("tables after DownTo(1) = %v, want %v", got, want)
+	}
+	if triggers := queryStrings(t, db,
+		`SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name`); len(triggers) != 0 {
+		t.Errorf("triggers after DownTo(1) = %v, want none", triggers)
+	}
+	if cols := queryStrings(t, db,
+		`SELECT name FROM pragma_table_info('events') ORDER BY name`); slices.Contains(cols, "leaves") {
+		t.Errorf("events still carries the leaves column after DownTo(1): %v", cols)
 	}
 }
 

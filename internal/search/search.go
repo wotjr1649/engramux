@@ -2,8 +2,11 @@
 //
 // The index is an external-content FTS5 table over events, so an FTS row's
 // rowid is the events rowid and the join below is the only way back to an
-// event's id. That is also why the FTS column is named payload: external
-// content requires the FTS column names to be the content table's.
+// event's id. That is also why the FTS column is named leaves: external content
+// requires the FTS column names to be the content table's, and events.leaves is
+// where [github.com/wotjr1649/engramux/internal/store.Leaves] puts the payload's
+// string leaves. The raw JSON is not indexed - its keys are tokens of every
+// document, which costs precision and buys nothing (spec 5.7).
 //
 // # What this package is not yet
 //
@@ -35,8 +38,9 @@ type Hit struct {
 	ID string
 }
 
-// Search returns up to limit events whose indexed payload matches text, best
-// first.
+// Search returns up to limit events whose indexed text matches text, best
+// first. What is indexed is the payload's string leaves, so a match is on
+// something the event said and never on the shape it said it in.
 //
 // text goes to MATCH unmodified, so it is FTS5 query syntax and not a literal:
 // a caller handing it raw user input can get a syntax error back rather than an
