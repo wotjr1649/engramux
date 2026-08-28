@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/wotjr1649/engramux/internal/search"
@@ -54,9 +56,24 @@ const precisionKey = "cwd"
 // that also matched a stray jamo would derive a query no reader could check.
 var hangulRun = regexp.MustCompile(`[\x{AC00}-\x{D7A3}]+`)
 
-// particles are spec 5.7's common Korean particles, longest first so that a run
-// ending in 으로 yields the stem before 으로 rather than the one before 로.
-var particles = []string{"에서", "으로", "는", "은", "이", "가", "을", "를", "의", "에", "로", "와", "과", "도"}
+// particleStem matches a token that ends in one of spec 5.7's common Korean
+// particles, capturing the stem in front of it.
+//
+// The stem may be Latin letters and digits or Hangul syllables, two or more of
+// either, and that alternation is the point rather than a convenience.
+// unicode61 does not split a Latin stem from an attached Korean particle -
+// spec 5.7 measured Codex는 as one token - so an exact-word search for Codex
+// misses it, and per-token prefix expansion is the only thing that reaches it.
+// A rule that only looked inside a Hangul run would never gate that case.
+//
+// Both stem quantifiers are lazy, and that is load-bearing rather than style.
+// Go's regexp is leftmost-first, so a greedy stem takes as much as it can and
+// leaves the shortest particle that still fits: 의도적으로 split as 의도적으 +
+// 로 instead of 의도적 + 으로. Lazy tries the shortest stem first, which leaves
+// the longest particle, and the alternation being longest-first then decides
+// between two particles of the same reach - 에서 before 에.
+var particleStem = regexp.MustCompile(
+	`([A-Za-z0-9]{2,}?|[\x{AC00}-\x{D7A3}]{2,}?)(에서|으로|는|은|이|가|을|를|의|에|로|와|과|도)$`)
 
 // camelWord matches a camelCase identifier as a whole word. Go's \b is the
 // ASCII word boundary, so PostToolUse does not match - there is no boundary
@@ -112,24 +129,72 @@ func deriveKoreanTwoChar(d doc) string {
 	return ""
 }
 
-// deriveParticle takes the first Hangul run that ends in one of [particles]
-// over a stem of at least two syllables, and returns the stem.
+// deriveParticle takes the first whitespace-delimited token that ends in a
+// particle over a stem of at least two characters, and returns the stem.
 //
-// unicode61 keeps the whole run as one token, so an exact-word search for the
-// stem cannot match it and only prefix expansion can (spec 5.7).
+// Trailing ASCII punctuation is trimmed first, because real text writes
+// Codex는, and 서비스가. and the particle is then not the last character. Only
+// trailing punctuation: anything inside the token is part of it, and unicode61
+// would split there anyway.
 func deriveParticle(d doc) string {
 	for _, leaf := range d.leaves {
-		for _, run := range hangulRun.FindAllString(leaf, -1) {
-			r := []rune(run)
-			for _, p := range particles {
-				pr := []rune(p)
-				if len(r) >= len(pr)+2 && string(r[len(r)-len(pr):]) == p {
-					return string(r[:len(r)-len(pr)])
-				}
+		for _, tok := range strings.Fields(leaf) {
+			tok = strings.TrimRightFunc(tok, func(r rune) bool {
+				return r < utf8.RuneSelf && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+			})
+			if m := particleStem.FindStringSubmatch(tok); m != nil {
+				return m[1]
 			}
 		}
 	}
 	return ""
+}
+
+// particleStemShapes counts how many documents derive a particle stem of each
+// shape. Both shapes are spec 5.7's, and the Latin one is the measured case
+// that makes per-token expansion load-bearing, so a run where it contributes
+// nothing is a run where that case went ungated.
+func particleStemShapes(docs []doc) (latin, hangul int) {
+	for _, d := range docs {
+		stem := deriveParticle(d)
+		if stem == "" {
+			continue
+		}
+		if r := []rune(stem)[0]; r < utf8.RuneSelf {
+			latin++
+		} else {
+			hangul++
+		}
+	}
+	return latin, hangul
+}
+
+// TestDeriveParticleStems pins [deriveParticle] to exact stems, because the
+// gate cannot: before T5's expansion every particle query misses, so a
+// derivation that produced the wrong stem and one that produced the right one
+// look identical there.
+//
+// Every input is invented. The 의도적으로 row is the one that matters most: a
+// greedy stem quantifier splits it as 의도적으 + 로, which is a stem no reader
+// would ask for, and nothing else in this package notices.
+func TestDeriveParticleStems(t *testing.T) {
+	for _, tc := range []struct{ leaf, want string }{
+		{"Codex는 하나의 토큰이다", "Codex"},       // spec 5.7's measured Latin case
+		{"fixturebot이 응답했다", "fixturebot"}, // the fixtures' own shape
+		{"서비스가 시작", "서비스"},                 // Hangul stem, one-syllable particle
+		{"의도적으로 끊었다", "의도적"},               // two-syllable particle, not 으 + 로
+		{"프로젝트에서 찾는다", "프로젝트"},             // 에서 before 에
+		{"Codex는, 그리고", "Codex"},           // trailing ASCII punctuation
+		{"relay-v2를 재시작", "v2"},            // a digit-carrying Latin run
+		{"종이 한 장", ""},                     // a one-syllable stem is not a candidate
+		{"nothing to strip here", ""},      // no particle anywhere
+	} {
+		t.Run(tc.leaf, func(t *testing.T) {
+			if got := deriveParticle(doc{leaves: []string{tc.leaf}}); got != tc.want {
+				t.Errorf("deriveParticle(%q) = %q, want %q", tc.leaf, got, tc.want)
+			}
+		})
+	}
 }
 
 // deriveTwoTokens takes two adjacent whitespace-separated tokens, each at least
@@ -187,19 +252,26 @@ func deriveCamelCase(d doc) string {
 	return best[:bestCut]
 }
 
+// humpsBeforeCut is how many humps the query keeps: "cut after its second
+// hump", so two. It is deliberately a separate constant from [camelMinHumps],
+// which happens to be one more today. The floor decides which identifiers
+// qualify and the cut decides where a query ends; moving one must not silently
+// move the other.
+const humpsBeforeCut = 2
+
 // humpsOf counts an identifier's humps and returns the byte offset the query is
-// cut at - the start of the third hump, which is what "cut after the second"
-// means. [camelWord] guarantees the match starts lower case, so the
-// identifier's own start is hump one and every uppercase letter opens another.
+// cut at - where the hump after the last kept one begins. [camelWord]
+// guarantees the match starts lower case, so the identifier's own start is hump
+// one and every uppercase letter opens another.
 //
-// cut is len(id) for an identifier with fewer than three humps, so a caller
-// that ignores the count still gets the whole identifier rather than a panic.
+// cut is len(id) for an identifier with too few humps to cut, so a caller that
+// ignores the count still gets the whole identifier rather than a panic.
 func humpsOf(id string) (humps, cut int) {
 	humps, cut = 1, len(id)
 	for i, r := range id {
 		if r >= 'A' && r <= 'Z' {
 			humps++
-			if humps == camelMinHumps {
+			if humps == humpsBeforeCut+1 {
 				cut = i
 			}
 		}
@@ -211,6 +283,12 @@ func humpsOf(id string) (humps, cut int) {
 // that has one with an extension. Windows and POSIX separators both count, and
 // only the basename leaves this function - a corpus path is an absolute path
 // under the user's directory in 900 of 902 captures (I-10, spec 7.5).
+//
+// A basename keeps whatever punctuation [baseWithExt] admits, and under
+// unicode61 a dot and a hyphen both split, so this class reaches MATCH as
+// several tokens rather than one. That is the phrase path and it is why the
+// class exists; before T5 quotes each token it is also how a basename becomes
+// an FTS5 syntax error rather than a miss, which is the louder failure.
 func derivePathBasename(d doc) string {
 	for _, leaf := range d.leaves {
 		for _, tok := range strings.Fields(leaf) {
@@ -236,13 +314,18 @@ type candidate struct {
 // candidatesFor returns up to [maxDocsPerClass] of the documents that carry a
 // candidate for c, and how many carried one in total.
 //
-// The sample is spread over the candidates - every floor(M/N)-th of them, or
+// The sample is spread over the candidates - index i*M/N for i in 0..N-1, or
 // all of them when there are no more than N - rather than taken from the front,
 // and this is the one place every class gets it. A corpus file name begins with
 // the host, the event and the capture timestamp, so sorted order groups a
 // session together: the first 25 of 901 were 25 captures of one session, with
-// one transcript_path basename between them. Stepping spans sessions and stays
-// mechanical - same corpus, same 25 documents, every run.
+// one transcript_path basename between them.
+//
+// i*M/N rather than a floor(M/N) step, which is what this did first: with
+// M = 49 and N = 25 the step is 1 and the sample is indices 0 to 24, half the
+// list, with the whole tail unreachable. Multiplying first reaches index 47.
+// Both are exact integer arithmetic, so the same corpus samples the same
+// documents every run.
 func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
 	var all []candidate
 	for _, d := range docs {
@@ -253,13 +336,41 @@ func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
 	if len(all) <= maxDocsPerClass {
 		return all, len(all)
 	}
-	// step is at least 1 here, and the last index taken is
-	// (N-1)*floor(M/N) < M, so this cannot walk off the end.
-	step := len(all) / maxDocsPerClass
-	for i := 0; len(sample) < maxDocsPerClass; i += step {
-		sample = append(sample, all[i])
+	// The largest index is (N-1)*M/N, which is below M for every M > N, so
+	// this cannot walk off the end.
+	for i := range maxDocsPerClass {
+		sample = append(sample, all[i*len(all)/maxDocsPerClass])
 	}
 	return sample, len(all)
+}
+
+// TestCandidateSampleSpansTheList pins [candidatesFor]'s spread, which the gate
+// itself cannot show: over this corpus a floor(M/N) step and an i*M/N index
+// pick the same 25 documents, and they diverge only when M is not a multiple of
+// N. 49 is the smallest awkward case worth naming - a step of 1 stops at index
+// 24 and leaves the whole second half unreachable.
+func TestCandidateSampleSpansTheList(t *testing.T) {
+	name := class{name: "name", want: 1, derive: func(d doc) string { return d.name }}
+	docs := make([]doc, 49)
+	for i := range docs {
+		docs[i] = doc{name: strconv.Itoa(i)}
+	}
+
+	sample, total := candidatesFor(name, docs)
+	if total != len(docs) {
+		t.Errorf("total = %d, want %d", total, len(docs))
+	}
+	if len(sample) != maxDocsPerClass {
+		t.Fatalf("sampled %d documents, want %d", len(sample), maxDocsPerClass)
+	}
+	// 24*49/25 = 47, two short of the end and 23 past where a step of 1 stops.
+	if got := []string{sample[0].name, sample[len(sample)-1].name}; !slices.Equal(got, []string{"0", "47"}) {
+		t.Errorf("sample runs %v, want from %q to %q", got, "0", "47")
+	}
+
+	if sample, total := candidatesFor(name, docs[:maxDocsPerClass]); len(sample) != total || total != maxDocsPerClass {
+		t.Errorf("with M == N, sampled %d of %d, want all %d", len(sample), total, maxDocsPerClass)
+	}
 }
 
 // TestPhase4Gate is spec 8's Phase 4 gate: known-item retrieval, gated per
@@ -276,9 +387,9 @@ func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
 // and the number it produces is what T4 uses to choose between indexing the raw
 // payload and indexing the string leaves.
 //
-// Written before internal/store creates events_fts, so today every subtest
-// fails with "no such table: events_fts" behind its own class name. A gate
-// written after the thing it gates is a gate shaped to pass.
+// It was written before internal/store created events_fts, when every subtest
+// failed with "no such table" behind its own class name. A gate written after
+// the thing it gates is a gate shaped to pass.
 //
 //	go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/
 func TestPhase4Gate(t *testing.T) {
@@ -292,7 +403,9 @@ func TestPhase4Gate(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			docs := mode.load(t) // corpus skips when absent
 			db := ingestAll(t, docs)
-			t.Logf("%s: %d documents ingested", mode.name, len(docs))
+			latin, hangul := particleStemShapes(docs)
+			t.Logf("%s: %d documents ingested; particle stems: %d Latin, %d Hangul",
+				mode.name, len(docs), latin, hangul)
 
 			for _, c := range classes {
 				t.Run(c.name, func(t *testing.T) {
@@ -345,7 +458,10 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 
 	slices.Sort(ranks)
 	if len(ranks) > 0 {
-		t.Logf("%s / %s: rank median %d, worst %d over %d found (not gated)",
+		// Upper median on an even count - ranks[n/2], not the mean of the
+		// two middle values. Named rather than averaged because a rank is
+		// a position and half a position is not one.
+		t.Logf("%s / %s: rank upper median %d, worst %d over %d found (not gated)",
 			mode, c.name, ranks[len(ranks)/2], ranks[len(ranks)-1], len(ranks))
 	}
 	if got := float64(found) / float64(len(cands)); got < c.want {
@@ -366,14 +482,21 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // The precondition is asserted first and is not decoration: when the leaf count
 // reaches the document count the bound is the whole corpus, and an index that
 // matched everything would pass.
+//
+// Two assertions follow it, and the second is not implied by the first. A count
+// bound alone is satisfied by an index that returns the right number of the
+// wrong documents - swap one hit that carries cwd for one that does not and the
+// count is unchanged - so every hit is also required to be a document whose
+// leaves carry the key.
 func gatePrecision(t *testing.T, db *sql.DB, mode string, docs []doc) {
 	t.Helper()
-	var inLeaves int
+	carriesKey := make(map[string]bool, len(docs))
 	for _, d := range docs {
 		if d.hasLeaf(precisionKey) {
-			inLeaves++
+			carriesKey[d.id] = true
 		}
 	}
+	inLeaves := len(carriesKey)
 	t.Logf("%s / precision: %q is in a string leaf of %d of %d documents", mode, precisionKey, inLeaves, len(docs))
 	if inLeaves >= len(docs) {
 		t.Fatalf("%s / precision: %q is in a leaf of %d of %d documents; the bound is the whole set and "+
@@ -388,5 +511,15 @@ func gatePrecision(t *testing.T, db *sql.DB, mode string, docs []doc) {
 		t.Errorf("%s / precision: %q matched %d documents, want at most %d - the documents that carry it in a "+
 			"string leaf. A key matching more than that is the index storing structure as content",
 			mode, precisionKey, len(hits), inLeaves)
+	}
+	var strangers int
+	for _, h := range hits {
+		if !carriesKey[h.ID] {
+			strangers++
+		}
+	}
+	if strangers > 0 {
+		t.Errorf("%s / precision: %d of the %d events %q matched carry it in no string leaf; the index matched "+
+			"them on structure, not on content", mode, strangers, len(hits), precisionKey)
 	}
 }

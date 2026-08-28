@@ -37,10 +37,12 @@ type doc struct {
 	id      string
 }
 
-// hasLeaf reports whether any of d's leaves contains want, case-insensitively;
-// want is lower-cased already, since only the leaf is folded. It is the
-// precision assertion's denominator, one document at a time.
+// hasLeaf reports whether any of d's leaves contains want, case-insensitively.
+// Both sides are folded, so the answer does not depend on the caller having
+// remembered to pass a lower-case needle. It is the precision assertion's
+// denominator, one document at a time.
 func (d doc) hasLeaf(want string) bool {
+	want = strings.ToLower(want)
 	for _, l := range d.leaves {
 		if strings.Contains(strings.ToLower(l), want) {
 			return true
@@ -144,8 +146,12 @@ func corpusDocs(t testing.TB) []doc {
 		if err := json.Unmarshal(raw, &capture); err != nil {
 			t.Fatalf("parse %s: %v", e.Name(), err)
 		}
-		if len(capture.Payload) == 0 {
-			continue
+		// A capture with no payload, or a null one, is a corrupt corpus
+		// file rather than a document to pass over. Skipping it silently
+		// shrinks the gate's document set by an amount nothing reports,
+		// so it fails here the way a parse error already does.
+		if len(capture.Payload) == 0 || string(capture.Payload) == "null" {
+			t.Fatalf("%s carries no payload to ingest", e.Name())
 		}
 		var head struct {
 			SessionID string `json:"session_id"`

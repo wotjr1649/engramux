@@ -11,5 +11,5 @@
   "tool_input": {
     "command": "echo fixture-two && parseFixtureRow --limit 3"
   },
-  "tool_response": "fixture-two 문자열로 돌려준 응답을 담았다\n"
+  "tool_response": "fixture-two fixturebot이 문자열로 응답을 돌려준다\n"
 }
