@@ -28,9 +28,15 @@ func cli(args []string) int {
 		return status()
 	case "cells":
 		return cells()
+	case "doctor":
+		return doctor(args[1:])
+	case "register":
+		return register(args[1:])
+	case "unregister":
+		return unregister(args[1:])
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux status | engramux cells")
+		warn("usage: engramux status | cells | doctor | register | unregister")
 		return 2
 	}
 }

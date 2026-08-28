@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,11 +14,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/schedule"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
 
@@ -479,6 +483,301 @@ func TestTheCellBreakdownTravelsOverThePipe(t *testing.T) {
 	}
 	if !strings.Contains(down.stderr, `\\.\pipe\engramux.v1`) {
 		t.Errorf("the failure does not say what could not be reached:\n%s", down.stderr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Gate 6: doctor's two halves, which do not need the same things
+// ---------------------------------------------------------------------------
+
+// scheduledProbe registers a scheduled task under a name no real install uses,
+// and removes it when the test ends - including when the test fails partway
+// through, which is the only reason this is a helper rather than four lines.
+//
+// The suffix is random rather than fixed: two runs overlapping would otherwise
+// fight over one registration and the loser would delete the winner's task.
+func scheduledProbe(t *testing.T, exe string) string {
+	t.Helper()
+	name := `\Engramux-test-` + rand.Text()
+	t.Cleanup(func() {
+		// Its own context: t.Context is already cancelled when cleanups
+		// run, and a cleanup that cannot reach schtasks would leave a
+		// scheduled task on the developer's machine.
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := schedule.Unregister(ctx, name); err != nil {
+			t.Errorf("unregister %s: %v - it is still on this machine", name, err)
+		}
+	})
+	if err := schedule.Register(t.Context(), name, exe); err != nil {
+		t.Fatalf("register %s: %v", name, err)
+	}
+	return name
+}
+
+// TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp is spec 8's Phase 3 [manual]
+// gate turned into an [auto] one, and spec 10's first open question answered by
+// the code rather than by a sentence.
+//
+// `doctor` has two halves with different availability: the task registration is
+// a Windows query that needs no service at all, and the counts are only
+// reachable over the pipe (I-07 leaves no other way to read them). So the
+// service being down does not make the command useless, and this asserts both
+// halves twice - once with the service up, once with it stopped.
+//
+// The settings are asserted by value: PT0S rather than "an ExecutionTimeLimit
+// element exists", PT1M and 3 rather than "a restart policy". LeastPrivilege is
+// the one value Windows never sends back - it normalises away an element equal
+// to its default - so seeing it printed is the readback treating absence as the
+// default rather than as a fault.
+//
+// It is pointed at a test-only registration. A test must never touch the name a
+// real install owns, and `doctor` takes the name for exactly that reason.
+func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
+	local := t.TempDir()
+	svc := start(t, local)
+	name := scheduledProbe(t, serviceBin)
+
+	// Everything spec 5.5 fixes, spelled as spec 5.5 spells it, plus the
+	// principal: the interactive user's token, not SYSTEM and not elevated.
+	registration := []string{
+		name,
+		serviceBin,
+		"PT0S",
+		"IgnoreNew",
+		"3 times, one every PT1M",
+		"InteractiveToken",
+		"LeastPrivilege",
+	}
+
+	up := cli(t, "doctor", name)
+	if up.exit != 0 {
+		t.Fatalf("engramux doctor exited %d with everything in place, want 0:\n%s\n%s", up.exit, up.stdout, up.stderr)
+	}
+	for _, want := range append(registration, filepath.Join(local, "engramux", "engramux.db")) {
+		if !strings.Contains(up.stdout, want) {
+			t.Errorf("engramux doctor did not report %q:\n%s", want, up.stdout)
+		}
+	}
+
+	svc.stop(t)
+
+	down := cli(t, "doctor", name)
+	if down.exit == 0 {
+		t.Errorf("engramux doctor exited 0 with no service running:\n%s", down.stdout)
+	}
+	// Still reports the half that never needed the service. A command that
+	// gave up at the first failure would print none of this, and this is the
+	// moment somebody runs it.
+	for _, want := range registration {
+		if !strings.Contains(down.stdout, want) {
+			t.Errorf("engramux doctor stopped reporting %q once the service was down:\n%s", want, down.stdout)
+		}
+	}
+	// And says plainly what it could not read, by name.
+	if !strings.Contains(down.stdout, `\\.\pipe\engramux.v1`) {
+		t.Errorf("engramux doctor does not say what it could not reach:\n%s", down.stdout)
+	}
+}
+
+// TestRegisterAndUnregisterFromTheCommandLine is provisioning at the level a
+// user meets it, and gate 4 - unregister leaves nothing behind, and running it
+// twice is not an error - one process out from the package that implements it.
+//
+// It is also the only thing that exercises how `register` finds the binary it
+// registers. TestMain builds the two into one directory under the names they
+// ship as, which is exactly the arrangement that lookup resolves against: a
+// registration pointing anywhere else would be a task that fails silently at
+// every logon.
+func TestRegisterAndUnregisterFromTheCommandLine(t *testing.T) {
+	name := `\Engramux-test-` + rand.Text()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := schedule.Unregister(ctx, name); err != nil {
+			t.Errorf("unregister %s: %v - it is still on this machine", name, err)
+		}
+	})
+
+	if res := cli(t, "register", name); res.exit != 0 {
+		t.Fatalf("engramux register exited %d, want 0:\n%s", res.exit, res.stderr)
+	}
+	got, err := schedule.Query(t.Context(), name)
+	if err != nil {
+		t.Fatalf("query %s: %v", name, err)
+	}
+	if got.Command != serviceBin {
+		t.Errorf("the registered command is %q, want the service binary beside the CLI %q", got.Command, serviceBin)
+	}
+
+	// Registering twice is spec 5.5's upgrade path - drain, stop, replace,
+	// start - where the binary moves and the user runs this again.
+	if res := cli(t, "register", name); res.exit != 0 {
+		t.Errorf("engramux register over an existing registration exited %d, want 0:\n%s", res.exit, res.stderr)
+	}
+
+	if res := cli(t, "unregister", name); res.exit != 0 {
+		t.Fatalf("engramux unregister exited %d, want 0:\n%s", res.exit, res.stderr)
+	}
+	if _, err := schedule.Query(t.Context(), name); !errors.Is(err, schedule.ErrNotRegistered) {
+		t.Errorf("the task still answers a query after unregister: %v", err)
+	}
+	// Twice is not an error, so that nobody has to remember whether they
+	// installed it. The cleanup above makes it three times.
+	if res := cli(t, "unregister", name); res.exit != 0 {
+		t.Errorf("engramux unregister a second time exited %d, want 0:\n%s", res.exit, res.stderr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Gate 7: spec 8's Phase 3 [auto] gate - 30 concurrent starts leave one service
+// ---------------------------------------------------------------------------
+
+// TestThirtyConcurrentStartsLeaveOneService is I-09 at the process level.
+//
+// internal/pipe already measures ListenPipe's exclusivity at 20 rounds x 30
+// processes, but that is the listener on its own. This is the service binary,
+// which also opens the database exclusively (I-07) - so it is also the test
+// that says *which* resource refuses the other 29. "database is locked" would
+// produce exactly one survivor too, and would be a confusing way to tell a
+// person their service is already running (spec 5.4, and the startup order in
+// internal/service).
+//
+// All 30 are released from one barrier so that they genuinely overlap. A loop
+// that started them one at a time would leave the first one holding the pipe
+// before the second was created, and would prove nothing about a race - the
+// spread below is logged and bounded so that a change back to that shape fails
+// here rather than passing quietly.
+func TestThirtyConcurrentStartsLeaveOneService(t *testing.T) {
+	const n = 30
+	local := t.TempDir()
+	requirePipeFree(t)
+
+	type instance struct {
+		cmd *exec.Cmd
+		out *bytes.Buffer
+	}
+	insts := make([]*instance, n)
+	for i := range insts {
+		var out bytes.Buffer
+		//nolint:gosec // G204: serviceBin is the binary TestMain built
+		cmd := exec.CommandContext(t.Context(), serviceBin)
+		cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+		cmd.Stdout, cmd.Stderr = &out, &out
+		insts[i] = &instance{cmd: cmd, out: &out}
+	}
+
+	// One goroutine per instance, all parked on gate, so that the 30
+	// CreateProcess calls are issued together rather than in sequence.
+	var ready, launched sync.WaitGroup
+	ready.Add(n)
+	launched.Add(n)
+	gate := make(chan struct{})
+	startErr := make([]error, n)
+	startedAt := make([]time.Time, n)
+	for i, in := range insts {
+		go func() {
+			defer launched.Done()
+			ready.Done()
+			<-gate
+			startErr[i] = in.cmd.Start()
+			startedAt[i] = time.Now()
+		}()
+	}
+	ready.Wait()
+	close(gate)
+	launched.Wait()
+
+	for i := range insts {
+		if startErr[i] != nil {
+			t.Fatalf("instance %d did not start at all: %v", i, startErr[i])
+		}
+	}
+	first, last := startedAt[0], startedAt[0]
+	for _, at := range startedAt[1:] {
+		if at.Before(first) {
+			first = at
+		}
+		if at.After(last) {
+			last = at
+		}
+	}
+	spread := last.Sub(first)
+	t.Logf("30 starts issued over %s", spread)
+	if spread > 10*time.Second {
+		t.Fatalf("the 30 starts were spread over %s, so they did not race and this test proves nothing", spread)
+	}
+
+	type exit struct {
+		i   int
+		err error
+	}
+	done := make(chan exit, n)
+	for i, in := range insts {
+		go func() { done <- exit{i, in.cmd.Wait()} }()
+	}
+
+	// Nothing survives this test. The pipe name is fixed (spec 5.2), so a
+	// process left running would fail the *next* test in this package with a
+	// diagnosis pointing at a development service that does not exist.
+	consumed := 0
+	t.Cleanup(func() {
+		for _, in := range insts {
+			if in.cmd.Process != nil {
+				_ = in.cmd.Process.Kill()
+			}
+		}
+		for consumed < n {
+			select {
+			case <-done:
+				consumed++
+			case <-time.After(60 * time.Second):
+				t.Errorf("%d of %d instances never exited", n-consumed, n)
+				return
+			}
+		}
+	})
+
+	losers := map[int]error{}
+	deadline := time.After(120 * time.Second)
+	for len(losers) < n-1 {
+		select {
+		case e := <-done:
+			consumed++
+			losers[e.i] = e.err
+		case <-deadline:
+			t.Fatalf("%d of the %d instances are still running: the singleton did not hold", n-len(losers), n)
+		}
+	}
+
+	// One is not none. A build where every instance refused itself would
+	// satisfy every assertion below and leave nothing capturing anything.
+	select {
+	case e := <-done:
+		consumed++
+		t.Fatalf("every instance exited, so no service is running (instance %d: %v)\n%s",
+			e.i, e.err, insts[e.i].out.Bytes())
+	case <-time.After(2 * time.Second):
+	}
+	if !servingOK(t) {
+		t.Errorf("the surviving instance does not answer a Status request on %s - it is a process, not a service", pipeName(t))
+	}
+
+	for i, err := range losers {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Errorf("instance %d returned %v, want a non-zero exit", i, err)
+			continue
+		}
+		// Reading the buffer is safe: this instance's Wait has returned,
+		// so os/exec's copying goroutine has finished with it.
+		said := insts[i].out.String()
+		if !strings.Contains(said, `\\.\pipe\engramux.v1`) {
+			t.Errorf("instance %d exited %d without naming the pipe:\n%s", i, exitErr.ExitCode(), said)
+		}
+		if strings.Contains(said, "database is locked") {
+			t.Errorf("instance %d was refused by the database rather than the pipe:\n%s", i, said)
+		}
 	}
 }
 
