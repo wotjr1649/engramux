@@ -9,7 +9,7 @@
   "tool_use_id": "call_fixture0000000000000002",
   "tool_name": "shell",
   "tool_input": {
-    "command": "echo fixture-two"
+    "command": "echo fixture-two && parseFixtureRow --limit 3"
   },
-  "tool_response": "fixture-two stdout, as a bare string\n"
+  "tool_response": "fixture-two 문자열로 돌려준 응답을 담았다\n"
 }

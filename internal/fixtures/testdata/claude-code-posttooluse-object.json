@@ -12,10 +12,10 @@
   "tool_use_id": "toolu_fixture000000000000004",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "echo fixture-four"
+    "command": "echo fixture-four && fixtureCacheWarmup --retry 2"
   },
   "tool_response": {
-    "stdout": "fixture-four stdout\n",
+    "stdout": "픽스처 저장소가 응답했다\nfixture-four stdout\n",
     "stderr": "fixture-four stderr\n",
     "interrupted": false,
     "isImage": false,

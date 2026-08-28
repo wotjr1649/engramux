@@ -9,16 +9,16 @@
   "tool_use_id": "call_fixture0000000000000003",
   "tool_name": "shell",
   "tool_input": {
-    "command": "echo fixture-three"
+    "command": "echo fixture-three && renderFixtureList --limit 2"
   },
   "tool_response": [
     {
       "type": "text",
-      "text": "fixture-three element one"
+      "text": "fixture-three 인덱스 요소가 도착했다"
     },
     {
       "type": "text",
-      "text": "fixture-three element two"
+      "text": "fixture-three 목록에 담긴 두 번째 요소"
     }
   ]
 }
