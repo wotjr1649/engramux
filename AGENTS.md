@@ -25,7 +25,13 @@ CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.e
 go test -p 1 ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
 ./scripts/race.sh            # test suite under the race detector
+go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
 ```
+
+`TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
+an empty directory. It is in `internal/spool` because clause 3 kills a child that has to be a copy
+of the running test binary, and that package's `TestMain` is what turns a re-executed copy into
+one.
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.
@@ -103,6 +109,7 @@ row on its own, delete the row — the test is the better owner.
 | The race detector is green and you are not sure it is looking | It is not enough that `-race` links. Write a deliberate unsynchronised `x++` across goroutines and confirm it fails, then confirm the mutex-guarded version stays quiet. A detector that reports nothing and a detector that is not running look identical |
 | A tool-output parser works for one host and silently misreads the other | In the captured corpus `tool_response` is an object from Claude Code but a string or an array from Codex (spec §4.4). Those are the shapes observed, not a contract the hosts promise — preserve a shape you do not recognise instead of assuming it away |
 | `t.TempDir()` cleanup fails on Windows | An open handle. Close the database and every listener before the test ends, including the WAL sidecar files |
+| A child that should sit still until you kill it dies on its own instead — and the test passes | `select {}` makes that goroutine the only one, so Go's deadlock detector runs and the child prints `fatal error: all goroutines are asleep - deadlock!` while your `TerminateProcess` is still in flight. It does not fire every run, which is worse than always: the kill is sometimes not what ended the process, and the row count looks identical either way. Park the child in a read syscall on a pipe the parent holds open and never writes to — an M stuck in a syscall keeps the detector from running — and assert the exit code is exactly 1 so you know the kill is what ended it. `docs/evidence/crash` is a standalone binary, not a test binary, and is unaffected |
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
 | A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
 | Redaction produces JSON that no longer parses | A `\S+` token pattern swallows the closing quote and brace. The payload must stay valid JSON (spec §6) |

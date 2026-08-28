@@ -141,6 +141,74 @@ func openMigrated(t *testing.T, path string) *sql.DB {
 	return db
 }
 
+// killAfterCommit is gate clause 3's steps 1 to 3, and the assertions that
+// make "killed" more than a hope.
+//
+// It re-executes this test binary against the database at dbPath, waits for the
+// child to say its COMMIT returned, and kills it with TerminateProcess before
+// any ACK can be written. It returns once the child is gone; Windows releases a
+// killed process's handles asynchronously, so the caller reopens the database
+// with openWithPatience rather than immediately.
+//
+// Two assertions decide whether the kill is what ended the child, and without
+// them the test passes just as happily when the child ended itself first -
+// which is a different experiment with the same row count, and the measured way
+// it happens is the runtime's deadlock detector rather than anything a reader
+// would look for.
+//
+// TerminateProcess against a process that has already exited fails with
+// ERROR_ACCESS_DENIED, so a nil error from Kill means there was something alive
+// to kill. And Go's Kill terminates with an exit code of 1, where every way this
+// child can end itself uses another: 2 for a reported failure or a Go fatal
+// error, 3 for reaching the end of its own function. Both were confirmed by
+// making the child exit 9 on its own: Kill became "TerminateProcess: Access is
+// denied".
+func killAfterCommit(t *testing.T, dbPath, id string) {
+	t.Helper()
+
+	//nolint:gosec // G204: os.Args[0] is this test binary, and the two
+	// environment values are this test's own literals.
+	cmd := exec.CommandContext(t.Context(), os.Args[0])
+	cmd.Env = append(os.Environ(), childDBEnv+"="+dbPath, childIDEnv+"="+id)
+	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("child stdout: %v", err)
+	}
+	// Opened and never written to. It is what the child parks in a read
+	// syscall on, so that it is alive and holding the exclusive lock when
+	// the kill arrives.
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatalf("child stdin: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the child: %v", err)
+	}
+	sc := bufio.NewScanner(stdout)
+	line := ""
+	if sc.Scan() {
+		line = sc.Text()
+	}
+
+	// os/exec's Kill is TerminateProcess on Windows: no defers run, nothing
+	// is closed, nothing is flushed, and no ACK is written.
+	killErr := cmd.Process.Kill()
+	waitErr := cmd.Wait()
+	if line != committedLine {
+		t.Fatalf("child said %q, want %q (scan %v, wait %v)", line, committedLine, sc.Err(), waitErr)
+	}
+	if killErr != nil {
+		t.Fatalf("kill the child: %v", killErr)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(waitErr, &exitErr) {
+		t.Fatalf("child wait = %v, want an *exec.ExitError from the kill", waitErr)
+	}
+	if code := exitErr.ExitCode(); code != 1 {
+		t.Fatalf("child exit code = %d, want 1 - it did not die of TerminateProcess", code)
+	}
+}
+
 // countEvents returns the number of rows in events.
 func countEvents(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
@@ -219,61 +287,8 @@ func TestAKillBetweenCommitAndTheAckReplaysExactlyOnce(t *testing.T) {
 		t.Fatalf("seed close: %v", err)
 	}
 
-	// Steps 1-2.
-	//nolint:gosec // G204: os.Args[0] is this test binary, and the two
-	// environment values are this test's own literals.
-	cmd := exec.CommandContext(t.Context(), os.Args[0])
-	cmd.Env = append(os.Environ(), childDBEnv+"="+dbPath, childIDEnv+"="+id)
-	cmd.Stderr = os.Stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("child stdout: %v", err)
-	}
-	// Opened and never written to. It is what the child parks in a read
-	// syscall on, so that it is alive and holding the exclusive lock when
-	// the kill arrives.
-	if _, err := cmd.StdinPipe(); err != nil {
-		t.Fatalf("child stdin: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start the child: %v", err)
-	}
-	sc := bufio.NewScanner(stdout)
-	line := ""
-	if sc.Scan() {
-		line = sc.Text()
-	}
-
-	// Step 3. os/exec's Kill is TerminateProcess on Windows: no defers run,
-	// nothing is closed, nothing is flushed, and no ACK is written.
-	killErr := cmd.Process.Kill()
-	waitErr := cmd.Wait()
-	if line != committedLine {
-		t.Fatalf("child said %q, want %q (scan %v, wait %v)", line, committedLine, sc.Err(), waitErr)
-	}
-	// These two together are what make "killed" more than a hope. Without
-	// them the test passes just as happily when the child ends itself before
-	// the kill lands, which is a different experiment with the same row
-	// count - and the measured way that happens is the runtime's deadlock
-	// detector, not anything a reader would look for.
-	//
-	// TerminateProcess against a process that has already exited fails with
-	// ERROR_ACCESS_DENIED, so a nil killErr means there was something alive
-	// to kill. Both were confirmed by making the child exit 9 on its own:
-	// killErr became "TerminateProcess: Access is denied".
-	if killErr != nil {
-		t.Fatalf("kill the child: %v", killErr)
-	}
-	// And Go's Kill terminates with an exit code of 1, where every way this
-	// child can end itself uses another: 2 for a reported failure or a Go
-	// fatal error, 3 for reaching the end of its own function.
-	var exitErr *exec.ExitError
-	if !errors.As(waitErr, &exitErr) {
-		t.Fatalf("child wait = %v, want an *exec.ExitError from the kill", waitErr)
-	}
-	if code := exitErr.ExitCode(); code != 1 {
-		t.Fatalf("child exit code = %d, want 1 - it did not die of TerminateProcess", code)
-	}
+	// Steps 1-3.
+	killAfterCommit(t, dbPath, id)
 
 	// Step 4. This is what the relay does when its post-dial budget expires
 	// with no valid ACK: the same id, not a fresh one (I-05).
