@@ -243,6 +243,17 @@ func (e *event) settle() {
 // cost the relay a regex compile per hook event in a process that lives about
 // 11 ms (spec 5.1).
 //
+// Claude Code's hook reference was checked rather than assumed, and it closes
+// the same door from the other side: hook stderr reaches the persisted session
+// transcript ONLY on a non-zero exit - exit 2 in full, any other non-zero exit
+// as its first line - while on exit 0 it goes to the debug log and nowhere
+// else, and only when debug logging is on.
+//
+// I-03 makes this process exit 0 on every path, including panic. So the
+// invariant that keeps the relay from blocking its host is also what keeps
+// these lines out of a file on disk. The two are the same guarantee, which is
+// worth knowing before anyone "improves" either one.
+//
 // Two things would invalidate it, and either one means this has to change
 // rather than be re-argued:
 //

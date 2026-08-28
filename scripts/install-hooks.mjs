@@ -34,15 +34,17 @@ import { join, dirname } from 'node:path'
 // handles the intersection and nothing else.
 // The value is the `matcher`, or null to omit the key.
 //
-// This is not a style choice and getting it wrong loses captures silently. Read
-// off two installed plugins that already work on this machine rather than
-// guessed: claude-mem uses `matcher: "*"` on PostToolUse to see every tool, and
-// omits the key entirely on Stop and UserPromptSubmit, which have no tool to
-// match. SessionStart is the awkward one - there the matcher filters the START
-// REASON (claude-mem uses "startup|clear|compact" for Claude Code and
-// "startup|resume" for Codex), so an omitted key might mean every reason or no
-// reason. "*" is used there for the same reason it is used on the tool events:
-// asking for everything explicitly beats relying on a default nobody documented.
+// Checked against Claude Code's hook reference rather than inferred: `"*"`,
+// `""` and an omitted key are documented as EQUIVALENT - all three match every
+// occurrence - so nothing here is load-bearing and no event needs a matcher to
+// fire at all. `"*"` is written on the events whose matcher would otherwise
+// filter something (tool name on PreToolUse/PostToolUse/PermissionRequest,
+// start reason on SessionStart, end reason on SessionEnd, agent type on the
+// Subagent pair, manual/auto on the Compact pair) purely so a reader can see
+// that capturing everything is the intent and not an oversight. `Stop` accepts
+// the field but has no matcher support whatsoever, so it is omitted there.
+//
+// All eleven names below appear verbatim in the documented lifecycle table.
 const EVENTS = {
   SessionStart: '*',
   SessionEnd: null,
@@ -169,10 +171,21 @@ if (!remove) {
   }
 }
 
-// Claude Code: command + args, exec form, no shell (spec 4.2).
+// Claude Code: command PLUS args, which is what selects exec form - the binary
+// is spawned directly, no shell, no tokenization.
+//
+// `args` is empty and must still be present. `command` on its own is SHELL
+// form, and on Windows that shell is Git Bash: it would spawn a shell for every
+// hook event, which throws away the entire reason this relay is a Go binary
+// (4.66 ms to start, against 33.5 ms for bare node), and it would route the
+// command string through the MSYS path conversion this repository already lists
+// as a gotcha. The relay takes no arguments by design - any argument at all
+// puts cmd/engramux on its CLI path instead of its relay path - so the array is
+// empty rather than carrying a subcommand.
 install(CLAUDE, 'claude-code', () => ({
   type: 'command',
   command: RELAY.replaceAll('\\', '/'),
+  args: [],
   timeout: TIMEOUT_SECONDS,
   statusMessage: 'engramux capture',
 }), (doc) => (doc.hooks ??= {}))
