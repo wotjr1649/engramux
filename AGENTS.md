@@ -145,6 +145,11 @@ Heredocs collapse `\\` to `\`, which corrupts Windows path literals and Go rune 
 - `docs/superpowers/plans/` — execution order only. Cites the spec, owns no values, restates no
   rules. If a plan and the spec disagree, the spec wins. A plan that proves unexecutable is deleted
   rather than repaired (precedent: `3e5fe8d`).
+- `docs/prompts/` — one work order per session, dated. It carries what the spec and this file
+  cannot: the state of the work when the session opened, and how that session was scoped. **A
+  brief is a record and is never updated** — a stale one is correct, because it says what was
+  true then. Read the newest to start; read an old one only to find out why something was done
+  the way it was. Same rule as everywhere else: no code blocks.
 - `docs/chatgpt/` — archive, superseded in full. Do not read it for current design.
 
 ## Output language
