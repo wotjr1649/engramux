@@ -80,6 +80,10 @@ func TestTheRunLoopCheckpointsWhileItServes(t *testing.T) {
 	if got := sidecarSize(t, dir, "-wal"); got != -1 {
 		t.Errorf("the -wal is %d bytes after a clean shutdown, want it gone", got)
 	}
+	// The DSN keeps this one away rather than the shutdown doing so: with
+	// locking_mode set before the first WAL access there is no wal-index to
+	// remove. internal/store owns that measurement in all three of its
+	// states; this is the service's own end state, asserted where it runs.
 	if got := sidecarSize(t, dir, "-shm"); got != -1 {
 		t.Errorf("the -shm is %d bytes after a clean shutdown, want it gone", got)
 	}
@@ -94,8 +98,8 @@ func TestTheRunLoopCheckpointsWhileItServes(t *testing.T) {
 // spec 5.4's checkpoint on shutdown that a test can decide.
 //
 // Whether the call exists at all is not observable: a clean db.Close
-// checkpoints the WAL and removes it and the wal-index anyway, so the on-disk
-// state after a shutdown is the same with the call and without it - deleting it
+// checkpoints the WAL and removes it anyway, so the on-disk state after a
+// shutdown is the same with the call and without it - deleting it
 // from run() leaves the whole suite green, which was confirmed rather than
 // assumed. What is observable is that it runs at all. It is reached only after
 // the context that started the shutdown has been cancelled, and a checkpoint

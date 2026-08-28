@@ -209,6 +209,89 @@ func killAfterCommit(t *testing.T, dbPath, id string) {
 	}
 }
 
+// sidecarSize returns the size of the database sidecar at path, and -1 when
+// there is no such file. A missing -wal and an empty one are the same thing to
+// a reader; a missing -shm and an empty one are not (spec 5.4).
+func sidecarSize(t *testing.T, path string) int64 {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return -1
+	}
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return fi.Size()
+}
+
+// requireNoSHM asserts that no wal-index file exists beside the database at
+// path.
+func requireNoSHM(t *testing.T, path, when string) {
+	t.Helper()
+	if got := sidecarSize(t, path+"-shm"); got != -1 {
+		t.Errorf("a -shm of %d bytes exists %s, want none (spec 5.4)", got, when)
+	}
+}
+
+// TestReopeningAHotWALCreatesNoSharedMemoryFile is the third of the three -shm
+// states spec 5.4 has to hold in, and the only one that describes production:
+// the service has no shutdown a user can invoke, so every start after the first
+// reopens whatever a kill left behind.
+//
+// It lives in this package rather than in internal/store because the kill is
+// killAfterCommit's, and that harness needs this package's TestMain to turn a
+// re-executed copy of the test binary into the child. A second harness next to
+// the store would be a second copy of the trap killAfterCommit documents.
+//
+// Two assertions come before the one that matters, because a test pointed at
+// the wrong path reports "no -shm" just as happily: the WAL the kill left is
+// not empty, and the row the child committed is readable through the reopen. A
+// reopen over nothing proves nothing.
+func TestReopeningAHotWALCreatesNoSharedMemoryFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "engramux.db")
+	id := idN(1)
+
+	// The child needs a schema to ingest into and it needs the exclusive
+	// lock, so this connection creates the one and lets go of the other.
+	seed, err := openWithPatience(t.Context(), dbPath)
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	if err := store.Migrate(t.Context(), seed); err != nil {
+		t.Fatalf("seed migrate: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("seed close: %v", err)
+	}
+
+	// One event committed, then TerminateProcess. Nothing checkpointed,
+	// nothing closed, no defer ran.
+	killAfterCommit(t, dbPath, id)
+
+	if got := sidecarSize(t, dbPath+"-wal"); got <= 0 {
+		t.Fatalf("the -wal is %d bytes after the kill, so there is no hot WAL to reopen over", got)
+	}
+	requireNoSHM(t, dbPath, "after the kill and before anything reopened the database")
+
+	db, err := openWithPatience(t.Context(), dbPath)
+	if err != nil {
+		t.Fatalf("reopen over the hot WAL: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the reopened database: %v", err)
+		}
+	})
+	requireNoSHM(t, dbPath, "after reopening over the hot WAL")
+
+	if n := countEvents(t, db); n != 1 {
+		t.Fatalf("events after reopening the hot WAL = %d, want the 1 the child committed - "+
+			"nothing was recovered, so nothing was reopened over", n)
+	}
+	requireNoSHM(t, dbPath, "after recovering the hot WAL")
+}
+
 // countEvents returns the number of rows in events.
 func countEvents(t *testing.T, db *sql.DB) int64 {
 	t.Helper()

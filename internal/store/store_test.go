@@ -64,20 +64,22 @@ func fastBusy(t *testing.T, uri string) string {
 }
 
 // TestDSN pins spec 5.4's DSN as one exact string: every pragma, every value,
-// and _txlock=immediate, which is the one setting Open cannot read back. The
-// path goes in as written - a Windows path with backslashes and a drive letter
-// is neither escaped nor rewritten.
+// _txlock=immediate, which is the one setting Open cannot read back, and
+// journal_mode spelled as the driver's own key rather than as a _pragma value,
+// which is what keeps locking_mode(exclusive) ahead of the first WAL access.
+// The path goes in as written - a Windows path with backslashes and a drive
+// letter is neither escaped nor rewritten.
 func TestDSN(t *testing.T) {
 	got := dsn(`D:\Users\example\AppData\Local\engramux\engramux.db`)
 	want := `file:D:\Users\example\AppData\Local\engramux\engramux.db` +
-		`?_pragma=journal_mode(wal)` +
-		`&_pragma=locking_mode(exclusive)` +
+		`?_pragma=locking_mode(exclusive)` +
 		`&_pragma=foreign_keys(1)` +
 		`&_pragma=recursive_triggers(1)` +
 		`&_pragma=synchronous(2)` +
 		`&_pragma=busy_timeout(10000)` +
 		`&_pragma=journal_size_limit(67108864)` +
 		`&_pragma=secure_delete(1)` +
+		`&_journal_mode=wal` +
 		`&_txlock=immediate`
 	if got != want {
 		t.Errorf("dsn()\n got %s\nwant %s", got, want)
@@ -168,19 +170,41 @@ func TestOpenRejectsMisspelledPragma(t *testing.T) {
 }
 
 // TestOpenRejectsPragmaThatDidNotTake is I-11's other half, and the half only
-// readback can catch: `synchronous(9)` is a known pragma name with a value
-// SQLite will not accept. The DSN passes name validation, the open returns nil,
-// and the setting silently stays at 1.
+// readback can catch. Two ways a correctly named setting still ends up wrong,
+// and nothing before the open sees either:
+//
+//   - `synchronous(9)` is a value SQLite will not accept. The DSN passes name
+//     validation, the open returns nil, and the setting silently stays at 1.
+//   - `_journal_mode=truncate` is a value both the driver's enum validator and
+//     SQLite accept. Nothing is wrong with it except that it is not what spec
+//     5.4 asks for, and no name check can tell - the DSN does name
+//     journal_mode. Only the readback can.
+//
+// The second case is here because deleting journal_mode from the readback left
+// the rest of this suite green. It was measured, not assumed: with `if p.name
+// == journalMode { continue }` in verifyPragmas, `go test -p 1 ./...` passed
+// end to end.
 func TestOpenRejectsPragmaThatDidNotTake(t *testing.T) {
-	bogus := strings.Replace(dsn(dbPath(t)), "synchronous(2)", "synchronous(9)", 1)
+	for _, tc := range []struct{ name, from, to string }{
+		{"a value SQLite will not accept", "synchronous(2)", "synchronous(9)"},
+		{"a value SQLite accepts and spec 5.4 does not", journalModeKey + "=wal", journalModeKey + "=truncate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			full := dsn(dbPath(t))
+			bogus := strings.Replace(full, tc.from, tc.to, 1)
+			if bogus == full {
+				t.Fatalf("test setup: the production DSN no longer contains %q: %s", tc.from, full)
+			}
 
-	db, err := open(t.Context(), bogus)
-	if err == nil {
-		closeAt(t, db)
-		t.Fatalf("open(%s) succeeded, want ErrPragmaMismatch", bogus)
-	}
-	if !errors.Is(err, ErrPragmaMismatch) {
-		t.Fatalf("open error = %v, want errors.Is(_, ErrPragmaMismatch)", err)
+			db, err := open(t.Context(), bogus)
+			if err == nil {
+				closeAt(t, db)
+				t.Fatalf("open(%s) succeeded, want ErrPragmaMismatch", bogus)
+			}
+			if !errors.Is(err, ErrPragmaMismatch) {
+				t.Fatalf("open error = %v, want errors.Is(_, ErrPragmaMismatch)", err)
+			}
+		})
 	}
 }
 
@@ -199,6 +223,109 @@ func TestOpenRejectsDSNMissingAPragma(t *testing.T) {
 	if !errors.Is(err, ErrMissingPragma) {
 		t.Fatalf("open error = %v, want errors.Is(_, ErrMissingPragma)", err)
 	}
+}
+
+// TestOpenRejectsADSNThatDoesNotNameJournalMode covers the half of I-11 that
+// had to keep working when journal_mode moved out of the _pragma list. The name
+// check is the only thing that catches a key nobody reads, and both ways of
+// losing journal_mode produce exactly that:
+//
+//   - the parameter deleted outright;
+//   - the driver's key misspelled, which is not an error to anybody. The driver
+//     ignores a key it does not know, SQLite is never told anything, and
+//     journal_mode reads back as whatever the file already was - which for a
+//     database this suite created is `wal`, so readback agrees with production
+//     on a DSN that sets nothing. The subtest measures that rather than
+//     asserting it.
+//
+// The value is the other half and it is no longer this package's problem, which
+// is the one thing the move improves: `_journal_mode=wla` is refused by the
+// driver's own enum validator before a single pragma runs, where
+// `_pragma=journal_mode(wla)` would have been executed verbatim and ignored.
+func TestOpenRejectsADSNThatDoesNotNameJournalMode(t *testing.T) {
+	ctx := t.Context()
+	const shorthand = "&" + journalModeKey + "=wal"
+
+	// Every case below runs against a database that is already in WAL mode,
+	// and that is the whole design of this test. On a database nobody has
+	// opened yet journal_mode reads back as `delete`, so readback rejects a
+	// DSN that sets nothing and the name check looks redundant. On an
+	// existing one it reads back as `wal` - the production value, from the
+	// file rather than from the DSN - and the name check is the only thing
+	// left. The service reopens an existing database on every start but its
+	// first.
+	path := dbPath(t)
+	seed, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open (seed): %v", err)
+	}
+	if _, err := seed.ExecContext(ctx, `CREATE TABLE t(v TEXT NOT NULL)`); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("Close (seed): %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		with string
+	}{
+		{"deleted", ""},
+		{"key misspelled", "&_journal_mdoe=wal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			broken := strings.Replace(dsn(path), shorthand, tc.with, 1)
+			if strings.Contains(broken, shorthand) {
+				t.Fatalf("test setup: could not remove %q from %s", shorthand, broken)
+			}
+			db, err := open(ctx, broken)
+			if err == nil {
+				closeAt(t, db)
+				t.Fatalf("open(%s) succeeded, want ErrMissingPragma", broken)
+			}
+			if !errors.Is(err, ErrMissingPragma) {
+				t.Fatalf("open error = %v, want errors.Is(_, ErrMissingPragma)", err)
+			}
+		})
+	}
+
+	t.Run("readback alone cannot catch the misspelled key", func(t *testing.T) {
+		typo := strings.Replace(dsn(path), shorthand, "&_journal_mdoe=wal", 1)
+		raw, err := sql.Open(driverName, typo)
+		if err != nil {
+			t.Fatalf("sql.Open: %v", err)
+		}
+		closeAt(t, raw)
+
+		var got any
+		if err := raw.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&got); err != nil {
+			t.Fatalf("PRAGMA journal_mode: %v", err)
+		}
+		if got != "wal" {
+			t.Fatalf("PRAGMA journal_mode on a DSN whose key is misspelled = %#v, want \"wal\".\n"+
+				"It no longer reads back as the production value, which means readback would now "+
+				"catch this and the name check's premise has changed.", got)
+		}
+	})
+
+	t.Run("the driver rejects a bad value on its own", func(t *testing.T) {
+		bogus := strings.Replace(dsn(path), shorthand, "&"+journalModeKey+"=wla", 1)
+		db, err := open(ctx, bogus)
+		if err == nil {
+			closeAt(t, db)
+			t.Fatalf("open(%s) succeeded, want the driver to refuse the value", bogus)
+		}
+		// Not one of this package's errors: the driver refuses it before
+		// any pragma runs, which is what _pragma could never do.
+		for _, ours := range []error{ErrUnknownPragma, ErrMissingPragma, ErrPragmaMismatch} {
+			if errors.Is(err, ours) {
+				t.Fatalf("open error = %v, want the driver's own rejection, not %v", err, ours)
+			}
+		}
+		if !strings.Contains(err.Error(), `invalid _journal_mode "wla"`) {
+			t.Errorf("open error = %v, want the driver's invalid _journal_mode message", err)
+		}
+	})
 }
 
 // TestOpenRefusesSecondConnection is I-07: no other process opens the database,
@@ -229,6 +356,8 @@ func TestOpenRefusesSecondConnection(t *testing.T) {
 		}
 	})
 
+	requireAbsent(t, path+"-shm", "after Open and before a second connection tried")
+
 	second, err := sql.Open(driverName, fastBusy(t, dsn(path)))
 	if err != nil {
 		t.Fatalf("sql.Open (second): %v", err)
@@ -241,6 +370,10 @@ func TestOpenRefusesSecondConnection(t *testing.T) {
 	var n int
 	err = second.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema").Scan(&n)
 	requireBusy(t, err, "second connection while the first is open")
+	// A refused connection is refused before it maps anything (spec 5.4).
+	// Asserted here as well as in the -shm tests because this is the one
+	// place a second process reaches the file at all.
+	requireAbsent(t, path+"-shm", "after a second connection was refused")
 
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close (first): %v", err)
@@ -260,12 +393,21 @@ func TestOpenRefusesSecondConnection(t *testing.T) {
 	}
 }
 
-// TestOpenCreatesNoSharedMemoryFile is the observable consequence of
-// locking_mode=exclusive taking effect before first access (spec 5.4): the -shm
-// wal-index is never created. That file is the one modernc.org/sqlite cannot
-// defend, since it is built with SQLITE_OMIT_SEH=1 and cannot catch the
-// structured exception a faulting filter driver raises on the mapping. A -shm
-// appearing at any point here means the locking mode did not take.
+// TestOpenCreatesNoSharedMemoryFile is the first of spec 5.4's three -shm
+// states: a database this process created. The wal-index is the file
+// modernc.org/sqlite cannot defend, since it is built with SQLITE_OMIT_SEH=1
+// and cannot convert a faulting filter driver's exception on the mapping into
+// an error code.
+//
+// On its own this test is worth almost nothing, and saying so here is the
+// point. It passes with locking_mode applied before journal_mode and with it
+// applied after, because a database with no schema and no WAL has nothing for
+// PRAGMA journal_mode to open - so it cannot fail on the bug it appears to
+// guard, and it did not, for four spec revisions.
+// [TestReopenCreatesNoSharedMemoryFile] and, in internal/spool,
+// TestReopeningAHotWALCreatesNoSharedMemoryFile are the two states that
+// distinguish the orderings. This one is kept because the guarantee has to hold
+// in all three.
 func TestOpenCreatesNoSharedMemoryFile(t *testing.T) {
 	ctx := t.Context()
 	path := dbPath(t)
@@ -306,6 +448,116 @@ func requireAbsent(t *testing.T, path, when string) {
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stat %s %s: err = %v, want os.ErrNotExist", filepath.Base(path), when, err)
 	}
+}
+
+// TestReopenCreatesNoSharedMemoryFile is the assertion above on the one state
+// that test cannot reach, and the reason this pair exists at all.
+//
+// A brand-new database has no schema to read and no WAL to open, so
+// `PRAGMA journal_mode` against a zero-length file touches nothing and the -shm
+// stays away whichever order the pragmas are applied in. The test above
+// therefore passes both with locking_mode applied first and with it applied
+// second - it cannot fail on the bug it looks like it is guarding. That is how
+// `docs/evidence/exclusive`, which only ever measured a database it had just
+// created, reported "no -shm" through four spec revisions while every reopen
+// made a 32,768-byte one.
+//
+// Reopening is what the service does from its second start onward, so this is
+// the state that decides whether the SQLITE_OMIT_SEH=1 exposure is real in
+// production (spec 5.4).
+func TestReopenCreatesNoSharedMemoryFile(t *testing.T) {
+	ctx := t.Context()
+	path := dbPath(t)
+	payload := ckptFixture(t)
+
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	for i := range 10 {
+		ingestOne(t, db, i, payload)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close (first): %v", err)
+	}
+	// A clean Close checkpoints and removes both sidecars, so what is
+	// reopened below is an existing database in WAL mode with no WAL file at
+	// all - nothing hot, nothing to recover. The -shm still appeared here
+	// before the DSN applied locking_mode first, which is what rules out
+	// checkpointing and crash recovery as the cause (spec 7.4-4).
+	requireAbsent(t, path+"-shm", "after the first connection closed")
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = reopened.Close()
+		}
+	})
+	requireAbsent(t, path+"-shm", "after reopening an existing WAL database")
+
+	// A read and a write, because the wal-index is opened by whatever first
+	// starts a read transaction, not by sql.Open. The row count is the check
+	// that this reopened the database and not an empty file beside it.
+	requireCount(t, reopened, "events", 10)
+	requireAbsent(t, path+"-shm", "after reading from the reopened database")
+
+	ingestOne(t, reopened, 10, payload)
+	requireCount(t, reopened, "events", 11)
+	requireAbsent(t, path+"-shm", "after writing to the reopened database")
+
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close (reopened): %v", err)
+	}
+	closed = true
+	requireAbsent(t, path+"-shm", "after the reopened connection closed")
+
+	// The control, and this test is decorative without it. Every assertion
+	// above is that a file is not there, and a file is also not there when
+	// the test is watching the wrong path, or when nothing opened the
+	// database at all. This reopens the same file with journal_mode moved
+	// back into the _pragma list - the DSN this package shipped until the
+	// -shm was traced to it - and the -shm comes back, on bytes the
+	// assertions above just called clean.
+	t.Run("the ordering this DSN replaced still creates one", func(t *testing.T) {
+		old := journalModeFirstDSN(t, path)
+		db, err := open(t.Context(), old)
+		if err != nil {
+			t.Fatalf("open %s: %v", old, err)
+		}
+		closeAt(t, db)
+		requireCount(t, db, "events", 11)
+		if got := fileSize(t, path+"-shm"); got != 32768 {
+			t.Errorf("reopening with journal_mode inside the _pragma list left a -shm of %d bytes, "+
+				"want the 32,768 that ordering measured before this DSN changed. Nothing here can "+
+				"produce a -shm any more, so the assertions above are not checks", got)
+		}
+	})
+}
+
+// journalModeFirstDSN is the production DSN with journal_mode moved back out of
+// the driver's own key and into the _pragma list, which is where spec 5.4 had
+// it until S5.
+//
+// Where in the list it lands does not matter: the driver sorts _pragma values
+// lexicographically before applying them, so journal_mode runs before
+// locking_mode wherever it is written. That sort is the whole bug, and
+// appending here rather than prepending is a small demonstration of it.
+func journalModeFirstDSN(t *testing.T, path string) string {
+	t.Helper()
+	const shorthand = "&" + journalModeKey + "=wal"
+	full := dsn(path)
+	out := strings.Replace(full, shorthand, "", 1)
+	if out == full {
+		t.Fatalf("test setup: the production DSN no longer contains %q: %s", shorthand, full)
+	}
+	return out + "&_pragma=journal_mode(wal)"
 }
 
 // TestOpenCapsThePoolAtOne pins spec 5.4's one connection. The cap is asserted
@@ -441,20 +693,33 @@ func TestTransactionsDoNotWedgeTheConnection(t *testing.T) {
 // Limitation, and spec 5.4 asks for exactly this and no more: this pins the
 // driver's _txlock handling, not the production DSN end to end. Observing
 // contention needs a second connection and locking_mode=exclusive means there
-// is no such thing, so locking_mode is dropped here and everything else from
-// spec 5.4 is kept. Two other tests cover the production DSN itself: TestDSN
-// holds _txlock=immediate in it literally, and TestOpenRefusesSecondConnection
-// fails without it, because Open's empty transaction only takes the exclusive
-// lock when the driver begins it IMMEDIATE.
+// is no such thing, so locking_mode is turned down here and everything else
+// from spec 5.4 is kept. Two other tests cover the production DSN itself:
+// TestDSN holds _txlock=immediate in it literally, and
+// TestOpenRefusesSecondConnection fails without it, because Open's empty
+// transaction only takes the exclusive lock when the driver begins it
+// IMMEDIATE.
 func TestTxlockImmediate(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 
-	// uri is the production DSN minus locking_mode, with the short busy
-	// timeout, optionally minus _txlock.
+	// uri is the production DSN with locking_mode turned down to normal,
+	// with the short busy timeout, optionally minus _txlock.
+	//
+	// Turned down rather than deleted, and the difference is not cosmetic:
+	// deleting the parameter means matching a '&' that belongs to whichever
+	// neighbour it happens to have, and this test passed for the wrong
+	// reason the moment locking_mode became the first parameter in the DSN -
+	// the replacement stopped matching, both connections stayed exclusive,
+	// and the deferred half failed with SQLITE_BUSY. Rewriting the value
+	// does not care where in the DSN it sits.
 	uri := func(t *testing.T, name string, txlock bool) string {
 		t.Helper()
-		out := fastBusy(t, strings.Replace(dsn(filepath.Join(dir, name)), "&_pragma=locking_mode(exclusive)", "", 1))
+		full := dsn(filepath.Join(dir, name))
+		if !strings.Contains(full, "locking_mode(exclusive)") {
+			t.Fatalf("test setup: the production DSN no longer sets locking_mode(exclusive): %s", full)
+		}
+		out := fastBusy(t, strings.Replace(full, "locking_mode(exclusive)", "locking_mode(normal)", 1))
 		if !txlock {
 			out = strings.Replace(out, "&_txlock=immediate", "", 1)
 			if strings.Contains(out, "_txlock") {

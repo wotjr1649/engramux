@@ -14,17 +14,27 @@
 // returned" and "the lock exists" is precisely when another process could slip
 // in, and I-07 does not have that window.
 //
-// The exclusive lock was also supposed to be why no -shm wal-index file is ever
-// created - the file modernc.org/sqlite cannot defend, because it is built with
-// SQLITE_OMIT_SEH=1 and so cannot catch the structured exception upstream
-// SQLite retries when a filter driver faults the -shm mapping (spec 5.4).
+// The exclusive lock is also why no -shm wal-index file is ever created, which
+// matters because that file is the one modernc.org/sqlite cannot defend: it is
+// built with SQLITE_OMIT_SEH=1, so it does not convert a fault on the mapping
+// into SQLITE_IOERR_IN_PAGE the way an MSVC build does. The fault reaches Go's
+// runtime instead, at a mapped address, where it is throw("fault") - fatal, and
+// invisible to recover (spec 5.4).
 //
-// Measured, it is not. The driver sorts _pragma values lexicographically, so
-// journal_mode(wal) is applied before locking_mode(exclusive), and reading the
-// schema for the first pragma opens the wal-index while the pager is still in
-// normal locking mode. A database this package created has no -shm; every
-// reopen of it does, whether or not the WAL was hot and whether or not it was
-// checkpointed first. TestTheWalIndexIsCreatedOnEveryReopen has the steps.
+// SQLite omits the wal-index only when the locking mode is exclusive *before*
+// the first WAL-mode access, and that condition is why journal_mode is set
+// through the driver's own key rather than as a _pragma value (see dsnParams).
+// Inside the _pragma list it was applied first, and PRAGMA journal_mode reads
+// the schema, which opens the wal-index while the pager is still in normal
+// locking mode - a Wal opened that way can never move to heap memory.
+//
+// Three states have to hold, and one test each, because only the last two ever
+// differed: a database this package creates (TestOpenCreatesNoSharedMemoryFile),
+// a reopen of it (TestReopenCreatesNoSharedMemoryFile), and a reopen over the
+// hot WAL a kill leaves (TestReopeningAHotWALCreatesNoSharedMemoryFile, in
+// internal/spool, which is where the kill harness lives). The first passes
+// whichever order the pragmas are applied in, so on its own it proves nothing -
+// which is exactly how the claim survived being false for four spec revisions.
 //
 // # Transactions
 //
@@ -100,7 +110,7 @@ type pragma struct {
 // and the set of values verified after opening, so a name that appears in one
 // and not the other cannot exist.
 var pragmas = []pragma{
-	{"journal_mode", "wal"},
+	{journalMode, "wal"},
 	{"locking_mode", "exclusive"},
 	{"foreign_keys", int64(1)},
 	{"recursive_triggers", int64(1)},
@@ -110,17 +120,41 @@ var pragmas = []pragma{
 	{"secure_delete", int64(1)},
 }
 
+// journalMode is the one pragma spec 5.4 does not set through _pragma, and
+// journalModeKey is the driver's own DSN key that sets it instead. See
+// dsnParams.
+const (
+	journalMode    = "journal_mode"
+	journalModeKey = "_journal_mode"
+)
+
 // dsnParams is spec 5.4's DSN, less the path. The driver applies _pragma values
-// in its own order regardless of how they appear here, so this order is for
+// in its own order regardless of how they appear here, so their order is for
 // readers only - it follows the spec's.
-const dsnParams = "?_pragma=journal_mode(wal)" +
-	"&_pragma=locking_mode(exclusive)" +
+//
+// journalModeKey is the exception, and it is load-bearing rather than
+// stylistic. The driver sorts _pragma values lexicographically before applying
+// them, so journal_mode(wal) as a _pragma value runs before
+// locking_mode(exclusive) - j before l - and the wal-index is open before the
+// locking mode that would have suppressed it. modernc.org/sqlite applies
+// _journal_mode after the whole _pragma list, so locking_mode is in force
+// first.
+//
+// The two orderings are not equally well founded, and this is the safer of
+// them: the driver states its apply order in its exported package
+// documentation and a test of its own scrambles a DSN to assert it, while the
+// lexicographic sort of _pragma values is documented nowhere and justified
+// only by a source comment. This does not generalise - _busy_timeout and
+// _auto_vacuum are shorthand keys applied *before* the _pragma list. Only
+// _foreign_keys, _journal_mode, _synchronous and _query_only come after it.
+const dsnParams = "?_pragma=locking_mode(exclusive)" +
 	"&_pragma=foreign_keys(1)" +
 	"&_pragma=recursive_triggers(1)" +
 	"&_pragma=synchronous(2)" +
 	"&_pragma=busy_timeout(10000)" +
 	"&_pragma=journal_size_limit(67108864)" +
 	"&_pragma=secure_delete(1)" +
+	"&" + journalModeKey + "=wal" +
 	"&_txlock=immediate"
 
 // uriPath escapes the three characters SQLite's URI parser consumes from a
@@ -198,7 +232,17 @@ func open(ctx context.Context, uri string) (*sql.DB, error) {
 // `synchronous` reads back as its default, which is the value spec 5.4 wanted
 // anyway.
 //
-// Parameters other than _pragma are not checked here. _txlock is not a pragma
+// journalModeKey counts as setting journal_mode, since that is how the DSN sets
+// it (see dsnParams). One thing genuinely improves under that spelling and one
+// does not: a *value* typo is now the driver's problem rather than nobody's,
+// because _journal_mode goes through an enum validator that rejects `wla` and
+// names the six values it would accept, where a _pragma value is executed
+// verbatim and a bad one is silently ignored. A *key* typo is still silent
+// under both spellings - `_journal_mdoe=wal` is not an error, it is just a
+// parameter nothing reads - so this check is still the only thing that catches
+// it, and it catches it as a missing pragma.
+//
+// Parameters other than those two are not checked here. _txlock is not a pragma
 // and cannot be read back either; it is pinned by a test instead (spec 5.4).
 func checkPragmaNames(uri string) error {
 	// A Windows path cannot contain '?', so the first one starts the
@@ -207,15 +251,20 @@ func checkPragmaNames(uri string) error {
 
 	seen := make(map[string]bool, len(pragmas))
 	for _, param := range strings.Split(params, "&") {
-		value, ok := strings.CutPrefix(param, "_pragma=")
-		if !ok {
+		if value, ok := strings.CutPrefix(param, "_pragma="); ok {
+			name, _, _ := strings.Cut(value, "(")
+			if !known(name) {
+				return fmt.Errorf("%w: %q", ErrUnknownPragma, name)
+			}
+			seen[name] = true
 			continue
 		}
-		name, _, _ := strings.Cut(value, "(")
-		if !known(name) {
-			return fmt.Errorf("%w: %q", ErrUnknownPragma, name)
+		// The value is left to the driver to validate and to
+		// verifyPragmas to compare; what is checked here is that the
+		// setting was asked for at all.
+		if _, ok := strings.CutPrefix(param, journalModeKey+"="); ok {
+			seen[journalMode] = true
 		}
-		seen[name] = true
 	}
 	for _, p := range pragmas {
 		if !seen[p.name] {

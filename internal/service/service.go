@@ -283,15 +283,17 @@ func run(ctx context.Context, dir string) error {
 // the statement without running it.
 //
 // What it is worth, measured rather than assumed: nothing, on this path. A
-// clean db.Close checkpoints the WAL and deletes it and the wal-index anyway,
-// and TestTheWalIndexIsCreatedOnEveryReopen measures the same on-disk state
-// either way. Deleting this line changes no observable outcome as long as
-// Close is reached. It is here because it is the only part of the shutdown
-// state this file states rather than inherits from the driver, and because
-// there is one path where it is not redundant: a Close that fails.
+// clean db.Close checkpoints the WAL and deletes it anyway, and
+// TestTheRunLoopCheckpointsWhileItServes measures the same on-disk state either
+// way. Deleting this line changes no observable outcome as long as Close is
+// reached. It is here because it is the only part of the shutdown state this
+// file states rather than inherits from the driver, and because there is one
+// path where it is not redundant: a Close that fails.
 //
-// It is emphatically not what keeps the -shm away. Nothing does - see
-// [store.Checkpointer] and spec 5.4.
+// It is emphatically not what keeps the -shm away. The DSN is, by setting
+// locking_mode before the first WAL access - see store's package documentation
+// and spec 5.4. Checkpointing never had anything to do with it, on any
+// schedule.
 func checkpointOnTheWayOut(ctx context.Context, db *sql.DB) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownCheckpointTimeout)
 	defer cancel()
