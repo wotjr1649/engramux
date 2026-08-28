@@ -91,7 +91,7 @@ func TestDSNEscapesOnlyWhatSQLiteConsumes(t *testing.T) {
 		path string
 		want string
 	}{
-		{"plain", `C:\Users\redacted\engramux.db`, `file:C:\Users\redacted\engramux.db`},
+		{"plain", `C:\Users\fixture\engramux.db`, `file:C:\Users\fixture\engramux.db`},
 		{"percent", `C:\Users\100%done\engramux.db`, `file:C:\Users\100%25done\engramux.db`},
 		{"hash", `C:\Users\hash#tag\engramux.db`, `file:C:\Users\hash%23tag\engramux.db`},
 		{"valid escape", `C:\Users\pct%41hex\engramux.db`, `file:C:\Users\pct%2541hex\engramux.db`},
