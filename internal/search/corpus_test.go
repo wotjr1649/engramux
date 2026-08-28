@@ -88,7 +88,7 @@ func leavesOf(raw json.RawMessage) []string {
 // fixtureDocs is the mode that always runs: the four Phase 1 fixtures, reached
 // through All() so a fixture dropped from that list fails here rather than
 // going quietly unsearched.
-func fixtureDocs(t *testing.T) []doc {
+func fixtureDocs(t testing.TB) []doc {
 	t.Helper()
 	all := fixtures.All()
 	if len(all) == 0 {
@@ -117,7 +117,7 @@ func fixtureDocs(t *testing.T) []doc {
 // filters as well is not: it carries no leaf any class can use and no cwd, so
 // it contributes nothing but one more document to the precision denominator,
 // where an extra document only makes the precondition easier to hold.
-func corpusDocs(t *testing.T) []doc {
+func corpusDocs(t testing.TB) []doc {
 	t.Helper()
 	entries, err := os.ReadDir(corpusDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -166,11 +166,7 @@ func corpusDocs(t *testing.T) []doc {
 // ingestAll builds one database from an empty directory through the production
 // path - store.Open, store.Migrate, store.Ingest per document - and fills in
 // each document's events.id. Nothing else writes to it.
-//
-// The id is a fresh UUIDv7 because that is what the relay mints and what I-05
-// makes the idempotency key; ingesting the same corpus twice in one run under
-// reused ids would leave one row per pair and half the documents unfindable.
-func ingestAll(t *testing.T, docs []doc) *sql.DB {
+func ingestAll(t testing.TB, docs []doc) *sql.DB {
 	t.Helper()
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "engramux.db"))
 	if err != nil {
@@ -187,7 +183,20 @@ func ingestAll(t *testing.T, docs []doc) *sql.DB {
 	if err := store.Migrate(t.Context(), db); err != nil {
 		t.Fatalf("store.Migrate: %v", err)
 	}
+	ingestInto(t, db, docs)
+	return db
+}
 
+// ingestInto stores every document in db through store.Ingest and fills in each
+// one's events.id.
+//
+// The id is a fresh UUIDv7 because that is what the relay mints and what I-05
+// makes the idempotency key; ingesting the same corpus twice in one run under
+// reused ids would leave one row per pair and half the documents unfindable.
+// That is also what lets [BenchmarkPrefixIndex] reach a scale this corpus does
+// not have, by handing the same payloads back a second time under new ids.
+func ingestInto(t testing.TB, db *sql.DB, docs []doc) {
+	t.Helper()
 	now := time.Now()
 	for i := range docs {
 		id, err := uuid.NewV7()
@@ -208,5 +217,4 @@ func ingestAll(t *testing.T, docs []doc) *sql.DB {
 			t.Fatalf("%s: Ingest answered %q, want %q", docs[i].name, status, ipc.Committed)
 		}
 	}
-	return db
 }

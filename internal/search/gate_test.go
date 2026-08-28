@@ -284,7 +284,7 @@ func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
 func TestPhase4Gate(t *testing.T) {
 	for _, mode := range []struct {
 		name string
-		load func(t *testing.T) []doc
+		load func(t testing.TB) []doc
 	}{
 		{"fixtures", fixtureDocs},
 		{"corpus", corpusDocs},

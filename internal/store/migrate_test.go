@@ -249,16 +249,23 @@ func schemaSnapshot(t *testing.T, db *sql.DB) string {
 		 FROM sqlite_schema ORDER BY type, name`), "\n")
 }
 
-// TestMigrateCreatesTheFiveTables names them, so that adding or losing one is a
-// test change rather than a silent one. events_fts is absent on purpose: FTS5 is
-// Phase 4 and spec 5.7's tokenizer and external-content decisions are not made
-// yet. goose_db_version is goose's own bookkeeping.
-func TestMigrateCreatesTheFiveTables(t *testing.T) {
+// TestMigrateCreatesTheDeclaredTables names them, so that adding or losing one
+// is a test change rather than a silent one. goose_db_version is goose's own
+// bookkeeping, and the four events_fts_* are FTS5's shadow tables - the index
+// itself, its structure record, its docsize record and its options - which the
+// virtual table creates and owns. They are listed because they are what an
+// external-content index costs on disk, and because losing one is how an index
+// silently stops being an index.
+func TestMigrateCreatesTheDeclaredTables(t *testing.T) {
 	db := migrated(t)
 	got := queryStrings(t, db,
 		`SELECT name FROM sqlite_schema
 		 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
-	want := []string{"events", "goose_db_version", "memory_items", "observations", "projects", "sessions"}
+	want := []string{
+		"events", "events_fts", "events_fts_config", "events_fts_data",
+		"events_fts_docsize", "events_fts_idx", "goose_db_version",
+		"memory_items", "observations", "projects", "sessions",
+	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tables = %v, want %v", got, want)
 	}
@@ -279,6 +286,10 @@ func TestForeignKeyCheckIsEmpty(t *testing.T) {
 // TestMigrateDownUpRestoresTheSameSchema. A migration that cannot be re-run is a
 // migration nobody can fix in place. The Down half is asserted separately, since
 // a Down that dropped nothing would make the comparison trivially true.
+//
+// DownTo(0) rather than Down: Down rolls back exactly one migration, so with
+// more than one in the set it would leave the earlier ones applied and the
+// assertion below would be about the wrong thing.
 func TestMigrateDownUpRestoresTheSameSchema(t *testing.T) {
 	ctx := t.Context()
 	db := migrated(t)
@@ -288,8 +299,8 @@ func TestMigrateDownUpRestoresTheSameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	if _, err := p.Down(ctx); err != nil {
-		t.Fatalf("Down: %v", err)
+	if _, err := p.DownTo(ctx, 0); err != nil {
+		t.Fatalf("DownTo(0): %v", err)
 	}
 	if got := queryStrings(t, db,
 		`SELECT name FROM sqlite_schema
@@ -321,8 +332,10 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
-	if v != 1 {
-		t.Fatalf("db version = %d, want 1", v)
+	// The literal is bumped by hand with every migration added, so a
+	// migration that arrives without anyone noticing fails here.
+	if v != 2 {
+		t.Fatalf("db version = %d, want 2", v)
 	}
 }
 

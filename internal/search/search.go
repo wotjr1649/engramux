@@ -42,9 +42,6 @@ type Hit struct {
 // a caller handing it raw user input can get a syntax error back rather than an
 // empty result. T5 is what puts a query builder in front of it. limit goes to
 // LIMIT unmodified as well, and SQLite reads a negative LIMIT as "no limit".
-//
-// Before the index exists this fails with "no such table: events_fts", which is
-// the honest answer and the one Phase 4's gate is currently pinned to.
 func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT events.id
