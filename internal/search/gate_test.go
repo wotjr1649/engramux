@@ -12,11 +12,11 @@ import (
 	"github.com/wotjr1649/engramux/internal/search"
 )
 
-// maxDocsPerClass bounds how many documents a class measures: the first N in
-// the mode's own order that carry a candidate. It exists so the corpus mode
-// stays a gate rather than a benchmark - 900 documents times five classes is
-// 4,500 queries - and it is small enough that one missing document is a visible
-// fraction rather than a rounding error.
+// maxDocsPerClass bounds how many documents a class measures: N spread over the
+// documents that carry a candidate, by [candidatesFor]. It exists so the corpus
+// mode stays a gate rather than a benchmark - 900 documents times five classes
+// is 4,500 queries - and it is small enough that one missing document is a
+// visible fraction rather than a rounding error.
 const maxDocsPerClass = 25
 
 // Per-class verdicts, one constant each so that lowering one later is a visible
@@ -58,10 +58,21 @@ var hangulRun = regexp.MustCompile(`[\x{AC00}-\x{D7A3}]+`)
 // ending in 으로 yields the stem before 으로 rather than the one before 로.
 var particles = []string{"에서", "으로", "는", "은", "이", "가", "을", "를", "의", "에", "로", "와", "과", "도"}
 
-// camelWord matches an identifier with at least two humps, as a whole word.
-// Go's \b is the ASCII word boundary, so PostToolUse does not match - there is
-// no boundary between P and o - and neither does the tail of snake_caseName.
+// camelWord matches a camelCase identifier as a whole word. Go's \b is the
+// ASCII word boundary, so PostToolUse does not match - there is no boundary
+// between P and o - and neither does the tail of snake_caseName.
 var camelWord = regexp.MustCompile(`\b[a-z]+[A-Z][a-zA-Z0-9]+\b`)
+
+// camelMinHumps is how many humps an identifier needs to be a candidate.
+//
+// Three, not the two [camelWord] can match, because an identifier with exactly
+// two humps is returned whole and a whole-identifier query is a different class
+// of search from the partial-identifier path this one exists for. Measured: at
+// two, the corpus derived bypassPermissions - permission_mode's value, which
+// sorts before tool_input and is in nearly every Claude capture - for document
+// after document, and a class that only ever asks for a whole common word
+// cannot fail on the path it is gating.
+const camelMinHumps = 3
 
 // baseWithExt matches a path's last component when it carries an extension.
 // The leading class must match at least one character before the final dot, so
@@ -126,6 +137,12 @@ func deriveParticle(d doc) string {
 // pair that does not, which is what "prefer a pair containing Korean when the
 // document has any" means: the mixed-script pair is the one that exercises
 // implicit AND across the tokenizer's two behaviours at once.
+//
+// Splitting on whitespace only, so a leading quote or a --- rule stays attached
+// to its token, is deliberate and not a gap: that is what a token looks like in
+// real captured text, and T5's per-token expansion has to survive it. A query
+// this produces would be an FTS5 syntax error today (spec 5.7), which is a
+// louder failure here than a miss and is the point.
 func deriveTwoTokens(d doc) string {
 	var first string
 	for _, leaf := range d.leaves {
@@ -146,27 +163,48 @@ func deriveTwoTokens(d doc) string {
 	return first
 }
 
-// deriveCamelCase takes the first camelCase identifier and cuts it after its
-// second hump: waitUntilServing becomes waitUntil, and waitUntil - which has
-// exactly two humps - stays whole. The cut is at the second uppercase letter,
-// and [camelWord] guarantees the first character is lowercase, so the first
-// hump is never the identifier's own start.
+// deriveCamelCase takes the document's identifier with the most humps - the
+// first occurrence on a tie - and cuts it after the second: waitUntilServing
+// becomes waitUntil. A document whose best identifier is under [camelMinHumps]
+// carries no candidate and is not measured.
+//
+// Most humps rather than first, because "first" is whichever leaf sorts
+// earliest, and that is a structural field far more often than it is something
+// a person wrote.
 func deriveCamelCase(d doc) string {
+	var best string
+	bestHumps, bestCut := 0, 0
 	for _, leaf := range d.leaves {
-		if id := camelWord.FindString(leaf); id != "" {
-			humps := 0
-			for i, r := range id {
-				if r >= 'A' && r <= 'Z' {
-					humps++
-					if humps == 2 {
-						return id[:i]
-					}
-				}
+		for _, id := range camelWord.FindAllString(leaf, -1) {
+			if h, cut := humpsOf(id); h > bestHumps {
+				best, bestHumps, bestCut = id, h, cut
 			}
-			return id
 		}
 	}
-	return ""
+	if bestHumps < camelMinHumps {
+		return ""
+	}
+	return best[:bestCut]
+}
+
+// humpsOf counts an identifier's humps and returns the byte offset the query is
+// cut at - the start of the third hump, which is what "cut after the second"
+// means. [camelWord] guarantees the match starts lower case, so the
+// identifier's own start is hump one and every uppercase letter opens another.
+//
+// cut is len(id) for an identifier with fewer than three humps, so a caller
+// that ignores the count still gets the whole identifier rather than a panic.
+func humpsOf(id string) (humps, cut int) {
+	humps, cut = 1, len(id)
+	for i, r := range id {
+		if r >= 'A' && r <= 'Z' {
+			humps++
+			if humps == camelMinHumps {
+				cut = i
+			}
+		}
+	}
+	return humps, cut
 }
 
 // derivePathBasename takes the last component of the first path-shaped token
@@ -195,21 +233,33 @@ type candidate struct {
 	id    string
 }
 
-// candidatesFor is the first [maxDocsPerClass] documents, in the mode's own
-// order, that carry a candidate for c.
-func candidatesFor(c class, docs []doc) []candidate {
-	var out []candidate
+// candidatesFor returns up to [maxDocsPerClass] of the documents that carry a
+// candidate for c, and how many carried one in total.
+//
+// The sample is spread over the candidates - every floor(M/N)-th of them, or
+// all of them when there are no more than N - rather than taken from the front,
+// and this is the one place every class gets it. A corpus file name begins with
+// the host, the event and the capture timestamp, so sorted order groups a
+// session together: the first 25 of 901 were 25 captures of one session, with
+// one transcript_path basename between them. Stepping spans sessions and stays
+// mechanical - same corpus, same 25 documents, every run.
+func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
+	var all []candidate
 	for _, d := range docs {
-		q := c.derive(d)
-		if q == "" {
-			continue
-		}
-		out = append(out, candidate{query: q, name: d.name, id: d.id})
-		if len(out) == maxDocsPerClass {
-			break
+		if q := c.derive(d); q != "" {
+			all = append(all, candidate{query: q, name: d.name, id: d.id})
 		}
 	}
-	return out
+	if len(all) <= maxDocsPerClass {
+		return all, len(all)
+	}
+	// step is at least 1 here, and the last index taken is
+	// (N-1)*floor(M/N) < M, so this cannot walk off the end.
+	step := len(all) / maxDocsPerClass
+	for i := 0; len(sample) < maxDocsPerClass; i += step {
+		sample = append(sample, all[i])
+	}
+	return sample, len(all)
 }
 
 // TestPhase4Gate is spec 8's Phase 4 gate: known-item retrieval, gated per
@@ -266,12 +316,13 @@ func TestPhase4Gate(t *testing.T) {
 // otherwise turn that class off silently.
 func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	t.Helper()
-	cands := candidatesFor(c, docs)
-	if len(cands) == 0 {
+	cands, total := candidatesFor(c, docs)
+	if total == 0 {
 		t.Fatalf("%s / %s: no document carries a candidate, so this class gates nothing", mode, c.name)
 	}
 	for i, cd := range cands[:min(eyeballQueries, len(cands))] {
-		t.Logf("%s / %s: derived query %d of %d: %q", mode, c.name, i+1, len(cands), cd.query)
+		t.Logf("%s / %s: derived query %d of %d sampled from %d candidate documents: %q",
+			mode, c.name, i+1, len(cands), total, cd.query)
 	}
 
 	var found int
@@ -280,7 +331,8 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	for _, cd := range cands {
 		hits, err := search.Search(t.Context(), db, cd.query, len(docs))
 		if err != nil {
-			t.Fatalf("%s / %s: Search(%q), derived from %s: %v", mode, c.name, cd.query, cd.name, err)
+			t.Fatalf("%s / %s: %d of %d candidate documents sampled; Search(%q), derived from %s: %v",
+				mode, c.name, len(cands), total, cd.query, cd.name, err)
 		}
 		rank := slices.IndexFunc(hits, func(h search.Hit) bool { return h.ID == cd.id })
 		if rank < 0 {
@@ -297,8 +349,8 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 			mode, c.name, ranks[len(ranks)/2], ranks[len(ranks)-1], len(ranks))
 	}
 	if got := float64(found) / float64(len(cands)); got < c.want {
-		t.Errorf("%s / %s: found %d of %d (%.1f%%), want %.1f%%\nmissed: %s",
-			mode, c.name, found, len(cands), got*100, c.want*100, strings.Join(misses, ", "))
+		t.Errorf("%s / %s: found %d of %d sampled (%.1f%%), want %.1f%% - %d documents carried a candidate\nmissed: %s",
+			mode, c.name, found, len(cands), got*100, c.want*100, total, strings.Join(misses, ", "))
 	}
 }
 
