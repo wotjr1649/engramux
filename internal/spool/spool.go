@@ -1,0 +1,124 @@
+// Package spool is the on-disk holding area for events the relay could not
+// deliver. It is what makes I-04 true: an event that cannot reach the service
+// goes to a file instead of being lost.
+//
+// This package owns the writer. The bounds on count, bytes and age, the
+// quarantine, and the drain that replays records back into the service are the
+// next task's, and they read what is written here.
+//
+// # The record
+//
+// One record is one file: the name is the relay-minted id with a ".json"
+// suffix, and the body is the hook payload exactly as it arrived on the
+// relay's stdin.
+//
+// The id is in the name and nowhere else, which is the whole point. The body
+// is bytes a host wrote and this process never validated - Phase 1 gates on a
+// byte-for-byte round trip, so nothing here parses, compacts or re-encodes it
+// - and a body that will not parse would take its own id down with it if the
+// id lived inside the document. A drain that cannot read a record can still
+// name it, quarantine it, and tell a human which event it was.
+//
+// It also removes a way to get I-05 wrong: there is no id field for a drain to
+// re-mint, because the id is the file it opened.
+//
+// Everything else the service needs is a constant. The envelope the drain
+// rebuilds carries ipc.Version and ipc.IngestEvent, and events.source is set
+// by the ingest path, not carried in the record (spec 6).
+package spool
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/google/uuid"
+)
+
+// ext is the suffix a completed record carries. It is what separates a record
+// from the temp file a write is staged in, so the drain listing "*.json" can
+// never pick up a write in progress.
+const ext = ".json"
+
+// tempPattern stages a write. The leading dot and the missing ext keep it out
+// of the drain's listing; os.CreateTemp replaces the '*'.
+const tempPattern = ".partial-*"
+
+// ErrID is returned when the id is not a UUID.
+var ErrID = errors.New("spool: id is not a uuid")
+
+// Dir is the spool directory: "spool" under Engramux's directory under the
+// user's local application data directory (spec 5.6). os.UserCacheDir returns
+// %LocalAppData% on Windows.
+func Dir() (string, error) {
+	local, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("spool: locate the local application data directory: %w", err)
+	}
+	return filepath.Join(local, "engramux", "spool"), nil
+}
+
+// Write saves one record: payload under id, in dir, creating dir if it does
+// not exist. It writes a temp file, syncs it, and renames it over the final
+// name (spec 5.6), so a reader never sees a half-written record and a machine
+// that loses power mid-write loses the temp file rather than the record.
+//
+// Writing the same id twice leaves one record, because the id is the
+// idempotency key (I-05) and two writes under one id are one event by
+// definition. os.Rename maps to MoveFileEx with replace semantics on Windows,
+// so the second write wins rather than failing.
+//
+// payload is written exactly as given - no length cap, no validation, no
+// re-encoding. The cap belongs to the bounds this package's next task adds,
+// which measure the directory rather than the record, and validating a payload
+// here would be a second place that can decide to drop an event.
+func Write(dir, id string, payload []byte) error {
+	// id becomes a file name. It is minted by uuid.NewV7 today and so is
+	// always a UUID, but a "..\\.." would escape dir, and rejecting every
+	// shape that is not a UUID removes the escape instead of blacklisting
+	// the characters that reach it. It is also a real check on the caller:
+	// an empty id means the mint was skipped, and a record with no id
+	// cannot be replayed idempotently.
+	if err := uuid.Validate(id); err != nil {
+		return fmt.Errorf("%w: %.64q: %w", ErrID, id, err)
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("spool: create %s: %w", dir, err)
+	}
+
+	f, err := os.CreateTemp(dir, tempPattern)
+	if err != nil {
+		return fmt.Errorf("spool: create a temp record in %s: %w", dir, err)
+	}
+	tmp := f.Name()
+	// Every failure below removes the temp file. Leaving it would grow the
+	// directory without ever showing up in the drain's listing, which is
+	// the one kind of spool file nothing would clean up.
+	defer func() {
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+		}
+	}()
+
+	if err = f.Chmod(0o600); err != nil {
+		return fmt.Errorf("spool: restrict %s: %w", tmp, err)
+	}
+	if _, err = f.Write(payload); err != nil {
+		return fmt.Errorf("spool: write %s: %w", tmp, err)
+	}
+	// The event is already undeliverable; this file is the only copy of it,
+	// so it is worth an fsync.
+	if err = f.Sync(); err != nil {
+		return fmt.Errorf("spool: sync %s: %w", tmp, err)
+	}
+	if err = f.Close(); err != nil {
+		return fmt.Errorf("spool: close %s: %w", tmp, err)
+	}
+	if err = os.Rename(tmp, filepath.Join(dir, id+ext)); err != nil {
+		return fmt.Errorf("spool: rename %s: %w", tmp, err)
+	}
+	return nil
+}
