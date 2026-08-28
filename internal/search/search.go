@@ -8,18 +8,15 @@
 // string leaves. The raw JSON is not indexed - its keys are tokens of every
 // document, which costs precision and buys nothing (spec 5.7).
 //
+// What a person types never reaches MATCH as query syntax: [queryTokens] and
+// [matchExpression] turn it into one quoted prefix phrase per token, which is
+// what makes a hyphenated identifier, a Windows path and a two-character Korean
+// query work at all (spec 5.7).
+//
 // # What this package is not yet
 //
-// [Search] passes the caller's text to MATCH exactly as given. Spec 5.7 says a
-// query expands per token with a trailing star - "token"*, the star outside the
-// quotes, because a bare token* is a syntax error on a hyphenated identifier or
-// a Windows path - and that expansion is what makes a two-character Korean
-// query and a stem carrying a particle reachable at all. It is not here: T5
-// adds it, and until then the classes that need it can only be measured, not
-// passed.
-//
-// There is no excerpt either. [Hit] carries the event id and nothing else; T6
-// adds the snippet and the pipe surface that returns it.
+// There is no excerpt. [Hit] carries the event id and nothing else; T6 adds the
+// snippet and the pipe surface that returns it.
 //
 // The gate that measures all of this is TestPhase4Gate, in this package's
 // external test package (spec 8, Phase 4).
@@ -42,18 +39,28 @@ type Hit struct {
 // first. What is indexed is the payload's string leaves, so a match is on
 // something the event said and never on the shape it said it in.
 //
-// text goes to MATCH unmodified, so it is FTS5 query syntax and not a literal:
-// a caller handing it raw user input can get a syntax error back rather than an
-// empty result. T5 is what puts a query builder in front of it. limit goes to
-// LIMIT unmodified as well, and SQLite reads a negative LIMIT as "no limit".
+// text is what a person typed and not FTS5 query syntax: it is split on
+// whitespace and each token is quoted, so no syntax error can reach the caller
+// and no operator a person happened to type is obeyed ([matchExpression]). A
+// query that carries no token, too many, or one too long is refused with
+// [ErrEmptyQuery], [ErrTooManyTokens] or [ErrTokenTooLong] before the database
+// is touched - all three are errors and not empty results.
+//
+// limit goes to LIMIT unmodified, and SQLite reads a negative LIMIT as "no
+// limit".
 func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, error) {
+	tokens, err := queryTokens(text)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT events.id
 		FROM events_fts
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?
 		ORDER BY rank
-		LIMIT ?`, text, limit)
+		LIMIT ?`, matchExpression(tokens), limit)
 	if err != nil {
 		return nil, fmt.Errorf("search: match: %w", err)
 	}

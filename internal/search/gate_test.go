@@ -105,11 +105,16 @@ type class struct {
 	derive func(d doc) string
 }
 
+// twoTokensClass is the one class [gateClass] runs an extra assertion for, and
+// it is named here rather than spelled twice so that renaming the class cannot
+// silently turn that assertion off.
+const twoTokensClass = "two tokens"
+
 // classes is spec 8's list, in spec 8's order.
 var classes = []class{
 	{"two-character Korean", wantKoreanTwoChar, deriveKoreanTwoChar},
 	{"a content word carrying a particle", wantParticle, deriveParticle},
-	{"two tokens", wantTwoTokens, deriveTwoTokens},
+	{twoTokensClass, wantTwoTokens, deriveTwoTokens},
 	{"camelCase", wantCamelCase, deriveCamelCase},
 	{"a path basename", wantPathBasename, derivePathBasename},
 }
@@ -441,11 +446,17 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	var found int
 	var ranks []int
 	var misses []string
+	var escaped []string
+	var skipped, sharp int
 	for _, cd := range cands {
 		hits, err := search.Search(t.Context(), db, cd.query, len(docs))
 		if err != nil {
 			t.Fatalf("%s / %s: %d of %d candidate documents sampled; Search(%q), derived from %s: %v",
 				mode, c.name, len(cands), total, cd.query, cd.name, err)
+		}
+		if c.name == twoTokensClass {
+			e, s, d := escapesTheIntersection(t, db, cd, hits, len(docs))
+			escaped, skipped, sharp = append(escaped, e...), skipped+s, sharp+d
 		}
 		rank := slices.IndexFunc(hits, func(h search.Hit) bool { return h.ID == cd.id })
 		if rank < 0 {
@@ -454,6 +465,21 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 		}
 		found++
 		ranks = append(ranks, rank+1)
+	}
+	if c.name == twoTokensClass {
+		// Logged on the passing path too, and both numbers are needed.
+		// The first says how many comparisons ran; the second says how
+		// many of them could have failed, which over the fixtures is
+		// zero - see [escapesTheIntersection].
+		t.Logf("%s / %s: the intersection holds over %d of %d terms; %d carry no token to match on, "+
+			"and %d match something the pair does not, which is where an OR would show",
+			mode, c.name, 2*len(cands)-skipped-len(escaped), 2*len(cands), skipped, sharp)
+	}
+	if len(escaped) > 0 {
+		t.Errorf("%s / %s: %d term comparisons of %d sampled queries returned an event that term did not. "+
+			"An implicit AND returns the intersection, so its result set sits inside both single-term "+
+			"sets; a superset is an OR and a one-sided set is a dropped term:\n%s",
+			mode, c.name, len(escaped), len(cands), strings.Join(escaped, "\n"))
 	}
 
 	slices.Sort(ranks)
@@ -468,6 +494,96 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 		t.Errorf("%s / %s: found %d of %d sampled (%.1f%%), want %.1f%% - %d documents carried a candidate\nmissed: %s",
 			mode, c.name, found, len(cands), got*100, c.want*100, total, strings.Join(misses, ", "))
 	}
+}
+
+// escapesTheIntersection runs each of a two-token query's terms alone and
+// returns one line per term whose result set does not contain the whole
+// two-token result set. Three queries per candidate document: the pair, and
+// each term.
+//
+// The class's found check cannot do this. It asks only whether the source
+// document came back, and that is true of an implicit AND, of an OR, and of a
+// builder that dropped one term entirely - the document carries both tokens, so
+// any of the three returns it. The set relation tells them apart: an AND
+// returns the intersection, so its result set sits inside both single-term sets;
+// an OR returns the union, which is a superset of at least one; a dropped term
+// returns exactly one side, which is a superset of the intersection whenever the
+// two terms select different documents.
+//
+// Containment and not equality, because rank order and [maxDocsPerClass] are
+// not what this is measuring, and because an intersection is a subset by
+// definition - a proper one whenever either term matches a document the other
+// does not.
+//
+// A term the tokenizer reduces to nothing constrains nothing and is skipped,
+// which is measurement and not leniency. The corpus derives them - `"===`
+// beside 커밋 - and FTS5 drops such a term from the conjunction rather than
+// taking the whole query to nothing, so the pair returns what the surviving
+// term returns and the empty side returns nothing at all. Requiring containment
+// there would assert a relation that is false whenever the query works.
+// [constrains] is the test, and skipped is returned rather than assumed to be
+// zero: it is how much of the sample this assertion did not cover.
+//
+// sharp counts the comparisons that could have failed - the terms matching
+// something the pair does not - and it is returned for the same reason. A term
+// whose result set is exactly the pair's cannot tell an AND from an OR: the
+// union and the intersection are then the same set. Measured: over the four
+// fixtures all six comparisons are of that kind, so a builder that ORs its
+// tokens passes the fixtures mode of this class and fails the corpus mode
+// loudly. A count of held comparisons alone would have hidden that.
+func escapesTheIntersection(
+	t *testing.T, db *sql.DB, cd candidate, both []search.Hit, limit int,
+) (escaped []string, skipped, sharp int) {
+	t.Helper()
+	terms := strings.Fields(cd.query)
+	if len(terms) != 2 {
+		t.Fatalf("%s: derived %q, which is %d tokens rather than 2; this class no longer measures an AND",
+			cd.name, cd.query, len(terms))
+	}
+
+	for _, term := range terms {
+		if !constrains(term) {
+			skipped++
+			continue
+		}
+		alone, err := search.Search(t.Context(), db, term, limit)
+		if err != nil {
+			t.Fatalf("Search(%q), one term of %q derived from %s: %v", term, cd.query, cd.name, err)
+		}
+		if len(alone) > len(both) {
+			sharp++
+		}
+		ids := make(map[string]bool, len(alone))
+		for _, h := range alone {
+			ids[h.ID] = true
+		}
+		var strangers int
+		for _, h := range both {
+			if !ids[h.ID] {
+				strangers++
+			}
+		}
+		if strangers > 0 {
+			escaped = append(escaped, fmt.Sprintf(
+				"  %q returned %d events, %d of them absent from the %d that %q returns alone",
+				cd.query, len(both), strangers, len(alone), term))
+		}
+	}
+	return escaped, skipped, sharp
+}
+
+// constrains reports whether a term can narrow a conjunction at all: whether
+// unicode61 will find a token in it.
+//
+// Letters and digits, which is unicode61's own rule - it takes the Unicode
+// letter and number categories as token characters and everything else as a
+// separator, and remove_diacritics strips marks rather than tokenizing them.
+// A term of nothing but punctuation, `"===` or ---, produces no token and FTS5
+// drops it from the query.
+func constrains(term string) bool {
+	return strings.ContainsFunc(term, func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	})
 }
 
 // gatePrecision is the one precision assertion, and it carries no threshold:
