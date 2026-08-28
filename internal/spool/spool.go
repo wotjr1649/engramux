@@ -2,9 +2,8 @@
 // deliver. It is what makes I-04 true: an event that cannot reach the service
 // goes to a file instead of being lost.
 //
-// This package owns the writer. The bounds on count, bytes and age, the
-// quarantine, and the drain that replays records back into the service are the
-// next task's, and they read what is written here.
+// This package owns the writer, the three bounds spec 5.6 puts on the
+// directory, and the [Drainer] that replays records back into the service.
 //
 // # The record
 //
@@ -32,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -70,9 +70,10 @@ func Dir() (string, error) {
 // so the second write wins rather than failing.
 //
 // payload is written exactly as given - no length cap, no validation, no
-// re-encoding. The cap belongs to the bounds this package's next task adds,
-// which measure the directory rather than the record, and validating a payload
-// here would be a second place that can decide to drop an event.
+// re-encoding. The cap is the directory's, not the record's: a full spool
+// refuses the write with [ErrRecordBound] or [ErrByteBound] rather than
+// truncating anything, and validating a payload here would be a second place
+// that can decide to drop an event.
 func Write(dir, id string, payload []byte) error {
 	// id becomes a file name. It is minted by uuid.NewV7 today and so is
 	// always a UUID, but a "..\\.." would escape dir, and rejecting every
@@ -82,6 +83,27 @@ func Write(dir, id string, payload []byte) error {
 	// cannot be replayed idempotently.
 	if err := uuid.Validate(id); err != nil {
 		return fmt.Errorf("%w: %.64q: %w", ErrID, id, err)
+	}
+
+	// The bounds, measured against what is already on disk (spec 5.6). The
+	// relay is the only thing that writes a record, so a bound it does not
+	// enforce is a bound the directory does not have. The same scan drops
+	// records past the age bound, which is what usually makes the room the
+	// two bounds below are asking for.
+	//
+	// Refusing is not a drop: the caller still holds the bytes and reports
+	// that it could not save them. A spool that silently discarded the
+	// oldest record to make room would turn a full disk into missing events
+	// nobody counted.
+	held, used, err := scan(dir, time.Now())
+	if err != nil {
+		return err
+	}
+	if len(held) >= maxRecords {
+		return fmt.Errorf("%w: %d records, cap %d", ErrRecordBound, len(held), maxRecords)
+	}
+	if used+int64(len(payload)) > maxBytes {
+		return fmt.Errorf("%w: %d bytes held plus %d, cap %d", ErrByteBound, used, len(payload), maxBytes)
 	}
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
