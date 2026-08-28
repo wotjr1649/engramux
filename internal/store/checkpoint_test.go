@@ -285,20 +285,34 @@ func TestTheWALStaysBoundedAcrossALongRun(t *testing.T) {
 			"this run is too short for the bound to be doing anything", automatic, int64(threshold))
 	}
 	// The loop is asynchronous, so the WAL crosses the threshold before the
-	// next poll sees it. What it may not do is follow the uncheckpointed
-	// curve, and that is what the bound is written against - a quarter of the
-	// curve this same workload produces with no checkpointer, rather than a
-	// multiple of the threshold.
+	// next poll sees it. What it may not do is get far past it - this bound is
+	// a multiple of the checkpointer's own threshold on purpose, because what
+	// the test guards is that the loop keeps the WAL near where it was told
+	// to, not merely that it beats doing nothing. Doing nothing is 4.1 MiB.
 	//
-	// It used to be 4*threshold, which was a comfortable bound until every
-	// ingest also started writing FTS index pages: the peak then ran
-	// 420,272-510,912 B across six runs against a bound of 524,288 B, and the
-	// next thing to make an ingest heavier would have turned a real test into
-	// a flaky one. The guard above keeps automatic above 4*threshold, so this
-	// bound is always above the threshold itself.
-	if bound := automatic / 4; peak > bound {
-		t.Errorf("the WAL peaked at %d bytes against a bound of %d - a quarter of the %d bytes the "+
-			"same workload reached with no checkpointer", peak, bound, automatic)
+	// Five, and the multiplier is measured rather than chosen. Six runs each,
+	// every sample in its own process, because a second run in one process is
+	// warm and peaks at about half what a cold one does:
+	//
+	//	before events_fts existed   263,712-288,432 B   2.01-2.20x
+	//	with the FTS triggers       420,272-510,912 B   3.21-3.90x
+	//	Threshold miscalibrated 2x  576,832-675,712 B   4.40-5.16x
+	//	Threshold miscalibrated 4x  840,512-947,632 B   6.41-7.23x
+	//
+	// The triggers moved the peak by about 1.6-1.8x, which left the old
+	// 4*threshold with 2.6% of headroom - two of six runs came within 3% of
+	// failing. Five gives 28% over the worst correct run and still fails the
+	// 4x miscalibration by 22%, which is the regression that has to stay
+	// caught. It does not resolve a 2x miscalibration reliably, which straddles
+	// it; that is the limit of what 400 ingests of one fixture can separate,
+	// and going higher to buy margin would give up the 4x case too.
+	//
+	// Re-derive it the same way after the next thing that makes an ingest
+	// write more: take the cold peak, keep the multiplier under the smallest
+	// regression you still want to fail.
+	if peak > 5*threshold {
+		t.Errorf("the WAL peaked at %d bytes against a bound of %d - five times the %d byte "+
+			"threshold the checkpointer was given", peak, int64(5*threshold), int64(threshold))
 	}
 }
 
