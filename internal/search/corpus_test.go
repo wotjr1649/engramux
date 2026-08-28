@@ -95,19 +95,39 @@ func leavesOf(raw json.RawMessage) []string {
 // Without it each of the four fixtures carried its derived pair's two words and
 // no other document carried either, so every single-term search returned the
 // same one document the pair did - an AND and an OR are then the same set, and
-// the assertion gated nothing. This repeats exactly one word of one derived
+// the assertion gated nothing. Its leading word repeats one word of one derived
 // pair, `fixture-two fixturebot이` (codex-posttooluse-string), so that
 // `fixture-two` alone now returns two documents against the pair's one.
 //
-// Four things it must not acquire, each of which would move a number some other
-// part of this gate rests on:
+// # Both of its words are load-bearing, and the second one is not obvious
+//
+// `turns` is not filler chosen to make a pair. unicode61 splits turn_fixture_2
+// and turn_fixture_3 - the turn_id values of codex-posttooluse-string and
+// codex-posttooluse-array - on the underscore, and the porter stemmer folds
+// `turn` and `turns` to one stem. So `"turns"*` matches three documents where
+// `"fixture-two"*` matches two, and this pair is the only one over the fixtures
+// whose *second* term is the wider of the two.
+//
+// That is what catches a builder dropping the *leading* token: the query then
+// returns the second term's set, which holds a document the first term's set
+// does not, and the containment check sees it. Reword this to a word the
+// fixtures do not carry and that whole regression class goes uncovered -
+// measured, with `clarifies` in place of `turns` and the builder dropping
+// tokens[0]: containment held 8 of 8, sharp stayed 2, and the class passed.
+// [gateClass] therefore asserts the two directions separately rather than
+// trusting this paragraph to be read.
+//
+// # Four things it must not acquire
+//
+// Each would move a number some other part of this gate rests on:
 //
 //   - `fixturebot`, which would put it in the other term's result set too and
 //     take the pair back to the same set on both sides.
 //   - `cwd`, in any leaf and in any case, and no token beginning `cwd`. The
-//     precision assertion counts leaves as its bound and the fixtures' bound is
-//     0 of 4; one leaf here would make it 1 of 5 and buy the index a document.
-//     A key is not a leaf, but this carries no `cwd` key either.
+//     precision assertion counts leaves as its bound, and with this document in
+//     the set that bound is 0 of 5; one leaf here would make it 1 of 5 and buy
+//     the index a document. A key is not a leaf, but this carries no `cwd` key
+//     either - which is why [precisionKey] no longer holds of every document.
 //   - a Hangul run of three syllables, or a token ending in one of spec 5.7's
 //     particles - both are Hangul, so no Hangul at all settles both.
 //   - a three-hump camelCase identifier, or a path with an extension.
@@ -117,7 +137,7 @@ func leavesOf(raw json.RawMessage) []string {
 // one would add a candidate and change what those classes sample.
 const pairSharpener = `{
   "hook_event_name": "UserPromptSubmit",
-  "prompt": "fixture-two turns this class sharp: one word of one derived pair, repeated here and nowhere else",
+  "prompt": "fixture-two turns this class sharp: the leading word repeats a derived pair, the trailing word stems onto a value two other documents carry",
   "session_id": "gate-two-token-sharpener"
 }`
 

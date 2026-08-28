@@ -44,11 +44,17 @@ const (
 // user's directory (I-10, spec 7.5).
 const eyeballQueries = 3
 
-// precisionKey is the JSON key present in every document. It is a key and not a
-// leaf, which is the whole point: under an index built over raw payload bytes
-// it is a token in every document and matches all of them, and under an index
-// built over string leaves it matches only the documents that talk about it.
-// T4 chooses between those two with this number in hand.
+// precisionKey is the JSON key all but one document carries. It is a key and
+// not a leaf, which is the whole point: under an index built over raw payload
+// bytes it is a token in every document that has it and matches all of them,
+// and under an index built over string leaves it matches only the documents
+// that talk about it. T4 chooses between those two with this number in hand.
+//
+// The exception is [pairSharpener], which carries no `cwd` key, so in fixtures
+// mode 4 of the 5 documents have it. That weakens nothing: the bound is a leaf
+// count and is still 0, the precondition is still 0 < 5, and a raw-payload
+// index would still match 4 against a bound of 0. The corpus has its own
+// exception the other way - see [corpusDocs] on the capture probe.
 const precisionKey = "cwd"
 
 // hangulRun matches a run of precomposed Hangul syllables. Jamo and the
@@ -448,6 +454,7 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	var misses []string
 	var escaped []string
 	var skipped, sharp int
+	var leadingCatchers, trailingCatchers int
 	for _, cd := range cands {
 		hits, err := search.Search(t.Context(), db, cd.query, len(docs))
 		if err != nil {
@@ -455,8 +462,14 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 				mode, c.name, len(cands), total, cd.query, cd.name, err)
 		}
 		if c.name == twoTokensClass {
-			e, s, d := escapesTheIntersection(t, db, cd, hits, len(docs))
+			e, s, d, lead, trail := escapesTheIntersection(t, db, cd, hits, len(docs))
 			escaped, skipped, sharp = append(escaped, e...), skipped+s, sharp+d
+			if lead {
+				leadingCatchers++
+			}
+			if trail {
+				trailingCatchers++
+			}
 		}
 		rank := slices.IndexFunc(hits, func(h search.Hit) bool { return h.ID == cd.id })
 		if rank < 0 {
@@ -480,6 +493,24 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 				"this. Either no document repeats one word of a derived pair, or the pair is already "+
 				"returning at least as much as each term alone, which is the OR that check names",
 				mode, c.name, 2*len(cands)-skipped)
+		}
+		// Also on the passing path, and this pair of numbers is what says
+		// the class covers both dropped-term regressions rather than one.
+		t.Logf("%s / %s: of %d pairs, %d could catch a dropped leading token and %d a dropped "+
+			"trailing one", mode, c.name, len(cands), leadingCatchers, trailingCatchers)
+		if leadingCatchers == 0 {
+			t.Errorf("%s / %s: no pair had its second term matching a document its first does not, so a "+
+				"builder that dropped the first token would return the second term's set, which sits "+
+				"inside both single-term sets, and would pass this class. Nothing here would fail. The "+
+				"pairs this mode derives need one whose second term is the wider of the two - see "+
+				"[escapesTheIntersection] for what the fixtures use", mode, c.name)
+		}
+		if trailingCatchers == 0 {
+			t.Errorf("%s / %s: no pair had its first term matching a document its second does not, so a "+
+				"builder that dropped the second token would return the first term's set, which sits "+
+				"inside both single-term sets, and would pass this class. Nothing here would fail. The "+
+				"pairs this mode derives need one whose first term is the wider of the two - see "+
+				"[escapesTheIntersection] for what the fixtures use", mode, c.name)
 		}
 	}
 	if len(escaped) > 0 {
@@ -540,12 +571,29 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // gated nothing. The four fixtures alone were exactly such a run - all six
 // comparisons of that kind - which is what [pairSharpener] is in the document
 // set to fix. Measured with it, over the fixtures: 8 comparisons over 4 pairs,
-// none skipped, sharp 2 - one from `fixture-two` now selecting two documents
-// against its pair's one, and one from the sharpener's own derived pair. Over
-// the corpus: 50 comparisons, 1 skipped, sharp 45 of the 49 that ran.
+// none skipped, sharp 2. Those two are different mechanisms and not one
+// repeated: `fixture-two` against the pair it was taken from, where it now
+// selects two documents against that pair's one, and `turns` against the
+// sharpener's own pair, where the stemmer's turn/turns fold puts it in three
+// documents against that pair's two. Over the corpus: 50 comparisons, 1
+// skipped, sharp 45 of the 49 that ran.
+//
+// catchesLeadingDrop and catchesTrailingDrop are the pair's two sides, and they
+// are what makes this check's coverage measurable rather than assumed. A
+// dropped term is caught only from the side that survives: a builder that drops
+// the leading token returns the second term's set, which escapes containment
+// only if the second term matched a document the first did not, and a dropped
+// trailing token is the mirror of that. So a class whose every pair has one
+// term's set inside the other's covers one of those two regressions, misses the
+// other, and reports a pass either way - sharp does not notice, because it
+// compares each term against the pair rather than against the other term.
+// [gateClass] requires both directions to have occurred at least once.
+// Measured: over the fixtures exactly one pair of 4 on each side, and the
+// leading side is the sharpener's, which has it only because of the stemmer
+// collision [pairSharpener] documents. Over the corpus, 23 and 22 of 25.
 func escapesTheIntersection(
 	t *testing.T, db *sql.DB, cd candidate, both []search.Hit, limit int,
-) (escaped []string, skipped, sharp int) {
+) (escaped []string, skipped, sharp int, catchesLeadingDrop, catchesTrailingDrop bool) {
 	t.Helper()
 	terms := strings.Fields(cd.query)
 	if len(terms) != 2 {
@@ -553,7 +601,8 @@ func escapesTheIntersection(
 			cd.name, cd.query, len(terms))
 	}
 
-	for _, term := range terms {
+	var sets [2]map[string]bool
+	for i, term := range terms {
 		if !constrains(term) {
 			skipped++
 			continue
@@ -569,6 +618,7 @@ func escapesTheIntersection(
 		for _, h := range alone {
 			ids[h.ID] = true
 		}
+		sets[i] = ids
 		var strangers int
 		for _, h := range both {
 			if !ids[h.ID] {
@@ -581,7 +631,23 @@ func escapesTheIntersection(
 				cd.query, len(both), strangers, len(alone), term))
 		}
 	}
-	return escaped, skipped, sharp
+	// A term that constrains nothing was never searched, so there is no
+	// second set to compare against and this pair settles neither
+	// direction. It is not evidence against either one.
+	if sets[0] == nil || sets[1] == nil {
+		return escaped, skipped, sharp, false, false
+	}
+	return escaped, skipped, sharp, holdsAStranger(sets[1], sets[0]), holdsAStranger(sets[0], sets[1])
+}
+
+// holdsAStranger reports whether a matched a document b did not.
+func holdsAStranger(a, b map[string]bool) bool {
+	for id := range a {
+		if !b[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // constrains reports whether a term can narrow a conjunction at all: whether
@@ -601,11 +667,12 @@ func constrains(term string) bool {
 // gatePrecision is the one precision assertion, and it carries no threshold:
 // the bound is counted from the same documents the search runs over.
 //
-// [precisionKey] is a JSON key every document has. Its leaf count - the
-// documents whose string leaves contain it as a substring - is the most an
+// [precisionKey] is a JSON key all but one document carries - see its own doc
+// for the exception and why it costs this assertion nothing. Its leaf count -
+// the documents whose string leaves contain it as a substring - is the most an
 // index that stores content rather than structure can honestly match. An index
-// over the raw payload bytes matches every document instead, because there the
-// key is text like any other.
+// over the raw payload bytes matches every document that has the key instead,
+// because there the key is text like any other.
 //
 // The precondition is asserted first and is not decoration: when the leaf count
 // reaches the document count the bound is the whole corpus, and an index that
