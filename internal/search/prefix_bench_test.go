@@ -110,20 +110,35 @@ const (
 	tokenizeClause = "tokenize = 'unicode61 remove_diacritics 2'"
 )
 
+// productDDL is the statement the migration created [ftsTable] with, as SQLite
+// kept it, having first asserted that it still spells the tokenizer the way
+// [tokenizeClause] does.
+//
+// Both harnesses that build a second index start here rather than writing their
+// own CREATE: [alternateIndex] varies the prefix clause and [porterIndex]
+// varies the tokenizer, and each needs everything it did not vary to be exactly
+// what the migration wrote. A tokenizer that moves in the migration and not
+// here fails loudly instead of producing two indexes that are not comparable.
+func productDDL(t testing.TB, db *sql.DB) string {
+	t.Helper()
+	var ddl string
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT sql FROM sqlite_schema WHERE name = ?`, ftsTable).Scan(&ddl); err != nil {
+		t.Fatalf("read the DDL of %s: %v", ftsTable, err)
+	}
+	if !strings.Contains(ddl, tokenizeClause) {
+		t.Fatalf("the migration no longer spells the tokenizer %q, so two indexes built from this would "+
+			"not be comparable:\n%s", tokenizeClause, ddl)
+	}
+	return ddl
+}
+
 // alternateIndex creates a second external-content index over events carrying
 // the opposite prefix setting to the migration's, rebuilds it, and returns its
 // name along with a label for each of the two.
 func alternateIndex(b *testing.B, db *sql.DB) (table, prodLabel, altLabel string) {
 	b.Helper()
-	var ddl string
-	if err := db.QueryRowContext(b.Context(),
-		`SELECT sql FROM sqlite_schema WHERE name = ?`, ftsTable).Scan(&ddl); err != nil {
-		b.Fatalf("read the DDL of %s: %v", ftsTable, err)
-	}
-	if !strings.Contains(ddl, tokenizeClause) {
-		b.Fatalf("the migration no longer spells the tokenizer %q, so the two indexes would not be "+
-			"comparable:\n%s", tokenizeClause, ddl)
-	}
+	ddl := productDDL(b, db)
 
 	// The exact clause, not the word: the migration's own comment explains
 	// why the prefix index is absent, and sqlite_schema keeps whatever
@@ -156,14 +171,14 @@ func alternateIndex(b *testing.B, db *sql.DB) (table, prodLabel, altLabel string
 // rebuild reindexes an external-content table from its content table.
 //
 // table is interpolated because a table name cannot be a bind parameter. Every
-// caller passes one of the two constants at the top of this file, and no value
-// from the corpus reaches it.
-func rebuild(b *testing.B, db *sql.DB, table string) {
-	b.Helper()
-	//nolint:gosec // G202: table is a constant from this file, never a value
-	if _, err := db.ExecContext(b.Context(),
+// caller passes one of the three index-name constants this package's tests
+// declare, and no value from the corpus reaches it.
+func rebuild(t testing.TB, db *sql.DB, table string) {
+	t.Helper()
+	//nolint:gosec // G202: table is a constant, never a value
+	if _, err := db.ExecContext(t.Context(),
 		`INSERT INTO `+table+`(`+table+`) VALUES('rebuild')`); err != nil {
-		b.Fatalf("rebuild %s: %v", table, err)
+		t.Fatalf("rebuild %s: %v", table, err)
 	}
 }
 

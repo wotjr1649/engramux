@@ -129,8 +129,9 @@ var classes = []class{
 
 // tokenChar reports whether unicode61 treats r as part of a token rather than
 // as a separator. It is the one place this package states that rule, because
-// two things depend on it - [atTokenStart] and [constrains] - and they were
-// stating it separately and both getting it wrong in the same way.
+// three things depend on it - [atTokenStart], [constrains] and the trim in
+// [deriveParticle] - and the first two were stating it separately and both
+// getting it wrong in the same way.
 //
 // Letters, numbers and private use. The categories are measured in
 // [TestTheIndexAnchorsAPrefixAtATokenStart] rather than read off the
@@ -487,6 +488,24 @@ type candidate struct {
 	id    string
 }
 
+// allCandidates is every document that carries a candidate for c, in document
+// order, with the query c derives from it.
+//
+// It is what [candidatesFor] samples and what
+// [TestEveryCandidateDocumentIsReachable] sweeps whole, and it is one function
+// so that the two cannot come to disagree about what a class's population is -
+// the sweep's claim is precisely that it covers everything the gate's 25
+// documents are drawn from.
+func allCandidates(c class, docs []doc) []candidate {
+	var all []candidate
+	for _, d := range docs {
+		if q := c.derive(d); q != "" {
+			all = append(all, candidate{query: q, name: d.name, id: d.id})
+		}
+	}
+	return all
+}
+
 // candidatesFor returns up to [maxDocsPerClass] of the documents that carry a
 // candidate for c, and how many carried one in total.
 //
@@ -503,12 +522,7 @@ type candidate struct {
 // Both are exact integer arithmetic, so the same corpus samples the same
 // documents every run.
 func candidatesFor(c class, docs []doc) (sample []candidate, total int) {
-	var all []candidate
-	for _, d := range docs {
-		if q := c.derive(d); q != "" {
-			all = append(all, candidate{query: q, name: d.name, id: d.id})
-		}
-	}
+	all := allCandidates(c, docs)
 	if len(all) <= maxDocsPerClass {
 		return all, len(all)
 	}
