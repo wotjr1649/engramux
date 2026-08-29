@@ -43,32 +43,14 @@ Raised while reviewing the Phase 5 design; each is a property of code that alrea
 of that design. Rows 25 and 26 were closed by Phase 5 and are gone; the numbering is not
 renumbered, because a row's number is how the sessions that discussed it refer to it.
 
+A third section stood here, "Phase 5 prerequisites this review surfaced" — the masked status and
+list-sessions replies, `get_event`'s measured bound, the `(id, project_id)` pair, the trust boundary
+on a caller-supplied path, and the bound on the single connection. Every one is now a test, so by
+this file's own rule the list is gone. Spec 8's Phase 5 row names the tests that own them.
+
 | # | Where | What |
 |---|---|---|
-| 27 | the refusal path, all reply types | **A refused request carries no reason.** Observed live on 2026-08-30: `engramux sessions //host/share/dev` is correctly refused - the UNC guard fires - and the caller sees only *"the service replied rejected"*, because `ipc.Ack` has no field for a reason and every refusal is an Ack. A person can guess; a model cannot correct itself, and Phase 5's tool surface is the first caller that has to. Fixing it is a design change to a Phase 1 contract the relay depends on - either a reason field on `Ack` or an error field per reply document - so it is a row and not a patch |
+| 27 | the refusal path, all reply types | **A refused request carries no reason.** Observed live on 2026-08-30: `engramux sessions //host/share/dev` is correctly refused - the UNC guard fires - and the caller sees only *"the service replied rejected"*, because `ipc.Ack` has no field for a reason and every refusal is an Ack. A person can guess; a model cannot correct itself, and Phase 5's tool surface is the first caller that has to. Fixing it is a design change to a Phase 1 contract the relay depends on - either a reason field on `Ack` or an error field per reply document - so it is a row and not a patch. **Narrowed by Phase 5, not closed.** The tool surface no longer has the problem: `internal/mcpserver` calls the same `pipe.Handler` closures rather than dialing the pipe, so the handler's own error is in hand and is what the tool returns, masked. `TestARefusedCallCarriesAMaskedReason` holds it. The row stays because the wire still answers a bare rejected `Ack`, and the CLI is still the caller that reads it |
+| 28 | `internal/mcpconf`, `mcp.json` | **The file's DACL is inherited and grants more than the owning SID.** Measured (spec 7.1): every ACE is `(I)`, Go's `f.Chmod(0o600)` writes nothing to it, and on the machine measured a machine-local group holds `(RX)` on the bearer token. Spec 5.9 accepts it - the token is the whole of the control at that transport either way - and says explicitly that narrowing it is a change of its own: a security descriptor built with `golang.org/x/sys/windows` and passed to `CreateFile`, which is a different atomic-write path from `os.CreateTemp` plus rename. `internal/pipe`'s listener already builds a DACL, so there is a pattern to reuse |
 | 24 | spec 6 vs. the tree | **The 512 KiB field cap is documented but not implemented.** Spec 6 says field values are capped by a limiter that preserves JSON validity. Searching the non-test tree for it finds comments and the query builder's `maxTokenBytes`, and nothing that enforces it; `readStdin` is explicitly unbounded and says so. A stored payload is therefore bounded only by `ipc.MaxFrameLen`. Either implement the cap or correct spec 6 |
 
-## Phase 5 prerequisites this review surfaced
-
-Not backlog in the same sense — these must be settled *by* Phase 5 rather than carried past it.
-Listed here so the next session inherits them rather than rediscovering them.
-
-- `internal/ipc/status.go:39-42` justifies leaving `DatabasePath` unmasked on three grounds — the
-  trust boundary is one SID, the pipe's DACL admits only that SID, and the CLI prints it on the
-  same machine. Every one of those is void when the reader is a model. `status` and
-  `list_sessions` need their own masked responses; `projects.root` is the exact shape
-  `ClassUserPath` matches 1,714 times across 900 of 902 captures.
-- `get_event` would be the first unbounded egress in the product. Every other one is bounded —
-  the excerpt to 240 runes, the event name to 64. It needs a number before it is written, and
-  masking expands rather than shrinks: `secret.Mask` re-marshals whenever anything matched and
-  `encoding/json` HTML-escapes.
-- `events.id` is a global relay-minted UUID, so `get_event` must check `(id, project_id)`
-  together or a known id reads across projects.
-- A model-supplied project path is a filesystem operation: `project.Identify` stats each ancestor
-  and takes no context, and `internal/store/ingest.go` already records that a down UNC host or a
-  vanished mapped drive can stall the service. Reject non-absolute and UNC paths, and bound the
-  walk.
-- MCP is the first non-human caller of the single database connection. Pool waiting is not
-  bounded by `busy_timeout` — that governs SQLite lock contention, and there is no second
-  connection to contend with. A concurrency cap and a query deadline are needed whatever the
-  transport is.
