@@ -121,6 +121,7 @@ row on its own, delete the row — the test is the better owner.
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
 | A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
 | Redaction produces JSON that no longer parses | A `\S+` token pattern swallows the closing quote and brace. The payload must stay valid JSON (spec §6) |
+| The database file more than doubles, and the first start on the new binary pauses | Migration `00002` backfills `events.leaves` — a second copy of every payload's string text — and then rebuilds the whole FTS index, both in one transaction. Measured once over a copy of a real installation, 8,177 events in 40,751,104 B: `store.Migrate` took 1.30 s and left the file at 87,224,320 B, and the WAL grew to the size of the migrated database and was gone once the pool closed. One cost per database rather than per start, but the disk needs room for both files at once |
 
 ## Boundaries
 
