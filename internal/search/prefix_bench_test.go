@@ -107,7 +107,7 @@ const searchLimit = 20
 //nolint:gosec // G101: false positive, see above
 const (
 	prefixClause   = "prefix = '2 3 4'"
-	tokenizeClause = "tokenize = 'porter unicode61 remove_diacritics 2'"
+	tokenizeClause = "tokenize = 'unicode61 remove_diacritics 2'"
 )
 
 // alternateIndex creates a second external-content index over events carrying

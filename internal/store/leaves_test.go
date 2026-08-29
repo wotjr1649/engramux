@@ -180,9 +180,9 @@ func TestLeavesCoercesWhatIsNotWellFormed(t *testing.T) {
 //
 // The count is asserted too, and separately: two equal one-token lists would
 // also satisfy equality, and that is the failure where the ill-formed run
-// joined the words instead of separating them. The stems themselves are not
-// asserted - porter decides those, and pinning them here would be a test of the
-// stemmer rather than of the separator.
+// joined the words instead of separating them. The terms themselves are not
+// asserted - the tokenizer decides those, and pinning them here would be a test
+// of the tokenizer rather than of the separator.
 func TestTheTokenizerReadsBothIllFormedShapesTheSameWay(t *testing.T) {
 	ctx := t.Context()
 	db := migrated(t)

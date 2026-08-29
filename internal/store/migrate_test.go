@@ -278,11 +278,16 @@ func TestMigrateCreatesTheDeclaredTables(t *testing.T) {
 // index, no second column - were held by nothing at all.
 //
 // The whole argument list is compared, not a substring. A substring check for
-// "porter" passes on a tokenizer that also lost remove_diacritics, and no
-// substring check can assert that a clause is *absent* without naming every
-// clause anyone might add. Splitting on commas is safe because no clause this
-// table may carry contains one; a clause that did would land here as an
-// unreadable diff, which is the right way to find out.
+// "unicode61" passes on a tokenizer that also lost remove_diacritics or that
+// regained the porter stemmer in front of it, and no substring check can assert
+// that a clause is *absent* without naming every clause anyone might add.
+// Splitting on commas is safe because no clause this table may carry contains
+// one; a clause that did would land here as an unreadable diff, which is the
+// right way to find out.
+//
+// Whole-list comparison is what caught the Phase 4 tokenizer change: dropping
+// porter from the migration failed here first, by name, before any search test
+// noticed.
 func TestEventsFTSCarriesExactlyTheDecidedOptions(t *testing.T) {
 	db := migrated(t)
 	var ddl string
@@ -301,7 +306,7 @@ func TestEventsFTSCarriesExactlyTheDecidedOptions(t *testing.T) {
 	want := []string{
 		"leaves",
 		"content = 'events'",
-		"tokenize = 'porter unicode61 remove_diacritics 2'",
+		"tokenize = 'unicode61 remove_diacritics 2'",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("events_fts options = %q, want %q\nfull DDL: %s", got, want, ddl)

@@ -101,21 +101,33 @@ func leavesOf(raw json.RawMessage) []string {
 //
 // # Both of its words are load-bearing, and the second one is not obvious
 //
-// `turns` is not filler chosen to make a pair. unicode61 splits turn_fixture_2
-// and turn_fixture_3 - the turn_id values of codex-posttooluse-string and
-// codex-posttooluse-array - on the underscore, and the porter stemmer folds
-// `turn` and `turns` to one stem. So `"turns"*` matches three documents where
-// `"fixture-two"*` matches two, and this pair is the only one over the fixtures
-// whose *second* term is the wider of the two.
+// `stdout` is not filler chosen to make a pair. It is a plain token of
+// claude-code-posttooluse-object's `tool_response.stdout` *value*, and of no
+// other fixture - in particular not of codex-posttooluse-string, which is the
+// one document besides this that `"fixture-two"*` reaches. So each term matches
+// two documents, the pair matches one, and each term matches one document the
+// other does not.
 //
-// That is what catches a builder dropping the *leading* token: the query then
-// returns the second term's set, which holds a document the first term's set
-// does not, and the containment check sees it. Reword this to a word the
-// fixtures do not carry and that whole regression class goes uncovered -
-// measured, with `clarifies` in place of `turns` and the builder dropping
-// tokens[0]: containment held 8 of 8, sharp stayed 2, and the class passed.
-// [gateClass] therefore asserts the two directions separately rather than
-// trusting this paragraph to be read.
+// That symmetry is what makes this pair catch a dropped token from either side.
+// A builder that drops the *leading* token returns the second term's set, which
+// holds claude-code-posttooluse-object; a builder that drops the *trailing* one
+// returns the first term's set, which holds codex-posttooluse-string. Either
+// way the containment check sees a document the pair does not return. Measured
+// on this wording, with [matchExpression] made to drop tokens[0]: 1 of the 4
+// pairs escaped containment, and it was this one, on the term `stdout`. Reword
+// either word to something the other fixtures do not carry and that stops being
+// true - measured on the previous wording, with `clarifies` in place of the
+// trailing word and the same dropped token: containment held 8 of 8, sharp
+// stayed 2, and the class passed. [gateClass] therefore asserts the two
+// directions separately rather than trusting this paragraph to be read.
+//
+// It used to be `turns`, and it carried the leading side through the porter
+// stemmer's fold of `turns` onto the `turn` that unicode61 splits out of
+// turn_fixture_2 and turn_fixture_3. Phase 4 dropped porter from the tokenizer
+// (spec 5.7) and that fold went with it, taking the leading-drop catcher to
+// zero and this class red. What carries it now is a token that is simply
+// present in one fixture and absent from the other, which no tokenizer setting
+// can withdraw.
 //
 // # Four things it must not acquire
 //
@@ -137,7 +149,7 @@ func leavesOf(raw json.RawMessage) []string {
 // one would add a candidate and change what those classes sample.
 const pairSharpener = `{
   "hook_event_name": "UserPromptSubmit",
-  "prompt": "fixture-two turns this class sharp: the leading word repeats a derived pair, the trailing word stems onto a value two other documents carry",
+  "prompt": "fixture-two stdout is what sharpens this class: the leading word repeats a word of a derived pair, and the trailing word is a plain token that one other fixture carries in a tool response",
   "session_id": "gate-two-token-sharpener"
 }`
 

@@ -69,10 +69,21 @@ END;
 -- prefix query at 18,020 events from 0.79 ms to 0.64 ms, and costs 2.8x the
 -- index to do it (spec 5.7). A later migration plus a `rebuild` adds it if a
 -- real workload ever wants it back.
+--
+-- No `porter` either, and that one is a correction rather than an omission -
+-- spec 5.7 named it until Phase 4 measured it. Queries expand per token with a
+-- trailing `*`, so a prefix already reaches the longer form; what the stemmer
+-- adds on top of that is a query token rewritten to something that is not a
+-- prefix of itself, and the document then becomes unreachable. Measured over
+-- the corpus, per spec 5.7: porter loses 5 of 2,262 known-item documents that
+-- unicode61 alone finds, all of them in the Korean-particle and camelCase
+-- shapes this corpus is made of, and it wins none back. Changing this clause
+-- means re-running `rebuild`, which is why it belongs to this migration and not
+-- to a later one; 00002 has never been applied to a persistent database.
 CREATE VIRTUAL TABLE events_fts USING fts5(
     leaves,
     content = 'events',
-    tokenize = 'porter unicode61 remove_diacritics 2'
+    tokenize = 'unicode61 remove_diacritics 2'
 );
 
 -- Index the rows that were already here, after the backfill has given them

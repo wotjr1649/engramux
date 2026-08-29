@@ -125,19 +125,80 @@ var classes = []class{
 	{"a path basename", wantPathBasename, derivePathBasename},
 }
 
-// deriveKoreanTwoChar takes the first Hangul run of three or more syllables and
-// returns its first two. Three is the floor because two syllables of a
-// two-syllable run is the run itself, which is a whole-word search and not this
-// class; the class exists for the query that only a trailing star can reach.
+// atTokenStart reports whether byte offset i in leaf is where unicode61 would
+// begin a token: the start of the string, or just after a rune that is neither
+// a letter nor a digit.
+//
+// It is what makes a derived query answerable at all, and the derivations that
+// call it are not being made lenient by it. An FTS5 prefix query anchors at a
+// token start, and unicode61 takes the Unicode letter and number categories as
+// token characters and everything else as a separator - so the Hangul run
+// inside `0단계가` opens no token of its own, and no prefix query reaches it
+// whatever the index holds. Spec 5.7 says the same thing from the other side: a
+// prefix index does not promise a mid-token match. A class deriving such a
+// query measures its own derivation rather than the index, and a class that
+// cannot pass however the index is built gates nothing.
+//
+// Measured over the corpus: it moves 2 of the 196 two-character Korean
+// candidates and 2 of the 162 particle candidates, and takes both classes from
+// 194 of 196 and 160 of 162 to all of them. It drops no document from either
+// class - every document that carried a run anywhere carried one at a token
+// start as well.
+func atTokenStart(leaf string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(leaf[:i])
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+}
+
+// deriveKoreanTwoChar takes the first Hangul run of three or more syllables
+// that begins at a token start and returns its first two syllables. Three is
+// the floor because two syllables of a two-syllable run is the run itself,
+// which is a whole-word search and not this class; the class exists for the
+// query that only a trailing star can reach.
+//
+// A run that does not begin at a token start is passed over rather than cut -
+// see [atTokenStart] for why the query it would produce cannot be answered.
 func deriveKoreanTwoChar(d doc) string {
 	for _, leaf := range d.leaves {
-		for _, run := range hangulRun.FindAllString(leaf, -1) {
-			if r := []rune(run); len(r) >= 3 {
+		for _, loc := range hangulRun.FindAllStringIndex(leaf, -1) {
+			if !atTokenStart(leaf, loc[0]) {
+				continue
+			}
+			if r := []rune(leaf[loc[0]:loc[1]]); len(r) >= 3 {
 				return string(r[:2])
 			}
 		}
 	}
 	return ""
+}
+
+// TestDeriveKoreanTwoChar pins [deriveKoreanTwoChar] to exact queries, for the
+// reason [TestDeriveParticleStems] exists: over the corpus a derivation that
+// cuts inside a token and one that cuts at a token start differ on 2 documents
+// of 196, and the gate samples 25 - so which of the two rules is in place is
+// not something the gate reliably shows.
+//
+// Every input is invented. The digit-led rows are the shape that was found in
+// the corpus and are the reason this rule changed.
+func TestDeriveKoreanTwoChar(t *testing.T) {
+	for _, tc := range []struct{ leaf, want string }{
+		{"단계별로 진행한다", "단계"},         // a run at the start of the leaf
+		{"(픽스처) 응답", "픽스"},          // after a separator, which is a token start
+		{"0단계가 끝났다", "끝났"},          // the digit-led run is skipped, the next one is taken
+		{"0단계가", ""},                // and when it is the only run there is no candidate
+		{"Codex단계별 확인", ""},         // a run after a letter is inside that token too
+		{"replay를 다시읽기", "다시"},      // a one-syllable run is too short, the next is not
+		{"두 글자", ""},                // no run reaches three syllables
+		{"nothing here at all", ""}, // no Hangul
+	} {
+		t.Run(tc.leaf, func(t *testing.T) {
+			if got := deriveKoreanTwoChar(doc{leaves: []string{tc.leaf}}); got != tc.want {
+				t.Errorf("deriveKoreanTwoChar(%q) = %q, want %q", tc.leaf, got, tc.want)
+			}
+		})
+	}
 }
 
 // deriveParticle takes the first whitespace-delimited token that ends in a
@@ -147,14 +208,21 @@ func deriveKoreanTwoChar(d doc) string {
 // Codex는, and 서비스가. and the particle is then not the last character. Only
 // trailing punctuation: anything inside the token is part of it, and unicode61
 // would split there anyway.
+//
+// The stem must begin at a token start, and a token whose stem does not is
+// passed over rather than ending the search - 2단계를 yields the stem 단계,
+// which no prefix query can reach because the digit in front of it makes the
+// whole thing one token. [atTokenStart] carries the reasoning and the
+// measurement; this is the same defect the two-character Korean class had, and
+// on the same corpus documents.
 func deriveParticle(d doc) string {
 	for _, leaf := range d.leaves {
 		for _, tok := range strings.Fields(leaf) {
 			tok = strings.TrimRightFunc(tok, func(r rune) bool {
 				return r < utf8.RuneSelf && !unicode.IsLetter(r) && !unicode.IsDigit(r)
 			})
-			if m := particleStem.FindStringSubmatch(tok); m != nil {
-				return m[1]
+			if m := particleStem.FindStringSubmatchIndex(tok); m != nil && atTokenStart(tok, m[2]) {
+				return tok[m[2]:m[3]]
 			}
 		}
 	}
@@ -197,6 +265,8 @@ func TestDeriveParticleStems(t *testing.T) {
 		{"프로젝트에서 찾는다", "프로젝트"},             // 에서 before 에
 		{"Codex는, 그리고", "Codex"},           // trailing ASCII punctuation
 		{"relay-v2를 재시작", "v2"},            // a digit-carrying Latin run
+		{"2단계를 끝냈다", ""},                   // the stem is inside a digit-led token
+		{"0단계가 프로젝트에서 찾는다", "프로젝트"},        // so that token is passed over, not the leaf
 		{"종이 한 장", ""},                     // a one-syllable stem is not a candidate
 		{"nothing to strip here", ""},      // no particle anywhere
 	} {
@@ -571,12 +641,13 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // gated nothing. The four fixtures alone were exactly such a run - all six
 // comparisons of that kind - which is what [pairSharpener] is in the document
 // set to fix. Measured with it, over the fixtures: 8 comparisons over 4 pairs,
-// none skipped, sharp 2. Those two are different mechanisms and not one
-// repeated: `fixture-two` against the pair it was taken from, where it now
-// selects two documents against that pair's one, and `turns` against the
-// sharpener's own pair, where the stemmer's turn/turns fold puts it in three
-// documents against that pair's two. Over the corpus: 50 comparisons, 1
-// skipped, sharp 45 of the 49 that ran.
+// none skipped, sharp 3. Those three are two mechanisms and not one repeated.
+// `fixture-two` is the wider term twice - against the pair it was taken from,
+// and against the sharpener's own pair - because it selects two documents where
+// each of those pairs selects one. `stdout` is the wider term once, against the
+// sharpener's pair, because it is a token of claude-code-posttooluse-object as
+// well. Over the corpus: 50 comparisons, 1 skipped, sharp 45 of the 49 that
+// ran.
 //
 // catchesLeadingDrop and catchesTrailingDrop are the pair's two sides, and they
 // are what makes this check's coverage measurable rather than assumed. A
@@ -588,9 +659,12 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 // other, and reports a pass either way - sharp does not notice, because it
 // compares each term against the pair rather than against the other term.
 // [gateClass] requires both directions to have occurred at least once.
-// Measured: over the fixtures exactly one pair of 4 on each side, and the
-// leading side is the sharpener's, which has it only because of the stemmer
-// collision [pairSharpener] documents. Over the corpus, 23 and 22 of 25.
+// Measured: over the fixtures, 1 pair of 4 on the leading side and 2 on the
+// trailing side. The leading one is the sharpener's, and it has it because
+// `stdout` is a token of one fixture that `fixture-two` does not reach - see
+// [pairSharpener], and note that this is the direction that went to zero when
+// the tokenizer lost porter and the fold that used to carry it. Over the
+// corpus, 23 and 22 of 25.
 func escapesTheIntersection(
 	t *testing.T, db *sql.DB, cd candidate, both []search.Hit, limit int,
 ) (escaped []string, skipped, sharp int, catchesLeadingDrop, catchesTrailingDrop bool) {
