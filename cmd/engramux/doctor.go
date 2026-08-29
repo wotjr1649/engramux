@@ -385,7 +385,7 @@ func reportMCP(ctx context.Context) bool {
 //
 // So marker is the exact string the installer writes and a path cannot produce.
 // Claude Code's `"engramux":` needs a quote immediately before the name, which
-// a path key like "D:\\AI_DEV\\engramux" does not have - the character there is
+// a path key like "D:\\src\\engramux" does not have - the character there is
 // a backslash. Codex's is a TOML table header. A hand-written entry spelled
 // some other way reads as not registered, which is a false negative and is the
 // direction to be wrong in.
