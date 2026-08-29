@@ -162,6 +162,7 @@ before write.
 |---|---|
 | Claude Code dropping static headers | **T5, before the installer depends on it.** It is the one thing that could still change the transport |
 | `mcp.json`'s file permissions on Windows | **T3.** Measure the ACL that results, or leave §5.9's `[unverified]` standing with what rests on it |
+| Backlog 27, a refusal with no reason | **Read it before T4.** A refused request answers a bare rejected `Ack`, so a caller that sent a bad project learns only that it was refused. A person guesses; a model cannot. The tool surface is the first caller that has to, so decide there whether the tools carry their own error text or whether the wire gains a reason - and if it is the wire, that is a design change to a Phase 1 contract the relay depends on |
 | Backlog 24, the unimplemented 512 KiB cap | Still a row. Implementing it and correcting §6 are different decisions and neither is Phase 5's |
 | The 23 remaining backlog rows | Untouched unless a task is already standing in that file |
 | Phase 6 soak | After the merge. The service binary stops changing when this session ends |

@@ -45,6 +45,7 @@ renumbered, because a row's number is how the sessions that discussed it refer t
 
 | # | Where | What |
 |---|---|---|
+| 27 | the refusal path, all reply types | **A refused request carries no reason.** Observed live on 2026-08-30: `engramux sessions //host/share/dev` is correctly refused - the UNC guard fires - and the caller sees only *"the service replied rejected"*, because `ipc.Ack` has no field for a reason and every refusal is an Ack. A person can guess; a model cannot correct itself, and Phase 5's tool surface is the first caller that has to. Fixing it is a design change to a Phase 1 contract the relay depends on - either a reason field on `Ack` or an error field per reply document - so it is a row and not a patch |
 | 24 | spec 6 vs. the tree | **The 512 KiB field cap is documented but not implemented.** Spec 6 says field values are capped by a limiter that preserves JSON validity. Searching the non-test tree for it finds comments and the query builder's `maxTokenBytes`, and nothing that enforces it; `readStdin` is explicitly unbounded and says so. A stored payload is therefore bounded only by `ipc.MaxFrameLen`. Either implement the cap or correct spec 6 |
 
 ## Phase 5 prerequisites this review surfaced
