@@ -28,6 +28,9 @@ go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
 go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
 go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
+go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # spec §8's Phase 6 gate,
+go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
+bash scripts/soak-sample.sh --every 1800                                     # spec §8's Phase 6 soak
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
@@ -41,6 +44,19 @@ directory is absent. Before pasting its `-v` output anywhere, read the table row
 The second command is not covered by the first — `TestEveryCandidateDocumentIsReachable` sweeps
 every candidate document of every class rather than the gate's 25-per-class sample, under two
 tokenizer arms, and it is what priced the stemmer out of `00002`.
+
+The Phase 6 gate is two commands because it is two modes and neither alone is the audit: the
+`internal/service` half loads one event with a generated sample of every shape and sweeps every
+reply document, MCP tool result and MCP tool error; the `internal/secret` half masks every real
+capture and rescans it, and skips itself when `.capture/` is absent. What each surface is and
+which five are deliberately out of scope is spec §8's Phase 6 row — do not re-derive it. Neither
+command prints a document or a file name — measured, 0 of the 24 and 0 of the 5 `-v` lines carry a
+drive-letter path — so unlike `TestPhase4Gate` their output is safe to paste.
+
+`scripts/soak-sample.sh` appends one TSV line to `.capture/soak/soak.tsv` and reads everything
+from outside the service, because the soak's precondition is that the binary stops changing. A
+`--every` loop dies with the shell that started it; surviving a logoff needs a scheduled task,
+which is the user's to create.
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.
