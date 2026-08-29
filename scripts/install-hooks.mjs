@@ -26,11 +26,19 @@
 //     settings.json is rewritten and then Codex's hooks.json fails to parse,
 //     the first stays installed with its backup beside it.
 //
+//   - Registers the MCP endpoint with both hosts, when the service has
+//     published one. That is spec 5.9's second half and it needs the service to
+//     have started at least once on this build: the service binds the port and
+//     mints the token, and this script only ever READS mcp.json. On a first
+//     install there is nothing to read yet, so the run says so and the second
+//     run - after the service is up - is what registers it.
+//
 // The two hosts take different shapes (spec 4.2), and this is not a detail:
 // Claude Code takes `command` plus an `args` array, exec form, no shell. Codex
 // takes `commandWindows` as one string. Claude Code has no `commandWindows`
 // key, so a hook that only sets it is never invoked.
 
+import { execFileSync } from 'node:child_process'
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync,
   openSync, closeSync, fsyncSync, renameSync,
@@ -223,7 +231,7 @@ function commitInstalls(plans) {
     if (plan === null) continue
     const saved = backup(plan.path)
     writeAtomic(plan.path, plan.text)
-    changes.push(`${plan.label}: ${remove ? 'removed' : 'installed'} ${EVENT_NAMES.length} events`)
+    changes.push(`${plan.label}: ${plan.done ?? `${remove ? 'removed' : 'installed'} ${EVENT_NAMES.length} events`}`)
     changes.push(`${plan.label}: backup ${saved}`)
   }
 }
@@ -381,9 +389,181 @@ const codexPlan = planInstall(CODEX, 'codex', (event) => {
 
 commitInstalls([claudePlan, codexPlan])
 
+// ---------------------------------------------------------------------------
+// The MCP endpoint (spec 5.9)
+// ---------------------------------------------------------------------------
+//
+// The service binds the port, mints the token, and writes mcp.json. This script
+// READS that file and never writes it, which is spec 5.9's assignment and not a
+// convenience: an installer that chose the port would be choosing it before
+// anything bound it, and an installer that minted the token would be minting
+// one the service does not hold.
+//
+// So this half needs the service to have run at least once on this build. On a
+// first install it has not, and the run says so rather than inventing a URL.
+
+const MCP_NAME = 'engramux'
+const MCP_JSON = join(LOCAL, 'engramux', 'mcp.json')
+// The MCP entries do not live beside the hook entries in either host. Claude
+// Code keeps hooks in ~/.claude/settings.json and MCP servers in ~/.claude.json;
+// Codex keeps hooks in ~/.codex/hooks.json and MCP servers in
+// ~/.codex/config.toml. Overridable for the same reason CLAUDE and CODEX are.
+const CODEX_CONFIG = process.env.ENGRAMUX_CODEX_CONFIG ?? join(HOME, '.codex', 'config.toml')
+
+// unsafeValue is the trust boundary for the two strings out of mcp.json.
+//
+// Both are written into a TOML string and a command-line argument, and both
+// come from a file on disk that this script did not write in this run. The URL
+// is a loopback URL and the token is base32 from crypto/rand, so every value
+// the service produces passes; what this refuses is a hand-edited file with a
+// quote, a backslash, a space or a control character in it, which is the only
+// way either destination could be made to mean something else.
+const unsafeValue = (v) =>
+  typeof v !== 'string' || v === '' || /[^\x21-\x7e]/.test(v) || /["\\]/.test(v)
+
+// readEndpoint is mcp.json, or null when there is nothing usable in it.
+function readEndpoint() {
+  if (!existsSync(MCP_JSON)) return null
+  let doc
+  try {
+    doc = JSON.parse(readFileSync(MCP_JSON, 'utf8'))
+  } catch (err) {
+    // The message, never the file: it holds the token.
+    changes.push(`mcp: ${MCP_JSON} does not parse (${err.name}) - skipped`)
+    return null
+  }
+  if (unsafeValue(doc?.url) || unsafeValue(doc?.token)) {
+    changes.push(`mcp: ${MCP_JSON} holds a url or token this will not pass on - skipped`)
+    return null
+  }
+  return { url: doc.url, token: doc.token }
+}
+
+// spliceCodex rewrites config.toml's [mcp_servers.engramux] table, leaving the
+// rest of the file alone.
+//
+// It is a line splice and not a TOML round trip, and that is deliberate: Node
+// has no TOML parser in its standard library, and a parse-and-re-emit would
+// reformat a file full of another product's settings and drop every comment in
+// it to write four lines. The table header is unambiguous - a TOML table runs
+// from its header to the next line that starts one - so removing our own table
+// and appending it again is the whole operation.
+//
+// It normalises trailing blank lines, so the very first run may report a change
+// that is only whitespace. Every run after that is idempotent, because the
+// previous run left the file in exactly this shape.
+function spliceCodex(text, endpoint) {
+  const header = `[mcp_servers.${MCP_NAME}]`
+  if (remove && !text.includes(header)) return text
+
+  const kept = []
+  let inTable = false
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === header) {
+      inTable = true
+      continue
+    }
+    if (inTable && trimmed.startsWith('[')) inTable = false
+    if (!inTable) kept.push(line)
+  }
+
+  let out = kept.join('\n').replace(/\n+$/, '')
+  if (!remove) {
+    // http_headers is a documented map of static header values that Codex
+    // checks before its OAuth fallback engages, so a static Authorization
+    // needs no environment variable. The inline `bearer_token` field is a
+    // different thing and is rejected by Codex; `bearer_token_env_var`
+    // is the other documented route and would need a variable the service
+    // has no way to set in a host's environment.
+    out += `\n\n${header}\nurl = "${endpoint.url}"\n` +
+      `http_headers = { Authorization = "Bearer ${endpoint.token}" }`
+  }
+  return out + '\n'
+}
+
+// planCodexMCP has planInstall's contract: read, decide, write nothing.
+function planCodexMCP(endpoint) {
+  if (!existsSync(CODEX_CONFIG)) {
+    changes.push(`codex mcp: ${CODEX_CONFIG} does not exist - skipped`)
+    return null
+  }
+  const before = readFileSync(CODEX_CONFIG, 'utf8')
+  const after = spliceCodex(before, endpoint)
+  if (before === after) {
+    changes.push('codex mcp: already up to date')
+    return null
+  }
+  if (!apply) {
+    changes.push(`codex mcp: would ${remove ? 'remove' : 'install'} [mcp_servers.${MCP_NAME}] in ${CODEX_CONFIG}`)
+    return null
+  }
+  return { path: CODEX_CONFIG, label: 'codex mcp', text: after, done: `${remove ? 'removed' : 'installed'} [mcp_servers.${MCP_NAME}]` }
+}
+
+// claudeCommand is the `claude` binary, or null when it is not on PATH.
+//
+// `where` rather than a guess at the path: Claude Code installs to more than
+// one place, and its own launcher is what knows which. A .cmd or .bat shim -
+// what an npm global install leaves - cannot be spawned without a shell since
+// Node 18.20, so it is reported as unspawnable rather than run through one:
+// the arguments below carry a secret, and hand-quoting a command line to get
+// it past cmd.exe is not a thing to do with a secret.
+function claudeCommand() {
+  try {
+    const found = execFileSync('where', ['claude'], { encoding: 'utf8' })
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    return found.find((p) => p.toLowerCase().endsWith('.exe')) ?? null
+  } catch {
+    return null
+  }
+}
+
+// installClaudeMCP registers the endpoint with Claude Code through its own CLI.
+//
+// ~/.claude.json is not edited directly, and that is the one place this script
+// treats a host's file as off limits. It is Claude Code's live state file -
+// per-project history alongside the MCP entries - rewritten by a running
+// Claude Code on its own schedule, so a read-modify-write from here is a lost
+// update against whatever it wrote in between. `claude mcp add` is that
+// product's own supported write, and it is the same route a person would use.
+//
+// Nothing about the failure is printed except its errno or exit status. An
+// execFileSync error message carries the whole command line, and the command
+// line carries the bearer token (spec 6.1).
+function installClaudeMCP(endpoint) {
+  const bin = claudeCommand()
+  if (bin === null) {
+    changes.push('claude-code mcp: no `claude` executable on PATH - skipped')
+    return
+  }
+  const args = remove
+    ? ['mcp', 'remove', '--scope', 'user', MCP_NAME]
+    : ['mcp', 'add', '--scope', 'user', '--transport', 'http', MCP_NAME, endpoint.url,
+      '--header', `Authorization: Bearer ${endpoint.token}`]
+  if (!apply) {
+    changes.push(`claude-code mcp: would ${remove ? 'remove' : 'install'} ${MCP_NAME} with ${bin}`)
+    return
+  }
+  try {
+    execFileSync(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    changes.push(`claude-code mcp: ${remove ? 'removed' : 'installed'} ${MCP_NAME} at user scope`)
+  } catch (err) {
+    changes.push(`claude-code mcp: FAILED (${err.code ?? `exit ${err.status}`}) - run \`claude mcp list\` to see what it has`)
+  }
+}
+
+const endpoint = readEndpoint()
+if (!remove && endpoint === null) {
+  changes.push(`mcp: no endpoint published in ${MCP_JSON} - start the service and run this again`)
+} else {
+  commitInstalls([planCodexMCP(endpoint)])
+  installClaudeMCP(endpoint)
+}
+
 console.log(changes.join('\n'))
 console.log(
   apply
-    ? `\ndone. start the service before it matters:\n  ${SERVICE}\nthen check:\n  ${RELAY} status`
+    ? `\ndone. start the service before it matters:\n  ${SERVICE}\nthen check:\n  ${RELAY} doctor`
     : '\nnothing was written. re-run with --apply.',
 )

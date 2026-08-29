@@ -477,11 +477,30 @@ func installerBin(tmp string) string { return filepath.Join(tmp, "local", "engra
 // cannot land outside tmp even if the override were ignored.
 func runInstaller(t *testing.T, node, script, tmp, codexPath, claudePath string, args ...string) ([]byte, error) {
 	t.Helper()
+	return runInstallerWithPath(t, node, script, tmp, codexPath, claudePath, os.Getenv("PATH"), args...)
+}
+
+// runInstallerWithPath is [runInstaller] with the PATH the script sees.
+//
+// It exists for one reason and it is not tidiness. The MCP half of the
+// installer registers the endpoint with Claude Code by running `claude mcp add
+// --scope user`, which writes the caller's own ~/.claude.json - a file no test
+// may touch, and one the HOME redirection above does not protect, because the
+// `claude` binary resolves its own configuration and does not read HOME from
+// this environment. A test that seeds mcp.json and applies would otherwise
+// register a temporary directory's endpoint with the developer's Claude Code.
+//
+// An empty PATH is what stops it: the script finds `claude` with `where`, and
+// `where` is itself resolved through PATH, so an empty one fails the lookup and
+// the script reports the host as skipped. node is spawned by absolute path and
+// does not need PATH at all.
+func runInstallerWithPath(t *testing.T, node, script, tmp, codexPath, claudePath, pathEnv string, args ...string) ([]byte, error) {
+	t.Helper()
 	//nolint:gosec // G204: node is what LookPath resolved, script is a path this test built under t.TempDir
 	cmd := exec.CommandContext(t.Context(), node, append([]string{script}, args...)...)
 	cmd.Dir = tmp
 	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
+		"PATH=" + pathEnv,
 		"SystemRoot=" + os.Getenv("SystemRoot"),
 		"HOME=" + filepath.Join(tmp, "home"),
 		"USERPROFILE=" + filepath.Join(tmp, "home"),
@@ -584,4 +603,113 @@ func TestApplyLeavesNoTemporaryFileBehind(t *testing.T) {
 			t.Errorf("%s does not parse after --apply: %v", filepath.Base(path), err)
 		}
 	}
+}
+
+// TestTheInstallerSplicesTheCodexMCPTableAndLeavesTheRestAlone is spec 5.9's
+// installer half at the host whose file this script writes itself.
+//
+// Codex takes an MCP server as a TOML table in ~/.codex/config.toml, and that
+// file is full of another product's settings - trust levels per project, TUI
+// preferences, feature flags. The installer splices its own table in and out by
+// its header rather than parsing and re-emitting the document, because Node has
+// no TOML parser and a re-emit would reformat everything and drop every comment
+// to write three lines. What that has to hold is asserted here: the table is
+// written, the neighbours survive it, a second apply changes nothing, and a
+// remove leaves the file the way it started.
+//
+// The token is asserted absent from the output as well. It is a spec 6.1
+// secret, and an installer that echoed the command it ran would put it in a
+// terminal.
+func TestTheInstallerSplicesTheCodexMCPTableAndLeavesTheRestAlone(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+	seed(t, codexPath, map[string]any{"hooks": map[string]any{}})
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+
+	// The file the script derives from the redirected HOME, and the one the
+	// service would have published. Both are this test's own.
+	const (
+		endpoint  = "http://127.0.0.1:52341/mcp"
+		token     = "ABCDEFGHIJKLMNOPQRSTUVWXY2"
+		neighbour = "[tui]\nnotifications = true\n"
+	)
+	config := filepath.Join(tmp, "home", ".codex", "config.toml")
+	mcpJSON := filepath.Join(tmp, "local", "engramux", "mcp.json")
+	for _, dir := range []string{filepath.Dir(config), filepath.Dir(mcpJSON)} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}
+	writeFile(t, config, neighbour)
+	writeFile(t, mcpJSON, `{"url":"`+endpoint+`","token":"`+token+`"}`)
+
+	out, err := runInstallerWithPath(t, node, script, tmp, codexPath, claudePath, "", "--apply")
+	if err != nil {
+		t.Fatalf("install-hooks.mjs --apply: %v\n%s", err, out)
+	}
+	if bytes.Contains(out, []byte(token)) {
+		// The output is not printed on this failure: it carries the
+		// token.
+		t.Fatal("the installer printed the bearer token")
+	}
+	// Claude Code's own CLI is what writes its side, and an empty PATH is
+	// what keeps this test from reaching the developer's configuration
+	// through it. If that lookup ever starts succeeding here, this test is
+	// writing outside its temporary directory.
+	if !bytes.Contains(out, []byte("no `claude` executable on PATH")) {
+		t.Fatalf("the installer found a claude binary with an empty PATH:\n%s", out)
+	}
+
+	got := readFile(t, config)
+	for _, want := range []string{
+		"[mcp_servers.engramux]",
+		`url = "` + endpoint + `"`,
+		`http_headers = { Authorization = "Bearer ` + token + `" }`,
+		neighbour,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config.toml does not hold %q after --apply", want)
+		}
+	}
+
+	after := readFile(t, config)
+	if out, err = runInstallerWithPath(t, node, script, tmp, codexPath, claudePath, "", "--apply"); err != nil {
+		t.Fatalf("the second install-hooks.mjs --apply: %v\n%s", err, out)
+	}
+	if readFile(t, config) != after {
+		t.Error("a second --apply rewrote config.toml")
+	}
+	if !bytes.Contains(out, []byte("codex mcp: already up to date")) {
+		t.Errorf("the second --apply did not report the table as up to date:\n%s", out)
+	}
+
+	if out, err = runInstallerWithPath(t, node, script, tmp, codexPath, claudePath, "", "--remove", "--apply"); err != nil {
+		t.Fatalf("install-hooks.mjs --remove --apply: %v\n%s", err, out)
+	}
+	got = readFile(t, config)
+	if strings.Contains(got, "mcp_servers.engramux") || strings.Contains(got, token) {
+		t.Error("--remove left the table behind")
+	}
+	if !strings.Contains(got, neighbour) {
+		t.Errorf("--remove took the neighbouring table with it:\n%s", got)
+	}
+}
+
+// writeFile and readFile are the two lines each of the above that are not about
+// the installer.
+func writeFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path) //nolint:gosec // G304: a path this test built under t.TempDir
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
