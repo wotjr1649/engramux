@@ -11,7 +11,9 @@ package host
 // text instead would pass on a file that no longer produces that output.
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,39 +73,7 @@ func ours(h map[string]any) bool {
 // Code still 5, the foreign hook untouched, and exactly one Engramux hook per
 // event.
 func TestCodexSessionEndTimeoutIsWithinTheDocumentedLimit(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skipf("node is not on PATH, so the installer cannot be run: %v", err)
-	}
-
-	tmp := t.TempDir()
-
-	// The script derives its repo root from its own location, refuses to run
-	// without dist/*.exe under it, and copies those binaries into
-	// %LOCALAPPDATA%. Running a copy of it under t.TempDir(), beside two
-	// placeholder files, keeps the test off both: it needs no build, and it
-	// cannot reach anything of the caller's. The copy is byte-identical, and
-	// the script imports nothing but node builtins.
-	src := filepath.Join("..", "..", "scripts", "install-hooks.mjs")
-	body, err := os.ReadFile(src) //nolint:gosec // G304: this repository's own scripts directory by construction
-	if err != nil {
-		t.Fatalf("reading the installer: %v", err)
-	}
-	script := filepath.Join(tmp, "scripts", "install-hooks.mjs")
-	for _, dir := range []string{"scripts", "dist"} {
-		if err := os.MkdirAll(filepath.Join(tmp, dir), 0o750); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}
-	//nolint:gosec // G703: script is filepath.Join over t.TempDir and this file's own literals
-	if err := os.WriteFile(script, body, 0o600); err != nil {
-		t.Fatalf("%v", err)
-	}
-	for _, name := range []string{"engramux.exe", "engramux-service.exe"} {
-		if err := os.WriteFile(filepath.Join(tmp, "dist", name), []byte("placeholder\n"), 0o600); err != nil {
-			t.Fatalf("%v", err)
-		}
-	}
+	node, script, tmp := installerTree(t)
 
 	// The state the upgrade has to survive: one entry holding another tool's
 	// hook and a stale Engramux hook at the old 5 s.
@@ -127,27 +97,11 @@ func TestCodexSessionEndTimeoutIsWithinTheDocumentedLimit(t *testing.T) {
 	}})
 	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
 
-	// An explicit environment rather than os.Environ() plus overrides: nothing
-	// of the caller's LOCALAPPDATA or ENGRAMUX_* can leak in, so the binary
-	// copy cannot land outside tmp even if the override were ignored.
-	local := filepath.Join(tmp, "local")
-	//nolint:gosec // G204: node is what LookPath resolved, script is a path this test built under t.TempDir
-	cmd := exec.CommandContext(t.Context(), node, script, "--apply")
-	cmd.Dir = tmp
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"SystemRoot=" + os.Getenv("SystemRoot"),
-		"HOME=" + filepath.Join(tmp, "home"),
-		"USERPROFILE=" + filepath.Join(tmp, "home"),
-		"LOCALAPPDATA=" + local,
-		"ENGRAMUX_CODEX_HOOKS=" + codexPath,
-		"ENGRAMUX_CLAUDE_SETTINGS=" + claudePath,
-	}
-	out, err := cmd.CombinedOutput()
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
 	if err != nil {
 		t.Fatalf("install-hooks.mjs --apply: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(local, "engramux", "bin", "engramux.exe")); err != nil {
+	if _, err := os.Stat(filepath.Join(installerBin(tmp), "engramux.exe")); err != nil {
 		t.Fatalf("the script did not honour the redirected LOCALAPPDATA: %v\n%s", err, out)
 	}
 
@@ -197,6 +151,224 @@ func TestCodexSessionEndTimeoutIsWithinTheDocumentedLimit(t *testing.T) {
 	if found != 1 {
 		t.Errorf("claude-code SessionEnd: %d engramux hooks, want exactly 1", found)
 	}
+}
+
+// TestInstallerSkipsACopyWhoseBytesAlreadyMatch runs the installer twice over
+// one unchanged dist/ and asserts the second run copies nothing and still
+// writes both hook files.
+//
+// This is the ordinary re-run, and it is what used to crash: the service is
+// resident, Windows locks the image of a running process against writes, and
+// rewriting a file with the bytes it already holds is still a write.
+func TestInstallerSkipsACopyWhoseBytesAlreadyMatch(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+
+	seed(t, codexPath, map[string]any{"hooks": map[string]any{}})
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err != nil {
+		t.Fatalf("first --apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "copied ") {
+		t.Fatalf("the first run copied nothing, so the second proves nothing:\n%s", out)
+	}
+
+	// Re-seeded, so the second run has real work left at the hook files. Left
+	// as the first run wrote them, the script would report "already up to
+	// date" and the assertion below would pass without a write happening.
+	seed(t, codexPath, map[string]any{"hooks": map[string]any{}})
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+	out, err = runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err != nil {
+		t.Fatalf("second --apply: %v\n%s", err, out)
+	}
+	for _, name := range []string{"engramux.exe", "engramux-service.exe"} {
+		if !strings.Contains(string(out), "unchanged "+filepath.Join(installerBin(tmp), name)) {
+			t.Errorf("the second run did not report %s as unchanged:\n%s", name, out)
+		}
+	}
+	if strings.Contains(string(out), "copied ") {
+		t.Errorf("the second run copied over identical bytes:\n%s", out)
+	}
+
+	// Skipping the copies must not skip the rest of the run.
+	for _, path := range []string{codexPath, claudePath} {
+		mine := 0
+		for _, hooks := range readHooks(t, path) {
+			for _, h := range hooks {
+				if ours(h) {
+					mine++
+				}
+			}
+		}
+		if mine != 11 {
+			t.Errorf("%s: %d engramux hooks after the second run, want the 11 of the script's EVENTS table",
+				filepath.Base(path), mine)
+		}
+	}
+}
+
+// TestInstallerRefusesAllCopiesWhenOneDestinationCannotBeWritten asserts the
+// whole-run refusal: a destination that must change but cannot be opened for
+// writing stops the run before the FIRST copy, names the service and how to
+// stop it, and leaves both hook files exactly as they were.
+//
+// What this reaches, precisely. The script probes each destination it has to
+// overwrite by opening it for writing, and that probe is what a running image
+// fails. Measured on this machine against the installed pair with the service
+// up: the resident engramux-service.exe throws EBUSY (ERROR_SHARING_VIOLATION,
+// errno -4082) while the relay - spawned per event, gone again - opens fine.
+// This test does NOT hold an image lock and starts no process: it sets the
+// read-only attribute, which fails the same open with EPERM. Same call, same
+// branch, different errno. The guard is what is under test; the lock itself is
+// the measurement above.
+func TestInstallerRefusesAllCopiesWhenOneDestinationCannotBeWritten(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+
+	// Both destinations differ from dist/, so a run that reached any copy at
+	// all would rewrite both. The relay is the one to watch: it is copied
+	// first, so if it changes, the run half-installed before it stopped.
+	bin := installerBin(tmp)
+	if err := os.MkdirAll(bin, 0o750); err != nil {
+		t.Fatalf("%v", err)
+	}
+	relay, service := filepath.Join(bin, "engramux.exe"), filepath.Join(bin, "engramux-service.exe")
+	for _, dest := range []string{relay, service} {
+		if err := os.WriteFile(dest, []byte("an older build\n"), 0o600); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}
+	if err := os.Chmod(service, 0o400); err != nil {
+		t.Fatalf("%v", err)
+	}
+	// Restored before t.TempDir's cleanup runs, which cannot delete a
+	// read-only file on Windows.
+	t.Cleanup(func() {
+		if err := os.Chmod(service, 0o600); err != nil {
+			t.Errorf("restoring %s: %v", filepath.Base(service), err)
+		}
+	})
+
+	// Seeded with another tool's hook and none of ours, so a run that got as
+	// far as the hook files would have to write them.
+	doc := map[string]any{"hooks": map[string]any{
+		"SessionStart": []any{map[string]any{"hooks": []any{map[string]any{
+			"type": "command", "command": "C:/other-tool/bin/other.exe",
+		}}}},
+	}}
+	seed(t, codexPath, doc)
+	seed(t, claudePath, doc)
+	before := make(map[string][]byte, 2)
+	for _, path := range []string{codexPath, claudePath} {
+		b, err := os.ReadFile(path) //nolint:gosec // G304: a path this test built under t.TempDir
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		before[path] = b
+	}
+
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err == nil {
+		t.Fatalf("--apply exited 0 with a destination it cannot write:\n%s", out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("--apply: %v\n%s", err, out)
+	}
+
+	// The message has to carry the diagnosis and the fix, because the user is
+	// the one who stops the service - the script never does.
+	for _, want := range []string{"engramux-service.exe", "service is running", `schtasks /end /tn "\Engramux"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, out)
+		}
+	}
+
+	// Nothing was half-done: the relay was not copied and neither hook file
+	// was touched.
+	got, err := os.ReadFile(relay) //nolint:gosec // G304: a path this test built under t.TempDir
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if string(got) != "an older build\n" {
+		t.Errorf("the relay was copied before the run refused: %q - that is the half-install", got)
+	}
+	for _, path := range []string{codexPath, claudePath} {
+		got, err := os.ReadFile(path) //nolint:gosec // G304: a path this test built under t.TempDir
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		if !bytes.Equal(got, before[path]) {
+			t.Errorf("%s was modified by a run that could not copy the binaries", filepath.Base(path))
+		}
+	}
+}
+
+// installerTree copies the installer into a tree of its own under t.TempDir(),
+// beside placeholder binaries, and returns node, the copy, and the tree root.
+//
+// The script derives its repo root from its own location, refuses to run
+// without dist/*.exe under it, and copies those binaries into %LOCALAPPDATA%.
+// The copy keeps every test here off both: none needs a build, and none can
+// reach anything of the caller's. It is byte-identical, and the script imports
+// nothing but node builtins.
+func installerTree(t *testing.T) (node, script, tmp string) {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node is not on PATH, so the installer cannot be run: %v", err)
+	}
+	tmp = t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install-hooks.mjs")) //nolint:gosec // G304: this repository's own scripts directory by construction
+	if err != nil {
+		t.Fatalf("reading the installer: %v", err)
+	}
+	for _, dir := range []string{"scripts", "dist"} {
+		if err := os.MkdirAll(filepath.Join(tmp, dir), 0o750); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}
+	script = filepath.Join(tmp, "scripts", "install-hooks.mjs")
+	//nolint:gosec // G703: script is filepath.Join over t.TempDir and this file's own literals
+	if err := os.WriteFile(script, body, 0o600); err != nil {
+		t.Fatalf("%v", err)
+	}
+	for _, name := range []string{"engramux.exe", "engramux-service.exe"} {
+		if err := os.WriteFile(filepath.Join(tmp, "dist", name), []byte("placeholder "+name+"\n"), 0o600); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}
+	return node, script, tmp
+}
+
+// installerBin is where the script copies the binaries under the redirected
+// %LOCALAPPDATA% runInstaller hands it.
+func installerBin(tmp string) string { return filepath.Join(tmp, "local", "engramux", "bin") }
+
+// runInstaller runs the copied script against the two hook files given.
+//
+// An explicit environment rather than os.Environ() plus overrides: nothing of
+// the caller's LOCALAPPDATA or ENGRAMUX_* can leak in, so the binary copy
+// cannot land outside tmp even if the override were ignored.
+func runInstaller(t *testing.T, node, script, tmp, codexPath, claudePath string, args ...string) ([]byte, error) {
+	t.Helper()
+	//nolint:gosec // G204: node is what LookPath resolved, script is a path this test built under t.TempDir
+	cmd := exec.CommandContext(t.Context(), node, append([]string{script}, args...)...)
+	cmd.Dir = tmp
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"SystemRoot=" + os.Getenv("SystemRoot"),
+		"HOME=" + filepath.Join(tmp, "home"),
+		"USERPROFILE=" + filepath.Join(tmp, "home"),
+		"LOCALAPPDATA=" + filepath.Join(tmp, "local"),
+		"ENGRAMUX_CODEX_HOOKS=" + codexPath,
+		"ENGRAMUX_CLAUDE_SETTINGS=" + claudePath,
+	}
+	return cmd.CombinedOutput()
 }
 
 func seed(t *testing.T, path string, doc map[string]any) {

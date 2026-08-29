@@ -12,7 +12,9 @@
 //     Hooks point at the copy, not at dist/, so a `go build` during development
 //     cannot collide with a hook firing from a live session - the build would
 //     fail with "Access is denied" and the hook would run a half-written file.
-//     Re-run this script after a rebuild to push a new relay to the hooks.
+//     Re-run this script after a rebuild to push a new relay to the hooks. A
+//     destination that already holds these exact bytes is left alone, and one
+//     the running service has locked stops the run before anything is written.
 //
 //   - MERGES into the existing configuration. Both files already carry other
 //     tools' hooks; nothing that is not Engramux's is added, reordered or
@@ -26,7 +28,7 @@
 // takes `commandWindows` as one string. Claude Code has no `commandWindows`
 // key, so a hook that only sets it is never invoked.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, openSync, closeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -171,7 +173,21 @@ function install(path, label, makeHook, hooksOf) {
 
 // ---------------------------------------------------------------------------
 
-if (!remove) {
+// Windows locks the image of a running process against writes, and the service
+// is meant to be resident - so on an installed machine the one destination
+// here that normally cannot be written is the one this script has to overwrite.
+// Both are therefore decided before either is copied:
+//
+//   - Identical bytes are not copied at all. Re-running with no rebuild in
+//     between is the common case, and rewriting a file with the bytes it
+//     already holds is still a write, which the lock still refuses.
+//   - A destination that has to change is opened for writing first. Copying the
+//     relay and only then failing on the service is what leaves a new relay, an
+//     old service and no hook configuration at all - the state that makes this
+//     confusing rather than merely annoying. Refusing before the first copy
+//     leaves the machine exactly as it was.
+function planCopies() {
+  const plan = []
   for (const [src, dest] of [[DIST_RELAY, RELAY], [DIST_SERVICE, SERVICE]]) {
     if (!existsSync(src)) {
       console.error(`missing ${src} - build first:`)
@@ -179,6 +195,32 @@ if (!remove) {
       console.error(`  CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service`)
       process.exit(1)
     }
+    if (existsSync(dest) && readFileSync(dest).equals(readFileSync(src))) {
+      changes.push(`unchanged ${dest} - identical bytes, not copied`)
+      continue
+    }
+    if (apply && existsSync(dest)) {
+      try {
+        // 'r+' rather than a trial copy: it asks for the same write handle
+        // copyFileSync would ask for, and asks without truncating anything.
+        closeSync(openSync(dest, 'r+'))
+      } catch (err) {
+        console.error(`cannot write ${dest}: ${err.code ?? err.message}`)
+        console.error(`the engramux service is running, and Windows locks the image of a running process.`)
+        console.error(`stop the service yourself, then run this again:`)
+        console.error(`  schtasks /end /tn "\\Engramux"        # registered to start at logon`)
+        console.error(`  taskkill /f /im engramux-service.exe   # started by hand`)
+        console.error(`nothing was copied, and no hook configuration was written.`)
+        process.exit(1)
+      }
+    }
+    plan.push([src, dest])
+  }
+  return plan
+}
+
+if (!remove) {
+  for (const [src, dest] of planCopies()) {
     if (apply) {
       mkdirSync(BIN, { recursive: true })
       copyFileSync(src, dest)
