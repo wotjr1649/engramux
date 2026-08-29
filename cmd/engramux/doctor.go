@@ -13,7 +13,6 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/schedule"
-	"github.com/wotjr1649/engramux/internal/service"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
 
@@ -100,14 +99,24 @@ func reportLocal() bool {
 		field("service binary", exe)
 	}
 
-	dir, err := service.Dir()
+	// Derived from the spool's own directory rather than from
+	// internal/service's Dir, and that is not a preference. This binary is
+	// the hook relay as well as the CLI (spec 5.1), and internal/service
+	// imports internal/store, which links the SQLite driver: importing it
+	// here put 4 MiB of database engine into a process that is spawned once
+	// per hook event and never opens a database (I-07). internal/spool is
+	// already on the relay path, and a test pins its derivation against the
+	// service's - a CLI reading a different directory from the one the relay
+	// writes to would report a spool that is not the spool.
+	spoolPath, err := spool.Dir()
 	if err != nil {
 		field("data directory", "unreadable: "+err.Error())
 		return false
 	}
+	dir := filepath.Dir(spoolPath)
 	field("data directory", dir)
 
-	if depth, err := spool.Depth(filepath.Join(dir, spoolDirName)); err != nil {
+	if depth, err := spool.Depth(spoolPath); err != nil {
 		field("spool", "unreadable: "+err.Error())
 		ok = false
 	} else {
@@ -131,14 +140,12 @@ func reportLocal() bool {
 	return ok
 }
 
-// The names spec 5.6 gives the files this command reads without the service.
-// They are restated here rather than exported from internal/service, which owns
-// the layout: a CLI that could only describe a directory while the service was
-// running to describe it is the command this section exists to avoid.
+// The names spec 5.6 gives the log file this command reads without the service.
+// They are restated here rather than taken from internal/service, which owns the
+// layout and cannot be imported into this binary - see [reportLocal] for why.
 const (
-	spoolDirName = "spool"
-	logsDirName  = "logs"
-	logFileName  = "engramux-service.log"
+	logsDirName = "logs"
+	logFileName = "engramux-service.log"
 )
 
 // maxLogTail is how much of the end of the log file is read to find its last
