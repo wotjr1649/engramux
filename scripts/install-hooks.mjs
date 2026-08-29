@@ -21,7 +21,10 @@
 //     removed. An Engramux entry is recognised by its command path, so running
 //     this twice refreshes rather than duplicates.
 //
-//   - Backs up each file it touches to <file>.engramux-backup-<timestamp>.
+//   - Backs up each file it touches to <file>.engramux-backup-<timestamp>. The
+//     two host files are written in sequence, not together: if Claude Code's
+//     settings.json is rewritten and then Codex's hooks.json fails to parse,
+//     the first stays installed with its backup beside it.
 //
 // The two hosts take different shapes (spec 4.2), and this is not a detail:
 // Claude Code takes `command` plus an `args` array, exec form, no shell. Codex
@@ -186,6 +189,14 @@ function install(path, label, makeHook, hooksOf) {
 //     old service and no hook configuration at all - the state that makes this
 //     confusing rather than merely annoying. Refusing before the first copy
 //     leaves the machine exactly as it was.
+//
+// The second point buys exactly one guarantee and it is worth stating at its
+// real size: no half-install from a lock or a permission failure on a
+// destination that ALREADY EXISTS. That is the defect and the common case. A
+// destination that does not exist yet is never probed, and nothing here can
+// stop the service being started, or a scanner grabbing the file, between the
+// probe and the copy - so the copy loop reports what it did before it failed
+// rather than pretending it cannot.
 function planCopies() {
   const plan = []
   for (const [src, dest] of [[DIST_RELAY, RELAY], [DIST_SERVICE, SERVICE]]) {
@@ -205,11 +216,35 @@ function planCopies() {
         // copyFileSync would ask for, and asks without truncating anything.
         closeSync(openSync(dest, 'r+'))
       } catch (err) {
+        // Nothing here looks for a process, so nothing here may claim one is
+        // running. The errno is the only measured fact - EBUSY is a mapped
+        // image, EPERM is the read-only attribute or an ACL - and which of the
+        // two files failed is what makes one cause likelier than the other.
+        // The relay branch matters: it is held by a hook that is firing right
+        // now, and telling that user to stop the service is wrong advice.
         console.error(`cannot write ${dest}: ${err.code ?? err.message}`)
-        console.error(`the engramux service is running, and Windows locks the image of a running process.`)
-        console.error(`stop the service yourself, then run this again:`)
-        console.error(`  schtasks /end /tn "\\Engramux"        # registered to start at logon`)
-        console.error(`  taskkill /f /im engramux-service.exe   # started by hand`)
+        console.error(err.code === 'EBUSY'
+          ? `EBUSY means a running process has that image mapped, and Windows locks it against writes.`
+          : `${err.code ?? 'this'} is not a lock: the file is read-only, or an ACL denies the write.`)
+        if (dest === SERVICE) {
+          console.error(`for this file the usual cause is that the engramux service is running.`)
+          // cmd or PowerShell rather than a Git Bash spelling: MSYS path
+          // conversion rewrites /end and /tn into C:/Program Files/Git/...,
+          // and the spellings that survive it - //end, or an
+          // MSYS_NO_PATHCONV=1 prefix - are wrong in the two shells a Windows
+          // user is likelier to be in. One line that is right everywhere,
+          // plus the name of the shell that breaks it.
+          console.error(`stop it yourself, then run this again. run the line in cmd or PowerShell:`)
+          console.error(`Git Bash rewrites /end and /tn into paths and the command fails there.`)
+          console.error(`  schtasks /end /tn "\\Engramux"        # registered to start at logon`)
+          console.error(`  taskkill /f /im engramux-service.exe   # started by hand`)
+          console.error(`stopping it loses nothing: it is a hard kill, so the WAL keeps whatever was`)
+          console.error(`committed but not checkpointed, and the next start recovers from it.`)
+        } else {
+          console.error(`for this file the usual cause is a hook firing right now - the relay runs`)
+          console.error(`only for as long as one event takes. wait a moment and run this again.`)
+          console.error(`do not stop the service for this one; the service is not what holds it.`)
+        }
         console.error(`nothing was copied, and no hook configuration was written.`)
         process.exit(1)
       }
@@ -220,10 +255,28 @@ function planCopies() {
 }
 
 if (!remove) {
-  for (const [src, dest] of planCopies()) {
+  const plan = planCopies()
+  let copied = 0
+  for (const [src, dest] of plan) {
     if (apply) {
-      mkdirSync(BIN, { recursive: true })
-      copyFileSync(src, dest)
+      try {
+        mkdirSync(BIN, { recursive: true })
+        copyFileSync(src, dest)
+      } catch (err) {
+        // Everything the probe cannot reach lands here: a destination that did
+        // not exist to be probed, a disk that filled, a scanner holding the
+        // file, the service started since the probe ran. The point is not to
+        // prevent it - it is to leave the reader with what is on disk instead
+        // of a stack trace over a half-finished install.
+        console.error(`copying ${src} -> ${dest} failed: ${err.code ?? err.message}`)
+        if (copied > 0) {
+          console.error(`${copied} of ${plan.length} binaries were already updated, so this install is`)
+          console.error(`half done: stop the service and run this again.`)
+        }
+        console.error(`no hook configuration was written.`)
+        process.exit(1)
+      }
+      copied++
       changes.push(`copied ${src} -> ${dest}`)
     } else {
       changes.push(`would copy ${src} -> ${dest}`)

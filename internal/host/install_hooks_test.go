@@ -171,8 +171,8 @@ func TestInstallerSkipsACopyWhoseBytesAlreadyMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first --apply: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "copied ") {
-		t.Fatalf("the first run copied nothing, so the second proves nothing:\n%s", out)
+	if n := copyLines(out); n != 2 {
+		t.Fatalf("the first run copied %d binaries, want 2 - the second run proves nothing otherwise:\n%s", n, out)
 	}
 
 	// Re-seeded, so the second run has real work left at the hook files. Left
@@ -189,8 +189,8 @@ func TestInstallerSkipsACopyWhoseBytesAlreadyMatch(t *testing.T) {
 			t.Errorf("the second run did not report %s as unchanged:\n%s", name, out)
 		}
 	}
-	if strings.Contains(string(out), "copied ") {
-		t.Errorf("the second run copied over identical bytes:\n%s", out)
+	if n := copyLines(out); n != 0 {
+		t.Errorf("the second run copied %d binaries over identical bytes, want 0:\n%s", n, out)
 	}
 
 	// Skipping the copies must not skip the rest of the run.
@@ -306,6 +306,67 @@ func TestInstallerRefusesAllCopiesWhenOneDestinationCannotBeWritten(t *testing.T
 			t.Errorf("%s was modified by a run that could not copy the binaries", filepath.Base(path))
 		}
 	}
+}
+
+// TestAWriteHandleOnARunningImageIsRefused pins the premise the installer's
+// probe rests on, and which no other test here reaches: opening a resident
+// executable for writing FAILS. If it silently succeeded, the probe would wave
+// every run through and copyFileSync would throw exactly as it did before the
+// fix, with every other test in this file still green - the guard would be
+// decoration and nothing would say so.
+//
+// The subject is this test binary's own image, which go test built and is
+// running right now. It is genuinely mapped, so the refusal is a real
+// ERROR_SHARING_VIOLATION rather than a stand-in: it starts no process,
+// touches no service, and needs nothing installed.
+func TestAWriteHandleOnARunningImageIsRefused(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node is not on PATH, so the installer's own runtime cannot be asked: %v", err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating this test binary: %v", err)
+	}
+	// The script's call, in the script's runtime, on a file known to be
+	// mapped. Under -e, process.argv[1] is the first argument after the
+	// script text.
+	const probe = `const fs = require('node:fs')
+try { fs.closeSync(fs.openSync(process.argv[1], 'r+')); console.log('OPENED') }
+catch (e) { console.log(e.code) }`
+	//nolint:gosec // G204: node is what LookPath resolved, and the argument is os.Executable()
+	out, err := exec.CommandContext(t.Context(), node, "-e", probe, self).CombinedOutput()
+	if err != nil {
+		t.Fatalf("running the probe: %v\n%s", err, out)
+	}
+
+	got := strings.TrimSpace(string(out))
+	if got == "OPENED" {
+		t.Fatalf("a write handle on this running test binary was GRANTED: the installer's probe cannot detect a locked binary at all, and its refusal path is unreachable")
+	}
+	// EBUSY exactly - ERROR_SHARING_VIOLATION, what a mapped image gives. Any
+	// throwing code keeps the script correct, since its catch takes all of
+	// them, but a different one means this platform's answer moved and the
+	// measurement the comments cite needs taking again.
+	if got != "EBUSY" {
+		t.Errorf("opening a running image for writing gave %q, want EBUSY", got)
+	}
+}
+
+// copyLines counts the script's own copy lines, anchored at the line start.
+//
+// A substring search cannot do this job. The skip line ends "- identical
+// bytes, not copied", so strings.Contains(out, "copied ") used as a NEGATIVE
+// assertion inverts silently the moment anyone adds a character after that
+// word, and the test guarding the whole skip path would pass forever.
+func copyLines(out []byte) int {
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "copied ") {
+			n++
+		}
+	}
+	return n
 }
 
 // installerTree copies the installer into a tree of its own under t.TempDir(),
