@@ -21,6 +21,7 @@ import (
 	"github.com/wotjr1649/engramux/internal/fixtures"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/schedule"
+	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
 
@@ -354,7 +355,17 @@ func TestStatusReportsWhatIsActuallyThere(t *testing.T) {
 	if reply.SpoolDepth != wantSpool {
 		t.Errorf("spool_depth = %d, want %d", reply.SpoolDepth, wantSpool)
 	}
-	if want := filepath.Join(local, "engramux", "engramux.db"); reply.DatabasePath != want {
+	// The masked spelling of the file the service opened, not the file
+	// (spec 5.9). Equality still pins which database it is: masking is a
+	// function of the path, so the expected value is derived from the same
+	// directory this test handed the service rather than from a literal.
+	//
+	// Under a temporary directory two classes fire, and both are the point.
+	// ClassUserPath takes the profile name out of %LOCALAPPDATA%, which is
+	// the one this clause exists for; ClassOpaque takes the test's own
+	// directory name, which is 40-odd alphanumerics because t.TempDir names
+	// it after the test.
+	if want := maskedDatabasePath(local); reply.DatabasePath != want {
 		t.Errorf("database_path = %q, want %q", reply.DatabasePath, want)
 	}
 	// Uptime is a real measurement, not a zero and not a start instant read
@@ -373,7 +384,7 @@ func TestStatusReportsWhatIsActuallyThere(t *testing.T) {
 	for _, want := range []string{
 		fmt.Sprintf("events    %d", wantEvents),
 		fmt.Sprintf("spool     %d", wantSpool),
-		filepath.Join(local, "engramux", "engramux.db"),
+		maskedDatabasePath(local),
 	} {
 		if !strings.Contains(res.stdout, want) {
 			t.Errorf("engramux status did not print %q:\n%s", want, res.stdout)
@@ -519,6 +530,17 @@ func scheduledProbe(t *testing.T, exe string) string {
 	return name
 }
 
+// maskedDatabasePath is the value a status reply carries for a service running
+// out of local: spec 5.6's file, through spec 5.9's mask.
+//
+// It is derived rather than written out, so this holds on a machine whose
+// profile is spelled differently and on one whose temporary directory is not
+// under a profile at all. It also keeps a failure message free of the real
+// path, which is what the unmasked expectation used to print.
+func maskedDatabasePath(local string) string {
+	return secret.MaskString(filepath.Join(local, "engramux", "engramux.db"))
+}
+
 // TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp is spec 8's Phase 3 [manual]
 // gate turned into an [auto] one, and spec 10's first open question answered by
 // the code rather than by a sentence.
@@ -558,7 +580,11 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 	if up.exit != 0 {
 		t.Fatalf("engramux doctor exited %d with everything in place, want 0:\n%s\n%s", up.exit, up.stdout, up.stderr)
 	}
-	for _, want := range append(registration, filepath.Join(local, "engramux", "engramux.db")) {
+	// `doctor` prints what the pipe said, which since spec 5.9 is the masked
+	// path. The real one is what a local diagnostic ought to show and is not
+	// on this request; a Doctor request that carries it is Phase 5's, and
+	// this expectation moves when that lands.
+	for _, want := range append(registration, maskedDatabasePath(local)) {
 		if !strings.Contains(up.stdout, want) {
 			t.Errorf("engramux doctor did not report %q:\n%s", want, up.stdout)
 		}

@@ -107,7 +107,9 @@ type SearchHit struct {
 	Host string `json:"host"`
 	// EventName is events.event_name: whatever the payload's
 	// hook_event_name said, including "" for one that did not say (I-04).
-	// It is untrusted width and untrusted bytes.
+	// It is untrusted width and untrusted bytes, so it is masked and then
+	// bounded, in that order (I-10, spec 5.9) - the bound is about what fits
+	// a frame, and masking is about what may leave the machine.
 	EventName string `json:"event_name"`
 	// ReceivedAtMS is events.received_at - milliseconds since the Unix
 	// epoch, the same clock [Cell] reports.

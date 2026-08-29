@@ -37,9 +37,19 @@ import (
 // below exist in one process and nothing else can look.
 //
 // DatabasePath names a file under the user's local application data directory,
-// so it carries a Windows user name. That is not an I-10 egress: spec 2 puts a
-// single Windows SID inside the trust boundary, the pipe's DACL admits only
-// that SID and SYSTEM (spec 5.2), and the CLI prints it on the same machine.
+// so it carries a Windows user name, and it is masked (I-10, spec 5.9).
+//
+// It was not, and the three grounds for that are worth keeping because each one
+// was true and none of them survived: spec 2 puts a single Windows SID inside
+// the trust boundary, the pipe's DACL admits only that SID and SYSTEM (spec
+// 5.2), and the CLI prints it on the same machine. All three describe a reader
+// who is a person at this machine's keyboard. Spec 5.9 adds one who is not - a
+// model, which may repeat what it read into a transcript that leaves the
+// machine - and every ground goes with it.
+//
+// There is one status shape rather than a masked one for MCP and a real one for
+// the CLI, so the field that reaches a model is the field somebody looks at.
+// `doctor` is where the real path is, because that is a local diagnostic.
 type StatusReply struct {
 	// Version is the wire protocol version the service speaks, the same
 	// constant [Ack] carries.
@@ -59,7 +69,7 @@ type StatusReply struct {
 	// milliseconds. A duration rather than a start instant, so a reader does
 	// not have to trust two clocks.
 	UptimeMS int64 `json:"uptime_ms"`
-	// DatabasePath is the database the service opened.
+	// DatabasePath is the database the service opened, masked.
 	DatabasePath string `json:"database_path"`
 }
 
@@ -88,6 +98,11 @@ type StatusReply struct {
 // Host is one of internal/host.Detect's three values, which is what the
 // events.host CHECK constrains it to. `unknown` is reachable and is not an
 // error (I-04).
+//
+// EventName is masked, the same way [SearchHit]'s is and for the same reason:
+// the column has no CHECK, so it carries whatever a payload said, and a cell
+// breakdown is as much an egress as a search hit is (I-10, spec 5.9). Masking
+// happens after the GROUP BY, so two names that mask alike stay two cells.
 //
 // FirstSeenMS and LastSeenMS are the smallest and largest events.received_at in
 // the cell - milliseconds since the Unix epoch, the same clock the column

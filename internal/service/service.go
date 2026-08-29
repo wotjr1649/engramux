@@ -348,6 +348,21 @@ func drain(ctx context.Context, d *spool.Drainer) {
 // A failure to read either one returns an error, and internal/pipe turns that
 // into a rejected reply. Half a status is worse than none: a caller cannot tell
 // a zero that was read from a zero that was never filled in.
+//
+// # There is one status shape and it is masked (spec 5.9)
+//
+// dbPath is under the user's local application data directory (spec 5.6), so it
+// carries a Windows user name. internal/ipc used to justify sending it verbatim
+// on three grounds - one SID inside the trust boundary, the pipe's DACL admitting
+// only that SID, and the CLI printing it on the same machine. All three are void
+// when the reader is a model, which may repeat what it read into a transcript
+// that leaves the machine.
+//
+// The CLI sees the masked path too, rather than there being a second shape for
+// it. Two shapes would mean the field that reaches MCP is the one nobody looks
+// at, which is how a masked path quietly becomes an unmasked one. `doctor` is
+// where the real path belongs and is where it is: a local diagnostic, printed to
+// the terminal of the SID that owns the file.
 func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time) (ipc.StatusReply, error) {
 	var events int64
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&events); err != nil {
@@ -366,7 +381,7 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 		Events:       events,
 		Cells:        byCell,
 		UptimeMS:     time.Since(started).Milliseconds(),
-		DatabasePath: dbPath,
+		DatabasePath: secret.MaskString(dbPath),
 	}, nil
 }
 
@@ -386,6 +401,20 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 // The hits are copied field by field rather than shared. internal/search's Hit
 // is a reader's type and ipc.SearchHit is the wire's, and this function is the
 // seam between them - the same seam the pipe's Handler is for the database.
+//
+// # EventName is masked here, and the order is masking before the bound
+//
+// The excerpt arrives already masked - internal/search cuts it from a payload
+// internal/secret masked whole - and events.event_name did not, which is the
+// I-10 perimeter spec 5.7 recorded and spec 5.9 closes. It is whatever a
+// payload's hook_event_name said, so a captured path lands in it as readily as
+// `PostToolUse` does.
+//
+// Masking runs first because the bound is about what fits a frame and masking is
+// about what may leave the machine, and a bound applied to unmasked text is a
+// bound on a value that should not have existed. The remaining interaction is
+// harmless in both directions: masking expands, so a name near the bound can be
+// cut mid-placeholder, and internal/secret decides a placeholder on its prefix.
 func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.SearchReply, error) {
 	limit, err := req.EffectiveLimit()
 	if err != nil {
@@ -400,7 +429,7 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 		out[i] = ipc.SearchHit{
 			ID:           h.ID,
 			Host:         h.Host,
-			EventName:    truncateRunes(h.EventName, maxEventNameRunes),
+			EventName:    truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes),
 			ReceivedAtMS: h.ReceivedAtMS,
 			Excerpt:      h.Excerpt,
 		}
@@ -471,6 +500,16 @@ func cells(ctx context.Context, db *sql.DB) ([]ipc.Cell, error) {
 		if err := rows.Scan(&c.Host, &c.EventName, &c.Count, &c.FirstSeenMS, &c.LastSeenMS); err != nil {
 			return nil, fmt.Errorf("service: scan a cell: %w", err)
 		}
+		// The same untrusted column [searchEvents] masks, reaching the
+		// same wire by a different reply. Masking one and not the other
+		// would close the perimeter on the surface somebody happened to
+		// look at.
+		//
+		// It is masked after the GROUP BY rather than before it, so two
+		// names that mask to one placeholder stay two cells. Grouping on
+		// the masked value would silently merge them and report a count
+		// that is not any cell's.
+		c.EventName = secret.MaskString(c.EventName)
 		out = append(out, c)
 	}
 	// Checked rather than assumed: rows.Next returns false both for "that
