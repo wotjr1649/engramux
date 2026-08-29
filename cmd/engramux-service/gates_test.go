@@ -580,11 +580,19 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 	if up.exit != 0 {
 		t.Fatalf("engramux doctor exited %d with everything in place, want 0:\n%s\n%s", up.exit, up.stdout, up.stderr)
 	}
-	// `doctor` prints what the pipe said, which since spec 5.9 is the masked
-	// path. The real one is what a local diagnostic ought to show and is not
-	// on this request; a Doctor request that carries it is Phase 5's, and
-	// this expectation moves when that lands.
-	for _, want := range append(registration, maskedDatabasePath(local)) {
+	// The real path, unmasked, and this is the only command that gets it
+	// (spec 5.9): a local diagnostic printing to the terminal of the SID that
+	// owns the file. Every other reply masks it, and
+	// TestStatusReportsWhatIsActuallyThere holds that half.
+	//
+	// The tokenizer line is asserted as the *comparison* and not as the
+	// tokenizer string. What this command is for here is answering whether
+	// the live index and the migration agree - goose does not checksum a
+	// migration, so nothing else in the product could answer it at all.
+	for _, want := range append(registration,
+		filepath.Join(local, "engramux", "engramux.db"),
+		"agrees with the migration",
+	) {
 		if !strings.Contains(up.stdout, want) {
 			t.Errorf("engramux doctor did not report %q:\n%s", want, up.stdout)
 		}
@@ -596,10 +604,11 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 	if down.exit == 0 {
 		t.Errorf("engramux doctor exited 0 with no service running:\n%s", down.stdout)
 	}
-	// Still reports the half that never needed the service. A command that
-	// gave up at the first failure would print none of this, and this is the
-	// moment somebody runs it.
-	for _, want := range registration {
+	// Still reports the halves that never needed the service - the
+	// registration, and the local state spec 5.5 added to this command
+	// because a service that is down is when it is run. A command that gave
+	// up at the first failure would print none of it.
+	for _, want := range append(registration, "local", "this binary", "spool", "last log line") {
 		if !strings.Contains(down.stdout, want) {
 			t.Errorf("engramux doctor stopped reporting %q once the service was down:\n%s", want, down.stdout)
 		}
@@ -831,13 +840,18 @@ func TestAnUnknownCommandIsRefused(t *testing.T) {
 // The other three request types
 // ---------------------------------------------------------------------------
 
-// TestTheUnimplementedRequestTypesAreRejected pins what Phase 1 does not do.
-// Doctor, Search and Drain are spec 5.2 types with no implementation, and the
-// answer has to be a rejection rather than anything a caller could mistake for
-// an empty result.
+// TestTheUnimplementedRequestTypesAreRejected pins what this build does not do.
+// Drain is the one spec 5.2 type left with no implementation, and the answer has
+// to be a rejection rather than anything a caller could mistake for an empty
+// result.
+//
+// The list used to hold Doctor and Search as well. Search was implemented in
+// Phase 4 and Doctor in Phase 5, and this list is where that is recorded: a type
+// leaves it in the commit that implements it, and the type's own routing test is
+// what holds it from then on.
 func TestTheUnimplementedRequestTypesAreRejected(t *testing.T) {
 	start(t, t.TempDir())
-	for _, typ := range []ipc.RequestType{ipc.Doctor, ipc.Search, ipc.Drain} {
+	for _, typ := range []ipc.RequestType{ipc.Drain} {
 		t.Run(string(typ), func(t *testing.T) {
 			raw := send(t, request(t, ipc.Version, typ, "", nil))
 			var ack ipc.Ack

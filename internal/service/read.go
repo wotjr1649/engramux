@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/project"
@@ -138,4 +139,42 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 		}
 	}
 	return ipc.ListSessionsReply{ProjectRoot: secret.MaskString(p.Root), Sessions: out}, nil
+}
+
+// doctorReport answers a [ipc.Doctor] request (spec 5.2, 5.5).
+//
+// It is the one reply that carries the real database path. Every other reply
+// masks it (spec 5.9), because the reader of those may be a model; this one has
+// a single caller printing to the terminal of the SID that owns the file, and it
+// is deliberately not one of the four MCP tools.
+//
+// The tokenizer comparison is here rather than in a tool because I-07 leaves
+// this process as the only one that can read the live schema, and because the
+// thing worth reporting is the comparison: goose does not checksum a migration,
+// so an applied one edited in place leaves an index built by the old clause and
+// a file claiming the new one, on every machine that already ran that version.
+//
+// A tokenizer that cannot be read is carried as a message rather than failing
+// the request. A database with no search index is a real state - one that
+// predates the migration - and it is the state a person runs `doctor` to find
+// out about.
+func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time) (ipc.DoctorReply, error) {
+	st, err := status(ctx, db, dbPath, spoolPath, started)
+	if err != nil {
+		return ipc.DoctorReply{}, err
+	}
+	reply := ipc.DoctorReply{
+		UptimeMS:   st.UptimeMS,
+		Events:     st.Events,
+		SpoolDepth: st.SpoolDepth,
+		// Not st.DatabasePath: that one is masked.
+		DatabasePath: dbPath,
+	}
+	live, expected, err := store.Tokenizer(ctx, db)
+	if err != nil {
+		reply.TokenizerReadError = err.Error()
+		return reply, nil
+	}
+	reply.TokenizerLive, reply.TokenizerExpected = live, expected
+	return reply, nil
 }

@@ -31,7 +31,6 @@ AGENTS.md applies to its own "What will bite you" table.
 | 15 | `leaves_test.go` | `goJSONDepthLimit = 10000` pins an undocumented `encoding/json` implementation detail. Accepted and self-flagged: it is the measurement behind the constant's "ten times" claim, and an unmeasured number is what AGENTS.md forbids |
 | 16 | `maxEventNameRunes = 64` | Couples the wire to what one client prints. An MCP client wanting the whole name is what would move it. Recorded in the constant |
 | 17 | EventName truncation | Carries no marker, so a shortened name is indistinguishable from a real 64-rune one. A client that needs to know needs a flag on the hit, not a suffix |
-| 18 | product-wide | **Nothing in the product verifies a live index's tokenizer against the migration.** `events_fts` appears nowhere outside `internal/store`'s tests and goose does not checksum. Editing an applied migration in place was safe only while `00002` was not an ancestor of `main` — that expired at merge. A `doctor` clause would make the premise checkable. Phase 5 doctor candidate |
 | 19 | `%q` rune precision | True and verified by throwaway, but nothing in the suite holds `fmt`'s rule — only `truncateRunes` does. Four lines would hold it. If Go changed `%q` precision to bytes the CLI would display fewer characters than the wire carries: cosmetic |
 | 20 | `scripts/install-hooks.mjs:137` | A half-migrated `EVENTS` row silently loses its matcher. Destructuring `matcher` from an old-style STRING value yields `undefined`, which is not `null`, so the entry is pushed with `matcher: undefined` and `JSON.stringify` deletes it; `codexTimeout` goes the same way. Measured. One line to close: throw when a table row is not an object |
 | 21 | spec 7.1 / 7.3 | The Codex `SessionEnd` clamp row labels the observed half honestly but does not record the WARNING TEXT itself, which is that observation's only evidence. A home-path-stripped copy would let the next Codex version be compared against it |
@@ -41,12 +40,12 @@ AGENTS.md applies to its own "What will bite you" table.
 ## Pre-existing defects confirmed by the 2026-08-29 adversarial review
 
 Raised while reviewing the Phase 5 design; each is a property of code that already shipped, not
-of that design.
+of that design. Rows 25 and 26 were closed by Phase 5 and are gone; the numbering is not
+renumbered, because a row's number is how the sessions that discussed it refer to it.
 
 | # | Where | What |
 |---|---|---|
 | 24 | spec 6 vs. the tree | **The 512 KiB field cap is documented but not implemented.** Spec 6 says field values are capped by a limiter that preserves JSON validity. Searching the non-test tree for it finds comments and the query builder's `maxTokenBytes`, and nothing that enforces it; `readStdin` is explicitly unbounded and says so. A stored payload is therefore bounded only by `ipc.MaxFrameLen`. Either implement the cap or correct spec 6 |
-| 25 | `scripts/install-hooks.mjs` | Writes each host configuration with a direct `writeFileSync`. Spec 5.6 requires every write to be to a temporary file followed by an atomic rename. The Claude file is fully rewritten before the Codex file is parsed, so a failure between them leaves a split state that only the timestamped backup recovers |
 
 ## Phase 5 prerequisites this review surfaced
 

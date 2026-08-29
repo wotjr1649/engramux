@@ -82,6 +82,16 @@ type (
 	ListSessionsFunc func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
 )
 
+// DoctorFunc answers a Doctor request. It takes no request document - the
+// question has no parameters - so it has [StatusFunc]'s shape rather than
+// [SearchFunc]'s, and the same rule about Version and Type: [Serve] stamps both.
+//
+// An error answers ipc.Rejected. There is no partial diagnostic, for the reason
+// there is no partial status: half-read numbers presented as a service's state
+// are worse than a refusal, and `doctor` has a whole half of its report that
+// does not need the service at all.
+type DoctorFunc func(ctx context.Context) (ipc.DoctorReply, error)
+
 // Handler is what [Serve] answers requests with - one function per request
 // type it implements.
 //
@@ -102,6 +112,9 @@ type Handler struct {
 	// one. A nil field refuses that type, the same way.
 	GetEvent     GetEventFunc
 	ListSessions ListSessionsFunc
+	// Doctor answers a Doctor request. A nil Doctor refuses one, the same
+	// way.
+	Doctor DoctorFunc
 }
 
 // Serve accepts connections on l and answers each one, until l is closed or
@@ -302,6 +315,26 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		}
 		return b
 
+	case ipc.Doctor:
+		if h.Doctor == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no Doctor handler")
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply, err := h.Doctor(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: doctor failed", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		// Stamped here rather than trusted from the handler, for the
+		// reason the status reply is.
+		reply.Version, reply.Type = ipc.Version, ipc.Doctor
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode doctor reply", "error", err)
+			return nil
+		}
+		return b
+
 	case ipc.GetEvent:
 		if h.GetEvent == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no GetEvent handler")
@@ -359,8 +392,8 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		return b
 
 	default:
-		// Doctor and Drain are the CLI reads I-08 routes over this
-		// pipe that this build does not implement. Rejected is the
+		// Drain is the CLI read I-08 routes over this pipe that this
+		// build does not implement. Rejected is the
 		// honest answer, and because ipc.Ack.Verify accepts only
 		// Committed it cannot be mistaken for success.
 		//

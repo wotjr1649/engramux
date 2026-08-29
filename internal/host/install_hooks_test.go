@@ -264,6 +264,7 @@ func TestInstallerRefusesAllCopiesWhenOneDestinationCannotBeWritten(t *testing.T
 	seed(t, claudePath, doc)
 	before := make(map[string][]byte, 2)
 	for _, path := range []string{codexPath, claudePath} {
+		//nolint:gosec // G304: both paths are ones this test built under t.TempDir
 		b, err := os.ReadFile(path) //nolint:gosec // G304: a path this test built under t.TempDir
 		if err != nil {
 			t.Fatalf("%v", err)
@@ -499,5 +500,88 @@ func seed(t *testing.T, path string, doc map[string]any) {
 	}
 	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
 		t.Fatalf("%v", err)
+	}
+}
+
+// TestAnUnparseableCodexFileLeavesTheClaudeFileAlone closes backlog 25's second
+// half: the installer used to rewrite one host's configuration completely before
+// it had parsed the other's, so a syntax error in the second left the first
+// already changed with only a timestamped backup to recover it.
+//
+// Both files are planned before either is written, so every failure that is
+// about *reading* now happens before the first byte is written. Two files still
+// cannot be made atomic together - nothing can do that - and this is the half
+// that can be closed.
+func TestAnUnparseableCodexFileLeavesTheClaudeFileAlone(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+	//nolint:gosec // G304: claudePath is a path this test built under t.TempDir
+	before, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read the seeded claude file: %v", err)
+	}
+	// Valid enough to exist and not valid JSON, which is what a half-edited
+	// configuration looks like.
+	if err := os.WriteFile(codexPath, []byte(`{"hooks": {`), 0o600); err != nil {
+		t.Fatalf("seed a broken codex file: %v", err)
+	}
+
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err == nil {
+		t.Fatalf("--apply exited 0 with a codex file that does not parse:\n%s", out)
+	}
+
+	//nolint:gosec // G304: same path, read back
+	after, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read the claude file afterwards: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("the claude file was rewritten before the codex file was parsed:\n" +
+			"the run failed and left one host installed and the other not")
+	}
+}
+
+// TestApplyLeavesNoTemporaryFileBehind is backlog 25's first half. Every write
+// this product makes goes to a temporary file and then a rename (spec 5.6), and
+// the temporary file is named beside its destination because a rename is atomic
+// only within a volume - so a leftover one would sit in the user's own .claude
+// or .codex directory.
+func TestApplyLeavesNoTemporaryFileBehind(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+	seed(t, codexPath, map[string]any{"hooks": map[string]any{}})
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err != nil {
+		t.Fatalf("install-hooks.mjs --apply: %v\n%s", err, out)
+	}
+
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatalf("read %s: %v", tmp, err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "engramux-tmp") {
+			t.Errorf("a temporary file was left behind: %s", e.Name())
+		}
+	}
+	// And both files parse, which is what the rename is for: a direct write
+	// that failed part way would leave a truncated document.
+	for _, path := range []string{codexPath, claudePath} {
+		//nolint:gosec // G304: both paths are ones this test built under t.TempDir
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Errorf("%s does not parse after --apply: %v", filepath.Base(path), err)
+		}
 	}
 }

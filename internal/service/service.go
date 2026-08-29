@@ -300,6 +300,11 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 				return status(ctx, db, dbPath, spoolPath, started)
 			})
 		},
+		Doctor: func(ctx context.Context) (ipc.DoctorReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.DoctorReply, error) {
+				return doctorReport(ctx, db, dbPath, spoolPath, started)
+			})
+		},
 		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
 			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.SearchReply, error) {
 				return searchEvents(ctx, db, req)

@@ -31,7 +31,10 @@
 // takes `commandWindows` as one string. Claude Code has no `commandWindows`
 // key, so a hook that only sets it is never invoked.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, openSync, closeSync } from 'node:fs'
+import {
+  readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync,
+  openSync, closeSync, fsyncSync, renameSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -150,11 +153,50 @@ function mergeEvents(hooks, makeHook) {
   }
 }
 
-function install(path, label, makeHook, hooksOf) {
+// writeAtomic writes text to path through a temporary file and a rename, which
+// is what spec 5.6 requires of every file this product writes on a user's
+// behalf - the two host configurations included.
+//
+// A direct write truncates first. If it then fails - a full disk, a scanner
+// holding the file, the process dying - what is left on disk is a truncated
+// JSON document, and the host that reads it next has no hook configuration at
+// all rather than the one it started with. The temporary file takes that risk
+// and the rename is the only step that touches the destination.
+//
+// The fsync is not decoration either: a rename that lands before the data does
+// leaves a file that is present, named correctly and empty. openSync/fsyncSync
+// is the only way to reach it from Node without an extra dependency.
+//
+// The temporary file is named beside the destination on purpose. A rename is
+// atomic only within a volume, and the system temporary directory is not
+// reliably on the same one.
+function writeAtomic(path, text) {
+  const tmp = `${path}.engramux-tmp-${process.pid}`
+  writeFileSync(tmp, text, 'utf8')
+  const fd = openSync(tmp, 'r+')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(tmp, path)
+}
+
+// planInstall reads one host's configuration and works out what it should say,
+// **without writing anything**. It returns the write to make, or null when there
+// is nothing to do.
+//
+// Reading and writing are split because there are two files. The previous shape
+// rewrote the Claude configuration completely before it had so much as parsed
+// the Codex one, so a syntax error in the second left the first already changed
+// and only the timestamped backup to recover it. Planning both and then writing
+// both cannot make two files atomic - nothing can - but it moves every failure
+// that is about *reading* to before the first byte is written.
+function planInstall(path, label, makeHook, hooksOf) {
   const doc = readJSON(path)
   if (doc === null) {
     changes.push(`${label}: ${path} does not exist - skipped`)
-    return
+    return null
   }
   const before = JSON.stringify(doc)
   mergeEvents(hooksOf(doc), makeHook)
@@ -162,16 +204,28 @@ function install(path, label, makeHook, hooksOf) {
 
   if (before === after) {
     changes.push(`${label}: already up to date`)
-    return
+    return null
   }
   if (!apply) {
     changes.push(`${label}: would ${remove ? 'remove' : 'install'} ${EVENT_NAMES.length} events in ${path}`)
-    return
+    return null
   }
-  const saved = backup(path)
-  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n', 'utf8')
-  changes.push(`${label}: ${remove ? 'removed' : 'installed'} ${EVENT_NAMES.length} events`)
-  changes.push(`${label}: backup ${saved}`)
+  return { path, label, text: JSON.stringify(doc, null, 2) + '\n' }
+}
+
+// commitInstalls backs up and writes every planned file.
+//
+// The backup is taken immediately before its own write rather than for all
+// files up front, so a run that fails on the second file has not left a backup
+// beside a file nothing touched.
+function commitInstalls(plans) {
+  for (const plan of plans) {
+    if (plan === null) continue
+    const saved = backup(plan.path)
+    writeAtomic(plan.path, plan.text)
+    changes.push(`${plan.label}: ${remove ? 'removed' : 'installed'} ${EVENT_NAMES.length} events`)
+    changes.push(`${plan.label}: backup ${saved}`)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +357,8 @@ if (!remove) {
 // as a gotcha. The relay takes no arguments by design - any argument at all
 // puts cmd/engramux on its CLI path instead of its relay path - so the array is
 // empty rather than carrying a subcommand.
-install(CLAUDE, 'claude-code', () => ({
+// Both configurations are planned before either one is written. See planInstall.
+const claudePlan = planInstall(CLAUDE, 'claude-code', () => ({
   type: 'command',
   command: RELAY.replaceAll('\\', '/'),
   args: [],
@@ -313,7 +368,7 @@ install(CLAUDE, 'claude-code', () => ({
 
 // Codex: commandWindows as a single string. `command` is set to the same thing
 // so the entry is not Windows-only by accident.
-install(CODEX, 'codex', (event) => {
+const codexPlan = planInstall(CODEX, 'codex', (event) => {
   const quoted = `"${RELAY.replaceAll('\\', '/')}"`
   return {
     type: 'command',
@@ -323,6 +378,8 @@ install(CODEX, 'codex', (event) => {
     statusMessage: 'engramux capture',
   }
 }, (doc) => (doc.hooks ??= {}))
+
+commitInstalls([claudePlan, codexPlan])
 
 console.log(changes.join('\n'))
 console.log(
