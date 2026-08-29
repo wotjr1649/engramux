@@ -400,12 +400,36 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 		out[i] = ipc.SearchHit{
 			ID:           h.ID,
 			Host:         h.Host,
-			EventName:    h.EventName,
+			EventName:    truncateRunes(h.EventName, maxEventNameRunes),
 			ReceivedAtMS: h.ReceivedAtMS,
 			Excerpt:      h.Excerpt,
 		}
 	}
 	return ipc.SearchReply{Hits: out}, nil
+}
+
+// maxEventNameRunes bounds events.event_name on the way onto the wire.
+//
+// It is the one field of a hit with no bound anywhere else: the column has no
+// CHECK, and internal/store takes hook_event_name from the payload verbatim, so
+// one event with a multi-megabyte name would make every search that matched it
+// fail at ipc.WriteFrame - which the CLI can only report as a failed read.
+// A shortened name is a worse answer than the real one and a much better one
+// than no answer at all.
+//
+// 64 is what the CLI prints: `engramux search` formats the name with %.64q,
+// which truncates its input to 64 runes, so nothing past this ever reached a
+// person anyway. A client that wants the whole name is what would move this.
+const maxEventNameRunes = 64
+
+// truncateRunes cuts s to at most n runes. Runes and not bytes, so the cut
+// cannot land inside one and produce U+FFFD.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // cells is the per-cell breakdown [ipc.Cell] documents: one row per distinct

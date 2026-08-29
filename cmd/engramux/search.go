@@ -44,16 +44,21 @@ func search(args []string) int {
 	}
 
 	for _, h := range reply.Hits {
-		// The event name and the excerpt are both quoted, and for the
-		// same reason [cells] quotes the event name: they are payload
-		// text, so they carry untrusted bytes - control characters and
-		// terminal escapes among them - and the excerpt spans leaves,
-		// so it carries the newline internal/store joins them with.
-		// Quoting is what keeps one hit to one block of three lines.
+		// Three of the four are quoted, and the rule is the schema
+		// rather than the field's name. events.host has a CHECK
+		// constraining it to three values this program knows, so it is
+		// printed bare. events.event_name has none - it is whatever a
+		// payload's hook_event_name said - and events.id has none
+		// either: it is TEXT PRIMARY KEY, and the routing boundary only
+		// requires it to be non-empty, so an id carrying a newline or a
+		// terminal escape is storable and this is the first command
+		// that prints one. The excerpt is payload text throughout and
+		// spans leaves, so it carries the newline internal/store joins
+		// them with.
 		//
-		// The host is not quoted: the events.host CHECK constrains it
-		// to three values this program knows.
-		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %.64q\n%s\n%q\n\n",
+		// Quoting is also what keeps one hit to one block of three
+		// lines, whatever bytes those three fields hold.
+		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %.64q\n%.64q\n%q\n\n",
 			stamp(h.ReceivedAtMS), h.Host, h.EventName, h.ID, h.Excerpt)
 	}
 	return 0

@@ -168,7 +168,12 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 			Excerpt:      "first leaf\nsecond leaf",
 		},
 		{
-			ID:           "0192f0c0-0000-7000-8000-000000000002",
+			// events.id is TEXT PRIMARY KEY with no shape
+			// constraint and the routing boundary only requires it
+			// to be non-empty, so a newline in one is storable.
+			// Unquoted it would print as a fourth line that reads
+			// like the start of another hit.
+			ID:           "0192f0c0-0000-7000-8000-000000000002\nnot a second hit",
 			Host:         "claude-code",
 			EventName:    "",
 			ReceivedAtMS: ms,
@@ -187,10 +192,10 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 	}
 	when := stamp(ms)
 	want := when + "  codex        " + `"PostToolUse"` + "\n" +
-		"0192f0c0-0000-7000-8000-000000000001\n" +
+		`"0192f0c0-0000-7000-8000-000000000001"` + "\n" +
 		`"first leaf\nsecond leaf"` + "\n\n" +
 		when + "  claude-code  " + `""` + "\n" +
-		"0192f0c0-0000-7000-8000-000000000002\n" +
+		`"0192f0c0-0000-7000-8000-000000000002\nnot a second hit"` + "\n" +
 		`""` + "\n\n"
 	if out != want {
 		t.Errorf("stdout =\n%q\nwant\n%q", out, want)

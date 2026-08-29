@@ -67,6 +67,28 @@ type Hit struct {
 // Every hit carries an excerpt cut from the event's masked payload, which is
 // the only text about the event this function returns - see [excerpt].
 //
+// # The rows are read first and masked afterwards, and that is not a style
+//
+// The two phases below look like one loop that was pulled apart for no reason.
+// They were pulled apart because the service has exactly one database
+// connection (spec 5.4, and internal/store sets SetMaxOpenConns(1)), and an
+// open *sql.Rows holds it. [excerpt] is the most expensive thing in this
+// package - eight RE2 patterns over every string leaf, a JSON decode and
+// re-encode when anything matched, then a second walk of the result - and
+// running it inside the cursor would hold that one connection for the whole of
+// it, per row.
+//
+// The service hands the same pool to the ingest handler, and internal/pipe
+// serves a goroutine per connection, so what would wait is every concurrent
+// store.Ingest: at the cap of 100 hits over spec 7.4's largest observed payload
+// that is plausibly hundreds of milliseconds against the relay's 800 ms
+// post-dial budget (spec 5.3). Nothing is lost when a relay blows its budget -
+// it spools, and I-04 holds - but a search that quietly slows ingest is not a
+// trade this package gets to make silently.
+//
+// So: scan, check Err, close, and only then mask. Anyone tidying this back into
+// one loop is reintroducing that.
+//
 // limit goes to LIMIT unmodified, and SQLite reads a negative LIMIT as "no
 // limit". [github.com/wotjr1649/engramux/internal/ipc.SearchRequest.EffectiveLimit]
 // is what the pipe surface bounds it with before it gets here.
@@ -88,21 +110,40 @@ func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var hits []Hit
+	// Phase one: read the rows and nothing else.
+	//
+	// The stored payload is read and never returned. It goes to [excerpt]
+	// below, which masks it whole before cutting anything out of it, and the
+	// window is all that leaves this function (I-10).
+	type row struct {
+		hit     Hit
+		payload []byte
+	}
+	var scanned []row
 	for rows.Next() {
-		var h Hit
-		// The stored payload is read and never returned. It goes to
-		// [excerpt], which masks it whole before cutting anything out of
-		// it, and the window is all that leaves this function (I-10).
-		var payload []byte
-		if err := rows.Scan(&h.ID, &h.Host, &h.EventName, &h.ReceivedAtMS, &payload); err != nil {
+		var r row
+		if err := rows.Scan(&r.hit.ID, &r.hit.Host, &r.hit.EventName, &r.hit.ReceivedAtMS, &r.payload); err != nil {
 			return nil, fmt.Errorf("search: scan a hit: %w", err)
 		}
-		h.Excerpt = excerpt(payload, tokens)
-		hits = append(hits, h)
+		scanned = append(scanned, r)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("search: read the hits: %w", err)
+	}
+	// Closed here rather than only by the defer, because the cursor must be
+	// gone before the masking starts - see this function's doc comment for
+	// what holding it costs. Close is idempotent, so the defer above stays
+	// as the path every error return takes.
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("search: close the hits: %w", err)
+	}
+
+	// Phase two: the connection is free, so this can take as long as it
+	// takes.
+	hits := make([]Hit, len(scanned))
+	for i, r := range scanned {
+		hits[i] = r.hit
+		hits[i].Excerpt = excerpt(r.payload, tokens)
 	}
 	return hits, nil
 }

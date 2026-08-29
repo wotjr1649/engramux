@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Microsoft/go-winio"
 
@@ -513,4 +514,34 @@ func seedEvent(t *testing.T, db *sql.DB, id, host, eventName string, receivedAt 
 	                          payload, privacy_class, redaction_version, received_at)
 	      VALUES (?, 'p', ?, ?, 'pipe', ?, '{}', '', 1, ?)`,
 		id, sessionID, host, eventName, receivedAt)
+}
+
+// TestTruncateRunesCutsOnRuneBoundaries pins the bound a search reply puts on
+// events.event_name, which is the one hit field nothing else bounds.
+//
+// The over-length case is three-byte runes, so a cut made on a byte offset
+// would land inside one: the assertion is the exact string and the exact rune
+// count, not that something was shortened.
+func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{name: "under the bound is untouched", in: "PostToolUse", n: 5, want: "PostT"},
+		{name: "exactly the bound is untouched", in: "abcde", n: 5, want: "abcde"},
+		{name: "empty is empty", in: "", n: 5, want: ""},
+		{name: "multibyte cuts on a rune", in: "가나다라마바", n: 3, want: "가나다"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateRunes(tc.in, tc.n)
+			if got != tc.want {
+				t.Errorf("truncateRunes(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
+			}
+			if n := utf8.RuneCountInString(got); n > tc.n {
+				t.Errorf("the result is %d runes, over the bound of %d", n, tc.n)
+			}
+		})
+	}
 }
