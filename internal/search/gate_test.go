@@ -3,6 +3,7 @@ package search_test
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wotjr1649/engramux/internal/search"
+	"github.com/wotjr1649/engramux/internal/store"
 )
 
 // maxDocsPerClass bounds how many documents a class measures: N spread over the
@@ -125,19 +127,33 @@ var classes = []class{
 	{"a path basename", wantPathBasename, derivePathBasename},
 }
 
+// tokenChar reports whether unicode61 treats r as part of a token rather than
+// as a separator. It is the one place this package states that rule, because
+// two things depend on it - [atTokenStart] and [constrains] - and they were
+// stating it separately and both getting it wrong in the same way.
+//
+// Letters, numbers and private use. The categories are measured in
+// [TestTheIndexAnchorsAPrefixAtATokenStart] rather than read off the
+// documentation, and two of the three are the reason this is a named function:
+// `unicode.IsDigit` is Nd alone, so it is false for U+00B2 and U+2168 which
+// unicode61 counts as token characters, and no letter-or-number test reaches
+// private use at all.
+func tokenChar(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.Is(unicode.Co, r)
+}
+
 // atTokenStart reports whether byte offset i in leaf is where unicode61 would
-// begin a token: the start of the string, or just after a rune that is neither
-// a letter nor a digit.
+// begin a token: the start of the string, or just after a separator.
 //
 // It is what makes a derived query answerable at all, and the derivations that
 // call it are not being made lenient by it. An FTS5 prefix query anchors at a
-// token start, and unicode61 takes the Unicode letter and number categories as
-// token characters and everything else as a separator - so the Hangul run
-// inside `0단계가` opens no token of its own, and no prefix query reaches it
-// whatever the index holds. Spec 5.7 says the same thing from the other side: a
-// prefix index does not promise a mid-token match. A class deriving such a
-// query measures its own derivation rather than the index, and a class that
-// cannot pass however the index is built gates nothing.
+// token start - measured in [TestTheIndexAnchorsAPrefixAtATokenStart] rather
+// than assumed here - and [tokenChar] is where the rule for what ends a token
+// lives. So the Hangul run inside `0단계가` opens no token of its own, and no
+// prefix query reaches it whatever the index holds. Spec 5.7 records the same
+// limit from the index's side. A class deriving such a query measures its own
+// derivation rather than the index, and a class that cannot pass however the
+// index is built gates nothing.
 //
 // Measured over the corpus: it moves 2 of the 196 two-character Korean
 // candidates and 2 of the 162 particle candidates, and takes both classes from
@@ -149,7 +165,86 @@ func atTokenStart(leaf string, i int) bool {
 		return true
 	}
 	r, _ := utf8.DecodeLastRuneInString(leaf[:i])
-	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	return !tokenChar(r)
+}
+
+// TestTheIndexAnchorsAPrefixAtATokenStart pins the two facts [atTokenStart] and
+// [constrains] rest on, neither of which was held by anything before: that an
+// FTS5 prefix query anchors at a token start, and which runes unicode61 counts
+// as token characters. Both derivation rules in this file are built on the
+// first, and a comment is not a check.
+//
+// One Hangul run per row, preceded by one rune of a different Unicode category,
+// asked twice: whether the index reaches the run with a prefix query, and what
+// [atTokenStart] says about the same offset. Both are asserted against the same
+// declared expectation rather than merely against each other, so a predicate
+// and a tokenizer that drifted together could not agree their way to a pass.
+//
+// The categories are not decoration. `unicode.IsDigit` is Nd only, and it is
+// false for U+00B2 and U+2168 - which unicode61 nonetheless treats as token
+// characters, so a predicate written on it reports a token start where the
+// index sees the middle of a token, and derives exactly the unanswerable query
+// the token-start rule exists to prevent. Private use is the third category and
+// no letter-and-number predicate reaches it at all. Measured here rather than
+// taken from the documentation, which is why the table carries U+E000.
+func TestTheIndexAnchorsAPrefixAtATokenStart(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "tokenizer.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the database: %v", err)
+		}
+	})
+	// The migration's own clause, so this moves with the tokenizer instead
+	// of pinning a second opinion about it.
+	if _, err := db.ExecContext(t.Context(),
+		`CREATE VIRTUAL TABLE probe USING fts5(t, `+tokenizeClause+`)`); err != nil {
+		t.Fatalf("CREATE VIRTUAL TABLE probe: %v", err)
+	}
+
+	const run = "가나다"
+	rows := []struct {
+		name      string
+		lead      string
+		wantReach bool
+	}{
+		{"nothing in front of it", "", true},
+		{"Ps, an opening parenthesis", "(", true},
+		{"Pc, an underscore", "_", true},
+		{"So, a symbol", "☀", true},
+		{"Ll, a letter", "x", false},
+		{"Nd, a digit", "0", false},
+		{"No, a superscript two", "²", false},
+		{"Nl, a roman numeral nine", "Ⅸ", false},
+		{"Co, a private use character", "", false},
+	}
+	for i, r := range rows {
+		if _, err := db.ExecContext(t.Context(),
+			`INSERT INTO probe(rowid, t) VALUES (?, ?)`, int64(i), r.lead+run); err != nil {
+			t.Fatalf("%s: insert: %v", r.name, err)
+		}
+	}
+	for i, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			var reached int
+			if err := db.QueryRowContext(t.Context(),
+				`SELECT count(*) FROM probe WHERE rowid = ? AND probe MATCH '"가나"*'`,
+				int64(i)).Scan(&reached); err != nil {
+				t.Fatalf("MATCH: %v", err)
+			}
+			if got := reached == 1; got != r.wantReach {
+				t.Errorf("a prefix query reached the run = %t, want %t - the index does not anchor "+
+					"a prefix where this test says it does", got, r.wantReach)
+			}
+			if got := atTokenStart(r.lead+run, len(r.lead)); got != r.wantReach {
+				t.Errorf("atTokenStart = %t, want %t - the predicate and unicode61 disagree about "+
+					"whether this rune ends a token, so a derivation built on it can produce a query "+
+					"the index cannot answer", got, r.wantReach)
+			}
+		})
+	}
 }
 
 // deriveKoreanTwoChar takes the first Hangul run of three or more syllables
@@ -189,7 +284,7 @@ func TestDeriveKoreanTwoChar(t *testing.T) {
 		{"0단계가 끝났다", "끝났"},          // the digit-led run is skipped, the next one is taken
 		{"0단계가", ""},                // and when it is the only run there is no candidate
 		{"Codex단계별 확인", ""},         // a run after a letter is inside that token too
-		{"replay를 다시읽기", "다시"},      // a one-syllable run is too short, the next is not
+		{"replay를 다시읽기", "다시"},      // 를 is both too short and inside the Latin token
 		{"두 글자", ""},                // no run reaches three syllables
 		{"nothing here at all", ""}, // no Hangul
 	} {
@@ -219,7 +314,7 @@ func deriveParticle(d doc) string {
 	for _, leaf := range d.leaves {
 		for _, tok := range strings.Fields(leaf) {
 			tok = strings.TrimRightFunc(tok, func(r rune) bool {
-				return r < utf8.RuneSelf && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+				return r < utf8.RuneSelf && !tokenChar(r)
 			})
 			if m := particleStem.FindStringSubmatchIndex(tok); m != nil && atTokenStart(tok, m[2]) {
 				return tok[m[2]:m[3]]
@@ -727,15 +822,18 @@ func holdsAStranger(a, b map[string]bool) bool {
 // constrains reports whether a term can narrow a conjunction at all: whether
 // unicode61 will find a token in it.
 //
-// Letters and digits, which is unicode61's own rule - it takes the Unicode
-// letter and number categories as token characters and everything else as a
-// separator, and remove_diacritics strips marks rather than tokenizing them.
-// A term of nothing but punctuation, `"===` or ---, produces no token and FTS5
-// drops it from the query.
+// [tokenChar] is unicode61's own rule, and remove_diacritics strips marks
+// rather than tokenizing them. A term of nothing but punctuation, `"===` or
+// ---, produces no token and FTS5 drops it from the query.
+//
+// This used to spell the rule itself, as letters and digits, and was wrong on
+// the same categories [atTokenStart] was - which is why the predicate is shared
+// now rather than written twice. Correcting it moved nothing here: over both
+// modes the skipped count, sharp, and both direction counts came back
+// identical, so no term in the fixtures or the corpus has a superscript or a
+// private use rune as its only token character.
 func constrains(term string) bool {
-	return strings.ContainsFunc(term, func(r rune) bool {
-		return unicode.IsLetter(r) || unicode.IsDigit(r)
-	})
+	return strings.ContainsFunc(term, tokenChar)
 }
 
 // gatePrecision is the one precision assertion, and it carries no threshold:

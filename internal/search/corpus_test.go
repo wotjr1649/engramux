@@ -126,8 +126,9 @@ func leavesOf(raw json.RawMessage) []string {
 // turn_fixture_2 and turn_fixture_3. Phase 4 dropped porter from the tokenizer
 // (spec 5.7) and that fold went with it, taking the leading-drop catcher to
 // zero and this class red. What carries it now is a token that is simply
-// present in one fixture and absent from the other, which no tokenizer setting
-// can withdraw.
+// present in one fixture and absent from the other, which no *stemmer* setting
+// can withdraw. A tokenizer that redrew token boundaries - trigram, say - still
+// would, and this class going red is how that would be found out.
 //
 // # Four things it must not acquire
 //
