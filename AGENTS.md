@@ -170,6 +170,9 @@ Heredocs collapse `\\` to `\`, which corrupts Windows path literals and Go rune 
   brief is a record and is never updated** — a stale one is correct, because it says what was
   true then. Read the newest to start; read an old one only to find out why something was done
   the way it was. Same rule as everywhere else: no code blocks.
+- `docs/superpowers/backlog.md` — the carry list of deferred findings no test owns yet. Owns
+  nothing else: not a decision, not a value, not a rule. When a test starts catching a row, delete
+  the row.
 - `docs/chatgpt/` — archive, superseded in full. Do not read it for current design.
 
 ## Output language
