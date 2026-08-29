@@ -97,6 +97,16 @@ type classResult struct {
 // table it defends is about; [TestPhase4Gate] remains the test that runs the
 // real read path end to end, and this is not a replacement for it.
 //
+// Reachability is monotone under widening, and that is the sharper limitation:
+// a query with a term dropped can only match more documents, so this sweep
+// cannot tell a conjunction from a disjunction and would stay green against a
+// builder that joined the tokens with OR. Measured, with the leading token
+// dropped from the builder: the two-token class fell to 853 of 860, and those
+// seven are pairs whose surviving term the tokenizer reduces to nothing - an
+// empty query, not a set relation this test can see.
+// [escapesTheIntersection] is the only check for that, and it runs over the
+// gate's 25 documents.
+//
 // The expression handed to MATCH is the product's own, through
 // [search.QueryTokens] and [search.MatchExpression]. A sweep that quoted its
 // tokens itself would be measuring a different system.
@@ -254,7 +264,24 @@ func reaches(t *testing.T, db *sql.DB, table, expr, id string) bool {
 		  AND `+table+` MATCH ?`, id, expr).Scan(&n); err != nil {
 		t.Fatalf("%s MATCH the expression built for one candidate: %v", table, err)
 	}
-	return n == 1
+	if n == 1 {
+		return true
+	}
+	// An id that is not in events makes the subquery NULL, the count 0, and
+	// the candidate a recall miss - which would report the index having
+	// lost a document when what happened is that the document was never
+	// ingested. Only reachable if store.Ingest dropped one silently, and
+	// that is precisely the failure worth not misattributing.
+	var ingested bool
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT EXISTS(SELECT 1 FROM events WHERE id = ?)`, id).Scan(&ingested); err != nil {
+		t.Fatalf("look up the candidate's own row: %v", err)
+	}
+	if !ingested {
+		t.Fatalf("the candidate's id is not in events, so this sweep would count it as a miss against " +
+			"the index; the document was never ingested")
+	}
+	return false
 }
 
 // printMisses renders up to [maxPrintedMisses] of a class's misses, and says
@@ -284,13 +311,8 @@ func printMisses(misses []string) string {
 // is written after the rebuild below, so that costs this sweep nothing.
 func porterIndex(t testing.TB, db *sql.DB) string {
 	t.Helper()
-	ddl := productDDL(t, db)
-	stemmed := strings.Replace(ddl, ftsTable, porterTable, 1)
-	stemmed = strings.Replace(stemmed, tokenizeClause, porterTokenize, 1)
-	if stemmed == ddl {
-		t.Fatalf("the porter arm's DDL came out identical to the migration's, so both arms would be the "+
-			"same index:\n%s", ddl)
-	}
+	stemmed := swapInDDL(t, productDDL(t, db), ftsTable, porterTable)
+	stemmed = swapInDDL(t, stemmed, tokenizeClause, porterTokenize)
 	if _, err := db.ExecContext(t.Context(), stemmed); err != nil {
 		t.Fatalf("create the porter index: %v", err)
 	}

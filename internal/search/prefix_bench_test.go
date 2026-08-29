@@ -133,9 +133,40 @@ func productDDL(t testing.TB, db *sql.DB) string {
 	return ddl
 }
 
+// swapInDDL replaces the first occurrence of old in a copy of the migration's
+// statement, and fails when there was nothing to replace.
+//
+// The failure is the point. A substitution that silently matched nothing
+// produces a second index that differs from the shipped one in some way its
+// harness did not intend and does not report, which is exactly how
+// [alternateIndex] came to index a different column from the one production
+// indexes and to go on reporting numbers for it.
+func swapInDDL(t testing.TB, ddl, old, replacement string) string {
+	t.Helper()
+	out := strings.Replace(ddl, old, replacement, 1)
+	if out == ddl {
+		t.Fatalf("the migration's statement holds no %q to replace, so the index built from it would "+
+			"not be the one this harness means to build:\n%s", old, ddl)
+	}
+	return out
+}
+
 // alternateIndex creates a second external-content index over events carrying
 // the opposite prefix setting to the migration's, rebuilds it, and returns its
 // name along with a label for each of the two.
+//
+// It is the migration's own statement with the table name changed and the
+// prefix clause added or removed - never a CREATE this file spells out. It used
+// to spell one out, over a column named `payload`, which was right until the
+// index moved to `leaves` underneath it: after that the two indexes read two
+// different columns of `events` and held different text, so the benchmark timed
+// two things that were not comparable. Deriving from the DDL is what makes the
+// next schema change fail loudly here instead of silently.
+//
+// Measured against this corpus, at 901 events: with the `payload` column the
+// benchmark aborts at [requireSameHits] on the first query, before any timing -
+// the two indexes return the same number of hits and not the same rows. With
+// the column taken from the migration, all ten queries agree.
 func alternateIndex(b *testing.B, db *sql.DB) (table, prodLabel, altLabel string) {
 	b.Helper()
 	ddl := productDDL(b, db)
@@ -148,20 +179,20 @@ func alternateIndex(b *testing.B, db *sql.DB) (table, prodLabel, altLabel string
 		b.Fatalf("the migration mentions a prefix index but not as %q, so this harness cannot tell "+
 			"which of the two settings it carries:\n%s", prefixClause, ddl)
 	}
-	altClause := ""
-	if !prodHasPrefix {
-		altClause = ",\n    " + prefixClause
-	}
+	alt := swapInDDL(b, ddl, ftsTable, altTable)
 	prodLabel, altLabel = "prefix", "no-prefix"
-	if !prodHasPrefix {
+	if prodHasPrefix {
+		// Removing it takes the comma and the indentation in front of
+		// the clause with it. This branch is unreached today and
+		// [swapInDDL] is what says so if the migration ever writes the
+		// clause some other way.
+		alt = swapInDDL(b, alt, ",\n    "+prefixClause, "")
+	} else {
 		prodLabel, altLabel = "no-prefix", "prefix"
+		alt = swapInDDL(b, alt, tokenizeClause, tokenizeClause+",\n    "+prefixClause)
 	}
 
-	if _, err := db.ExecContext(b.Context(), `CREATE VIRTUAL TABLE `+altTable+` USING fts5(
-    payload,
-    content = 'events',
-    `+tokenizeClause+altClause+`
-)`); err != nil {
+	if _, err := db.ExecContext(b.Context(), alt); err != nil {
 		b.Fatalf("create the %s index: %v", altLabel, err)
 	}
 	rebuild(b, db, altTable)
