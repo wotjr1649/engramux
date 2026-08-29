@@ -26,12 +26,21 @@ go test -p 1 ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
 ./scripts/race.sh            # test suite under the race detector
 go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
+go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
+go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
 an empty directory. It is in `internal/spool` because clause 3 kills a child that has to be a copy
 of the running test binary, and that package's `TestMain` is what turns a re-executed copy into
 one.
+
+`TestPhase4Gate` runs spec §8's five known-item classes and the precision assertion twice over:
+once over the fixtures, and once over `.capture/`'s captures, which skips itself when that
+directory is absent. Before pasting its `-v` output anywhere, read the table row about it below.
+The second command is not covered by the first — `TestEveryCandidateDocumentIsReachable` sweeps
+every candidate document of every class rather than the gate's 25-per-class sample, under two
+tokenizer arms, and it is what priced the stemmer out of `00002`.
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.
@@ -121,6 +130,8 @@ row on its own, delete the row — the test is the better owner.
 | Goroutine-leak checks always report zero | `Profile.Count()` returns 0 before the detecting GC cycle. Trigger detection with `WriteTo` and parse its output |
 | A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
 | Redaction produces JSON that no longer parses | A `\S+` token pattern swallows the closing quote and brace. The payload must stay valid JSON (spec §6) |
+| You paste a `TestPhase4Gate` run into a report, a commit message or a chat, and ship a real path | Its corpus mode logs the query it derived for each class, and those are cut from the captures — 900 of 902 of which carry the user's directory. Measured on one corpus run: **1 line of the 45**, and 1 of the 15 derived-query lines, carries a drive-letter path with the OS user name in it. One line in a wall of counts is exactly what gets skimmed past, and `origin` is public. Redact everything after `candidate documents: ` before the output goes anywhere, or grep out `[A-Za-z]:[\\/]` first. The sweep is not affected — measured, 0 of its 17 lines carry a path — and neither is the fixtures mode |
+| A snapshot of the database taken after stopping the service is torn, and nothing says so | `schtasks /end` is a hard kill, not a clean close: the service does not get to checkpoint, so the WAL survives the stop holding committed frames the `.db` does not have yet. A snapshot is therefore the **pair** — `.db` and `.db-wal` copied together — and the `.db` alone is a database missing whatever the WAL still held. The pair task 7b was handed had 181,312 B of WAL beside it. `-shm` is not in the pair and does not need to be: §5.4's exclusive locking means it never exists |
 | The database file more than doubles, and the first start on the new binary pauses | Migration `00002` backfills `events.leaves` — a second copy of every payload's string text — and then rebuilds the whole FTS index, both in one transaction. Measured once over a copy of a real installation, 8,177 events in 40,751,104 B: `store.Migrate` took 1.30 s and left the file at 87,224,320 B, and the WAL grew to the size of the migrated database and was gone once the pool closed. One cost per database rather than per start, but the disk needs room for both files at once |
 
 ## Boundaries
