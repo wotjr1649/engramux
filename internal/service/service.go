@@ -530,7 +530,11 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	out := make([]ipc.SearchHit, len(hits))
 	for i, h := range hits {
 		out[i] = ipc.SearchHit{
-			ID:           h.ID,
+			// The same untrusted column [getEvent] masks, reaching the
+			// same wire by a different reply (backlog 29). A real id is
+			// unchanged by it, so the id a model hands back to get_event
+			// is still the one that was stored.
+			ID:           secret.MaskString(h.ID),
 			Host:         h.Host,
 			EventName:    truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes),
 			ReceivedAtMS: h.ReceivedAtMS,

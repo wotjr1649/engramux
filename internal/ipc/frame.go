@@ -13,11 +13,15 @@ import (
 )
 
 // MaxFrameLen is the largest payload ReadFrame accepts, checked against the
-// 4-byte length header before any allocation happens. 4 MiB is 8x the 512
-// KiB per-field value cap (spec 6): a single envelope payload can
-// legitimately carry several fields each near that cap plus JSON structural
-// overhead, so a cap at or below 512 KiB would make some legitimate
-// payloads permanently unsendable rather than merely rare.
+// 4-byte length header before any allocation happens.
+//
+// 4 MiB was justified here as 8x spec 6's 512 KiB per-field value cap. That cap
+// was never implemented and is withdrawn (backlog 24), so the justification is
+// now the measurement that outlived it: the largest payload in the capture
+// corpus is 171,764 B and the p99 is 32,936 B (spec 7.4), which makes 4 MiB 24x
+// the largest real payload. It is a guard against a pathological envelope and
+// not a bound real traffic approaches - and since nothing bounds one field
+// inside a payload, it is the only bound a stored payload has.
 const MaxFrameLen = 4 * 1024 * 1024
 
 // ErrFrameTooLarge is returned by ReadFrame when the 4-byte length header

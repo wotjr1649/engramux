@@ -47,7 +47,15 @@ func getEvent(ctx context.Context, db *sql.DB, req ipc.GetEventRequest) (ipc.Get
 
 	masked := secret.Mask(e.Payload)
 	doc := ipc.EventDocument{
-		ID:   e.ID,
+		// Masked and not bounded, for the reason [listSessions] gives
+		// about a session id: a shortened id is not an id. events.id
+		// carries no CHECK and internal/store takes the envelope's
+		// IngestID verbatim, so this is untrusted bytes like every other
+		// column here (backlog 29). Masking costs a real id nothing - a
+		// UUIDv7's longest unbroken run is 12 characters and the
+		// shortest rule that could match one wants 40 - so a hit's id
+		// still round-trips to this function unchanged.
+		ID:   secret.MaskString(e.ID),
 		Host: e.Host,
 		// The same untrusted column a hit carries, masked and then
 		// bounded for the same reasons - see [searchEvents].

@@ -133,7 +133,12 @@ func ListenCurrent() (net.Listener, error) {
 	}
 	name, err := ipc.CurrentPipeName()
 	if err != nil {
-		return nil, err
+		// Wrapped rather than returned bare, so the message names the
+		// layer the way the one above it does. Unreachable today - the
+		// only failure inside is user.Current, which has already
+		// succeeded here - which is why it is consistency and not a fix
+		// (backlog 5).
+		return nil, fmt.Errorf("pipe: derive the pipe name: %w", err)
 	}
 	return Listen(name, u.Uid)
 }

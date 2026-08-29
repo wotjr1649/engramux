@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -341,6 +342,115 @@ func auditCall(t *testing.T, cs *mcp.ClientSession, tool string, args map[string
 		t.Fatalf("call %s: %v", tool, err)
 	}
 	return res
+}
+
+// TestPhase6AnEventIdThatCarriesAUserPathIsMasked is backlog 29, closed.
+//
+// events.id is TEXT NOT NULL PRIMARY KEY with no CHECK, internal/store inserts
+// the envelope's IngestID verbatim, and internal/pipe's validate requires only
+// that it is non-empty - so the column holds whatever reached it. Every other
+// untrusted string on a reply document is masked; this one reached an MCP
+// reader as it was stored, where the session id beside it is masked and the
+// event name is masked and then bounded.
+//
+// # Masking an id sounds like it should break the flow it exists for, and does
+// not
+//
+// A model gets an id from a search hit and hands it back to get_event. If the
+// id were rewritten on the way out, that would stop working. It is not: a
+// UUIDv7 is hex and hyphens, its longest unbroken run is 12 characters, and
+// spec 6.1's shortest matching rule is a 40-character opaque run - so
+// [secret.MaskString] returns a real id unchanged, byte for byte, and only a
+// secret-shaped one is rewritten. The test below holds both halves, because
+// only holding the second would pass on an implementation that masked
+// everything.
+//
+// The consequence for a secret-shaped id is that get_event cannot be asked for
+// it by the id a hit reported. That is accepted and it is not new: internal/ipc
+// says a shortened id is not an id, which is why list_sessions masks
+// Session.ID rather than truncating it, and this is the same trade on the same
+// reasoning.
+func TestPhase6AnEventIdThatCarriesAUserPathIsMasked(t *testing.T) {
+	dir := t.TempDir()
+	db := openMigrated(t, filepath.Join(dir, dbName))
+
+	// The shape a corrupted or hand-edited spool record produces. Nothing
+	// on the ingest path refuses it.
+	hostile := secrettest.Of(secret.ClassUserPath)
+	hostile.Shape = "an event id"
+
+	for _, id := range []string{auditEventID, hostile.Value} {
+		if ack, err := store.Ingest(t.Context(), db, ipc.Envelope{
+			Version:  ipc.Version,
+			Type:     ipc.IngestEvent,
+			IngestID: id,
+			Payload:  auditIDPayload(t, id),
+		}, store.SourcePipe, time.Now()); err != nil || ack != ipc.Committed {
+			t.Fatalf("ingest: status %q, err %v", ack, err)
+		}
+	}
+
+	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate())
+	samples := []secrettest.Sample{hostile}
+
+	t.Run("a real id survives masking unchanged", func(t *testing.T) {
+		ev, err := h.GetEvent(t.Context(), ipc.GetEventRequest{ID: auditEventID, Project: auditProject})
+		if err != nil {
+			t.Fatalf("get_event: %v", err)
+		}
+		if ev.Event == nil {
+			t.Fatal("get_event answered no event for an id it was just given")
+		}
+		// The whole search-then-read flow depends on this. An
+		// implementation that masked every id would pass the sweeps
+		// below and break the product.
+		if ev.Event.ID != auditEventID {
+			t.Fatalf("a UUIDv7 id came back rewritten, so a hit's id no longer round-trips to get_event")
+		}
+	})
+
+	t.Run("search", func(t *testing.T) {
+		reply, err := h.Search(t.Context(), ipc.SearchRequest{Query: auditTerm, Project: auditProject})
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if len(reply.Hits) != 2 {
+			t.Fatalf("the search returned %d hits, want the 2 that were ingested", len(reply.Hits))
+		}
+		auditClean(t, "the search reply", samples, reply)
+	})
+
+	t.Run("get_event", func(t *testing.T) {
+		// Looked up by the stored id, which is what a caller with a
+		// corrupted spool record would have. What comes back is what
+		// this checks.
+		reply, err := h.GetEvent(t.Context(), ipc.GetEventRequest{ID: hostile.Value, Project: auditProject})
+		if err != nil {
+			t.Fatalf("get_event: %v", err)
+		}
+		if reply.Event == nil {
+			t.Fatal("get_event answered no event, so the sweep below reads an empty reply")
+		}
+		auditClean(t, "the get_event reply", samples, reply)
+	})
+}
+
+// auditIDPayload is a minimal event that the audit term finds, under the
+// audit's project. The id is not in it - the point of the test above is the id
+// column, not the payload.
+func auditIDPayload(t *testing.T, id string) []byte {
+	t.Helper()
+
+	b, err := json.Marshal(map[string]string{
+		"session_id":      "phase6-id-" + strconv.Itoa(len(id)),
+		"hook_event_name": "PreToolUse",
+		"cwd":             auditProject,
+		"prompt":          "the event says " + auditTerm + " and nothing else",
+	})
+	if err != nil {
+		t.Fatalf("marshal the payload: %v", err)
+	}
+	return b
 }
 
 // auditAnswered is the vacuity guard the MCP sweeps need and the reply

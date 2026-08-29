@@ -149,18 +149,21 @@ func Leaves(payload []byte) string {
 
 		switch v := tok.(type) {
 		case json.Delim:
-			switch v {
-			case '{':
-				stack = append(stack, frame{object: true, atKey: true})
-			case '[':
-				stack = append(stack, frame{})
-			default: // '}' or ']', which only close a frame this loop opened
+			// Openers and closers are split here rather than in a
+			// switch over the four delimiters, so that the depth check
+			// sits on the only path that can raise the depth. In the
+			// switch it also ran after a pop, where len(stack) had just
+			// shrunk and the comparison could never fire (backlog 11).
+			//
+			// It stays one check for both openers, because SQLite counts
+			// them together - see [sqliteJSONDepthLimit].
+			if v == '{' || v == '[' {
+				stack = append(stack, frame{object: v == '{', atKey: v == '{'})
+				if len(stack) > sqliteJSONDepthLimit {
+					return ""
+				}
+			} else { // '}' or ']', which only close a frame this loop opened
 				stack = stack[:len(stack)-1]
-			}
-			// One check for both openers, because SQLite counts them
-			// together - see [sqliteJSONDepthLimit].
-			if len(stack) > sqliteJSONDepthLimit {
-				return ""
 			}
 		case string:
 			if !isKey {
