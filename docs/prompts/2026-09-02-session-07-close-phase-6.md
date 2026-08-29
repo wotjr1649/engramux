@@ -1,8 +1,9 @@
 # Session 07 — Engramux: close Phase 6
 
-Session 06 did the `[auto]` half of Phase 6 and started the `[manual]` half. **The redaction audit
-is written, gated and green, and it found nothing.** What is left is the soak, and the soak is a
-clock: it wants 72 hours of one service on one binary, and only time supplies that.
+Session 06 did the `[auto]` half of Phase 6, had it reviewed, fixed what the review found, and built
+the binary the soak runs on. **The redaction audit is written, gated and green, and it found
+nothing.** What is left is the soak, and the soak is a clock: it wants 72 hours of one service on
+one binary, and only time supplies that.
 
 `CLAUDE.md` imports `AGENTS.md`, so the standing rules are already in your context. This file
 carries what they cannot: the state of the work when the session opened, and how that session was
@@ -10,13 +11,11 @@ scoped.
 
 Read `docs/superpowers/specs/2026-08-27-engramux-1.0-design.md` **§8's Phase 6 row first** — it is
 now long, because session 06's job was to make it say what the audit is over and what the soak
-records. Everything below assumes you have read it. Then §7.1's `The redaction audit finds nothing`
-and `A read deadline shorter than a cold read`, and §7.3's soak row, which is where the series
-lives until it is finished.
+records. Then §7.1's `The redaction audit finds nothing` and `A read deadline shorter than a cold
+read`, and §7.3's soak row, which is where the series lives until it is finished.
 
-**If you are opening this before 2026-09-02 04:00 +09:00, the soak is not done and cannot be made
-done.** Read §2, take a sample, and stop. Everything else in this file is either already done or
-waiting on that clock.
+**If the soak has not reached 72 hours, it cannot be made to.** Read §2, check the series, and stop.
+Everything else here is either already done or waiting on that clock.
 
 ---
 
@@ -24,116 +23,117 @@ waiting on that clock.
 
 | | |
 |---|---|
-| Branch | `phase-6-hardening-and-soak`, off `main` at `26b5805`. **Not merged and not pushed** — session 06 left that to the user |
-| Last full verification, on that branch | `go test -p 1 -count=1 ./...` **16 packages ok** · pinned linter `0 issues.`, **exit 0** (the exit code, not the summary line) · `./scripts/race.sh` **exit 0, 16 ok, 0 `DATA RACE`** |
-| Shipped code changed | **None**, and it was checked rather than assumed. One non-`_test.go` file differs from `main` — `internal/secret/secrettest/secrettest.go`, which gained `Sample.Needle` — and `go list -deps ./cmd/engramux-service ./cmd/engramux` does not reach that package: it is imported by `_test.go` files only, so it is in neither binary. That is the soak's precondition; see §3 |
-| `dist/` and the installation | Untouched since session 05. `engramux.exe` 4,285,440 B, `engramux-service.exe` 13,919,232 B, installed and running |
-| The live service | Started **2026-08-30 04:00:19 +09:00** and has not restarted since. Two `ERROR` lines since that start, at 04:59:51 and 06:00:01, and §2 says what they were |
+| `main` | Session 06's commits, **pushed**. Working tree clean |
+| Last full verification | `go test -p 1 -count=1 ./...` **16 packages ok** · pinned linter `0 issues.`, **exit 0** (the exit code, not the summary line) · `./scripts/race.sh` **exit 0, 16 ok, 0 `DATA RACE`** |
+| `dist/` and the installation | **Rebuilt and reinstalled**, byte-for-byte identical to `dist/`. `engramux.exe` 4,285,440 B, `engramux-service.exe` 13,919,232 B |
+| Smoke test on the new build | `status` and `doctor` exit 0, MCP listening, both hosts pointing at the endpoint, tokenizer agreeing — and the flow the `events.id` fix could have broken, `search` then `event` on a real id, round-trips |
+| The soak clock | **Not started when this was written.** It starts at the user's reboot, and everything in the series before that reset is not the soak |
+| Backlog | **22 rows**, down from 26. Session 06 closed 5, 11, 24 and 29 |
 | Phases | 1–5 done and gated. **6's `[auto]` half is done and gated; its `[manual]` half is the soak** |
 
 ---
 
-## 2. The soak
+## 2. The soak, and the two things only the user can do
 
-**The clock ends 2026-09-02 04:00 +09:00**, 72 hours after the start above. It is the service's own
-uptime that counts, not the sampler's — the sampler can stop and restart without costing anything.
+**The clock is the service's own uptime**, read off `engramux status`. It starts at the reboot and
+ends 72 hours later. If the service restarted at any point in between — a logon, a crash, a
+`schtasks` mistake — the clock restarted with it, and §8's gate is not met however good the series
+looks. Check that before anything else.
 
-**The record is `.capture/soak/soak.tsv`**, gitignored, one TSV line per sample, and **the series
-in it starts at 2026-08-30 06:02:02** — everything before that is `soak-shakedown.tsv` and is not a
-series. `bash scripts/soak-sample.sh` takes one sample; `--every 1800` loops. The loop session 06
-started dies with that session, so the first thing to do is check the last `ts` and the `pid` column
-and start another one. **Start exactly one**: two loops appending to one log is not hypothetical, it
-happened three times over in session 06, and `AGENTS.md` has the row on the two mechanisms — a
-harness that stops a background command kills the wrapper and not the `bash`, and a running `bash`
-keeps executing the `sample()` it parsed before you rewrote the file. Check `ps -W` for
-`/usr/bin/sleep` before starting one, and `kill -9` both the loop and its sleep. Surviving a logoff
-needs a scheduled task, which is the user's to create and not an agent's.
+**The record is `.capture/soak/soak.tsv`**, gitignored, one TSV line per sample, with a `pid` column
+naming the run that wrote each row. Read the series from the **first row after the uptime resets**;
+what precedes it is the pre-reboot tail, and `soak-pre-reboot.tsv` and `soak-shakedown.tsv` beside
+it are earlier files that are not series at all.
 
-**What the shakedown said, over 90 minutes and 9 samples.** Events 12,587 → 13,119. `.db` 135.1 →
-145.9 MB. WAL 0 → 3.19 MB, so the checkpoint runs and truncates. Spool 0 throughout. Working set
-25.3 → 31.8 MB. Handles 201 → 223, threads 15 → 17. That is not a series and none of it is a
-trend — the `.db` figure alone would extrapolate to about 600 MB over 72 hours, which is the sort
-of thing to *measure* rather than to believe from two points through a lot of noise.
+Two things session 06 could not do:
 
-**The one thing it did turn up**, and it is worth understanding before you see it again. `status`
-lost to the 4 s read deadline **twice**, at 04:59:51 and 06:00:01, both with `service: group events
-by cell: context deadline exceeded`. The service was up through both — the working set on each row
-proves it, and its uptime never reset. **Both coincide with a race-detector run**, which saturates
-this machine for the better part of twenty minutes, and there is no occurrence outside one: 2 of 2.
-So the correlation is with load, not with the number, and two hours is not a base rate. §7.1's
-read-deadline row carries it. If you see one with nothing else running, that is the evidence:
-record it, and do not change the deadline in the same breath, because that restarts the clock (§3).
+1. **Register the sampler task.** `schtasks /create` is denied in that session's sandbox — `/query`,
+   `/run` and `/end` are not, which is worth knowing — so the Task Scheduler entry is the user's to
+   create. It runs `scripts/soak-sample-hidden.vbs`, which exists so the sampler does not flash a
+   console window 144 times over three days. **Delete the task when the soak ends**; nothing else
+   will.
+2. **The reboot.** It is what starts the clock on the installed build.
 
-Both were recorded as `down` by a pre-fix sampler that had no cell for "running and did not
-answer". It now writes `read-failed`, `down`, `unknown` and `parse-failed` as four separate states
-and leaves what it could not read as `-`, so a `down` in the live series means the process was
-genuinely absent.
+**Start exactly one sampler.** Two loops appending to one log is not hypothetical — it happened
+three times over in session 06, and `AGENTS.md` has the row on the two mechanisms. Check `ps -W` for
+`/usr/bin/sleep` before starting anything, and `kill -9` both the loop and its sleep.
+
+**The one thing the pre-soak samples turned up.** `status` lost to the 4 s read deadline twice, both
+with `service: group events by cell: context deadline exceeded`, and both while a race-detector run
+was saturating the machine — 2 of 2, no occurrence outside one. The correlation is with load, not
+with the number. If you see one with nothing else running, that is the evidence: record it, and do
+not change the deadline in the same breath, because that restarts the clock.
 
 ---
 
-## 3. Why nothing was rebuilt, and what that constrains
+## 3. Why the binary was rebuilt before the soak and must not be after
 
-The soak's precondition is that the binary stops changing. Session 06 therefore added tests, a
-script and spec prose, and nothing it touched is linked into either binary — so the running service
-is still the merged Phase 5 build, and its uptime is still the soak's clock. "Not a `_test.go` file"
-is the wrong test for that, and `go list -deps` over the two `cmd/` packages is the right one:
+The soak's precondition is that the binary stops changing. The user could afford **one** reboot, so
+session 06 spent it: the four backlog rows that needed a shipped-binary change were done together
+rather than trickled, and the reboot that installs them is the reboot that starts the clock.
+
+That spends the budget. **Any further change to a shipped `.go` file, followed by a rebuild and a
+reinstall, ends the soak and starts a new one at zero.** "Not a `_test.go` file" is the wrong test
+for what is shipped; `go list -deps ./cmd/engramux-service ./cmd/engramux` is the right one —
 `internal/secret/secrettest` is ordinary Go source that no shipped package imports.
 
-This constrains you the same way. Any change to a non-test `.go` file, followed by a rebuild and a
-reinstall, ends the soak and starts a new one at zero. That is not a reason to leave a real defect
-unfixed; it is a reason to know what fixing one costs, and to batch the fixing rather than trickle
-it. Documentation, tests and scripts are free.
+Documentation, tests and scripts are free. §5 says what to spend the three days on.
 
 ---
 
 ## 4. What session 06 built, so you do not rebuild it
 
-- **`TestPhase6RedactionAudit`** in `internal/service`. One event carrying a generated sample of
-  every shape in §6.1's table, plus a user path in `hook_event_name`, `session_id` and `cwd`, swept
-  through all eleven documents that leave the machine: the four reply documents, the four MCP tool
-  results over an in-memory transport, and three tool errors — `status` has no argument for a
-  caller to put a path in. Two assertions per document, a `secret.Detect` sweep and a literal search
-  for each sample's `Needle` - its generated body, not the whole of `Secret` - because the two fail on
-  different bugs and the whole of `Secret` was the wrong needle for both.
-- **`TestPhase6TheMaskedCorpusIsCleanUnderARescan`** in `internal/secret`. Every real capture
-  masked and rescanned. Skips itself when `.capture/` is absent.
-- **`scripts/soak-sample.sh`.** Reads everything from outside the service.
-- **§8's Phase 6 row** now decides the audit's scope: four surfaces in, five out with a reason each.
-  `doctor`, the installer's output, the CLI's own printing, the spool and the relay's stderr are the
-  five, and each reason is different. Do not re-derive them.
+**The audit.** `TestPhase6RedactionAudit` in `internal/service` loads one event with a generated
+sample of every shape in §6.1's table plus a user path in `hook_event_name`, `session_id` and `cwd`,
+and sweeps all eleven documents that leave the machine: four reply documents, four MCP tool results
+over an in-memory transport, and three tool errors. Two assertions per document — a `secret.Detect`
+sweep and a literal search for each sample's `Needle` — because they fail on different bugs.
+`TestPhase6TheMaskedCorpusIsCleanUnderARescan` in `internal/secret` masks every real capture and
+rescans it. **§8's Phase 6 row decides the scope**: four surfaces in, five out with a different
+reason each. Do not re-derive them.
 
-**Twelve deliberate breaks, one per mask, every one caught.** One is worth carrying: the corpus
-rescan is **not** broken by changing the placeholder's spelling, because `placeholder` and
-`isPlaceholder` read the same constant and move together. The mutation that isolates idempotence is
-`isPlaceholder` returning false.
+**The pre-soak fixes.** Backlog 29, `events.id` masked on both replies that carry it, with the half
+that matters held first — a real UUIDv7 is returned unchanged, so a hit's id still round-trips to
+`get_event`. Backlog 24, the 512 KiB field cap withdrawn from spec §6 rather than implemented, with
+`ipc.MaxFrameLen`'s justification rewritten from the measurement that outlived it. Backlog 5 and 11.
 
-**The audit was reviewed before it was merged, and the review found three inert assertions in it** —
-none of which any of the twelve breaks, the suite, the linter or the race detector had caught,
-because an assertion that cannot fail also cannot fail *loudly*. They are worth reading as a
-pattern, in §7.1's redaction-audit row: a needle that was the whole secret rather than its
-generated body, three carrier fields that were placed but not put in the list the literal half
-iterates, and eight MCP sweeps with no vacuity guard over a document that marshals to
-`{"content":null}` when empty. `secrettest.Sample.Needle` exists because of the first, and its doc
-comment is where that reasoning now lives.
+**Fifteen deliberate breaks, every one caught.** Three are worth carrying:
+
+- The corpus rescan is **not** broken by changing the placeholder's spelling — `placeholder` and
+  `isPlaceholder` read the same constant and move together. The mutation that isolates idempotence
+  is `isPlaceholder` returning false.
+- A break-it pass reverts with `git checkout --`, so it deletes uncommitted work in the files it
+  touches. Three files went that way and the only symptom was two mutations reporting `NOOP`.
+  `AGENTS.md` has the row.
+- **The review found three inert assertions in the audit itself**, none of which the twelve breaks,
+  the suite, the linter or the race detector had caught — because an assertion that cannot fail also
+  cannot fail loudly. §7.1's redaction-audit row has all three. `secrettest.Sample.Needle` exists
+  because of the first, and its doc comment is where that reasoning lives.
 
 ---
 
-## 5. What closing Phase 6 needs
+## 5. What to do, in order
 
-**T1 — Confirm the clock.** The service's uptime past 72 hours, read off `engramux status`, with
-the sample series behind it. If the service restarted at any point — a logon, a crash, a `schtasks`
-mistake — the clock restarted with it, and §8's gate is not met however good the series looks.
+**T1 — Check the clock, then the series.** `engramux status`'s uptime past 72 hours, with the sample
+series behind it and no restart in the service log.
 
-**T2 — Write the series up.** §7.3's soak row moves to §7.1 with what the 72 hours actually showed:
-the WAL's range, the database's growth rate, the working set's trend or absence of one, the handle
-and thread counts, and how many samples recorded each of `read-failed`, `down`, `unknown` and
-`parse-failed` — they mean four different things and only the first is about the read deadline. The
-working set is the MCP session map's only instrument, so its trend is the answer to the one question
-§5.9 left open — and a flat working set says nothing about the map's size, only that it is not
-growing without bound.
+**T2 — Write the series up.** §7.3's soak row moves to §7.1 with what the 72 hours showed: the WAL's
+range, the database's growth rate, the working set's trend or absence of one, the handle and thread
+counts, and how many samples recorded each of `read-failed`, `down`, `unknown` and `parse-failed` —
+four different things, and only the first is about the read deadline. The working set is the MCP
+session map's only instrument, so its trend is the answer to the one question §5.9 left open; a flat
+working set says nothing about the map's size, only that it is not growing without bound.
 
-**T3 — Whatever the series turned up.** If it turned up nothing, Phase 6 is done and 1.0's phase
-gates are all green, which is a decision about what happens next rather than a task in this file.
+**T3 — The backlog, while the clock runs.** 17 of the 22 rows need no shipped-binary change and are
+free during the soak: 1–4, 7–10, 12–15, and 19–23. Row 8 is one of them and is worth doing early —
+it is `particleStem` in `gate_test.go`, not production code, and it costs the Phase 4 gate 22 Hangul
+particle candidates. The five that are not free are 6, 16, 17, 27 and 28; they wait for the soak to
+end and then go into one build, the same way this one did.
+
+**T4 — Whatever the series turned up.** If it turned up nothing, Phase 6 is done and every phase gate
+is green. That is **not** 1.0: the user's decision is that this stays a personal tool for now — no
+tag, no release, and the backlog comes first. The repository has no `README` and no `LICENSE` while
+`origin` is public, which is a fact worth knowing rather than a task in this file.
 
 ---
 
@@ -141,25 +141,25 @@ gates are all green, which is a decision about what happens next rather than a t
 
 | Open | What to do |
 |---|---|
-| Backlog 28, the token in three files with inherited ACLs | Unchanged from session 06's brief: a design change, not a bug fix, and §5.9 already accepts the exposure. It also costs a rebuild, so it is not soak-compatible |
+| Backlog 28, the token in three files with inherited ACLs | A design change, not a bug fix; §5.9 already accepts the exposure. Needs a build, so it is not soak-compatible |
+| Backlog 27, a refusal with no reason | Narrowed, not closed. The tool surface carries its reason; the CLI still reads a bare rejected `Ack`. A Phase 1 wire-contract change |
+| Backlog 16 and 17, the event-name bound and its missing marker | Both wire-visible, both need a build |
+| Backlog 6, `doctor` saying when `ENGRAMUX_TEST_PIPE_SID` is set | Small, needs a build |
 | `doctor` cannot see a token mismatch | Accepted, deliberately. Unchanged |
-| Backlog 27, a refusal with no reason | Narrowed, not closed. The tool surface carries its reason; the CLI still reads a bare rejected `Ack` |
-| **Backlog 29**, `events.id` reaching a reader unmasked and unbounded | New, raised by the Phase 6 review on code that predates it. The session id beside it in the same reply is masked and the event name is masked and bounded; this one is neither. It is a row and not a defect because the id is relay-minted rather than payload-derived, so a secret-shaped one needs this user's own processes to write it — §6.1 records it as the second known perimeter. The fix is one `secret.MaskString` on each of two fields, and it costs a rebuild, so it is not soak-compatible |
-| Backlog 24, the unimplemented 512 KiB cap | Still a row |
-| The 23 remaining backlog rows | Untouched unless a task is already standing in that file |
-| An MCP reply has no size ceiling | Still stated in three comments and §5.9's tool table, still left that way |
-| The 4 s read deadline against a growing database | §2's observation is the first data point at 4 s. The database was 108 MB when 4 s was chosen and is 140 MB now, and the budget goes on page-cache I/O, so this is a number that ages. Watch it; do not move it on one loaded-machine sample |
+| An MCP reply has no size ceiling | Still stated in three comments and §5.9's tool table, still left that way: a cap needs a number nobody has measured |
+| The 4 s read deadline against a growing database | The database was 108 MB when 4 s was chosen and is about 149 MB now, and the budget goes on page-cache I/O, so this is a number that ages. §2 has the two observations |
 | Codex `SessionEnd` past the clamp, §7.3 | Still unmeasured; needs a deliberately slow hook in a user's own configuration. Not agent work |
+| No `README`, no `LICENSE`, `origin` public | The user's call and currently "later". A public repository with no licence grants nobody any rights |
 
 ---
 
-## 7. Four things that will bite
+## 7. Five things that will bite
 
-1. **A rebuild ends the soak.** §3. Check what you are about to change before you change it.
-2. **`schtasks /end` then `/run` back to back leaves nothing running.** There is a row in
-   `AGENTS.md`. It also ends the soak, twice over.
-3. **Check the linter's exit code, never its summary line.**
-4. **`./scripts/race.sh` takes about twenty minutes**, almost all of it `internal/search` at 840 s.
-   Start it early and do something else. While it runs the machine is saturated, and §2's
-   failed sample is what that looks like from the soak's side — so a sample taken during a race run
-   is not evidence about the deadline.
+1. **A rebuild ends the soak.** §3. Check `go list -deps` before you believe a change is free.
+2. **`schtasks /create` is denied in the agent sandbox**; `/query`, `/run` and `/end` are not. Do not
+   route around the denial — hand the command over.
+3. **`schtasks /end` then `/run` back to back leaves nothing running.** There is a row in
+   `AGENTS.md`. Wait for `status` to stop answering before starting.
+4. **Check the linter's exit code, never its summary line.**
+5. **`./scripts/race.sh` takes 10–20 minutes**, almost all of it `internal/search`. While it runs the
+   machine is saturated, and a soak sample taken during it is not evidence about the read deadline.
