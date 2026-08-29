@@ -29,10 +29,15 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // The 11-event intersection (spec 4.1). Both hosts expose all of these; 1.0
 // handles the intersection and nothing else.
-// The value is the `matcher`, or null to omit the key.
+//
+// The value is the per-event settings: `matcher`, null to omit the key, and
+// `codexTimeout` on the one event where Codex's own limit is below
+// TIMEOUT_SECONDS. One table, so a renamed event cannot leave a timeout
+// stranded under the old name.
 //
 // Checked against Claude Code's hook reference rather than inferred: `"*"`,
 // `""` and an omitted key are documented as EQUIVALENT - all three match every
@@ -46,17 +51,27 @@ import { join, dirname } from 'node:path'
 //
 // All eleven names below appear verbatim in the documented lifecycle table.
 const EVENTS = {
-  SessionStart: '*',
-  SessionEnd: null,
-  UserPromptSubmit: null,
-  PreToolUse: '*',
-  PostToolUse: '*',
-  Stop: null,
-  SubagentStart: null,
-  SubagentStop: null,
-  PreCompact: '*',
-  PostCompact: '*',
-  PermissionRequest: '*',
+  SessionStart: { matcher: '*' },
+  // Codex documents SessionEnd alone as "1 second by default and supports up
+  // to 3 seconds", against 600 s for every other hook, and warns at load that
+  // it is clamping anything higher. 3 rather than 1 because the relay's own
+  // ceiling is 1 s total (spec 5.3) plus process start, which is already over
+  // Codex's default; 3 is the documented maximum and an explicit value records
+  // that, where omitting it silently means 1. Not `async`: the same
+  // documentation says SessionEnd hooks "always run synchronously, even when
+  // `async` is true", so that is not a way out. Claude Code is unaffected - its
+  // SessionEnd budget is 1.5 s raised to the longest per-hook timeout - and
+  // keeps TIMEOUT_SECONDS.
+  SessionEnd: { matcher: null, codexTimeout: 3 },
+  UserPromptSubmit: { matcher: null },
+  PreToolUse: { matcher: '*' },
+  PostToolUse: { matcher: '*' },
+  Stop: { matcher: null },
+  SubagentStart: { matcher: null },
+  SubagentStop: { matcher: null },
+  PreCompact: { matcher: '*' },
+  PostCompact: { matcher: '*' },
+  PermissionRequest: { matcher: '*' },
 }
 const EVENT_NAMES = Object.keys(EVENTS)
 
@@ -71,7 +86,10 @@ const BIN = join(LOCAL, 'engramux', 'bin')
 const RELAY = join(BIN, 'engramux.exe')
 const SERVICE = join(BIN, 'engramux-service.exe')
 
-const REPO = join(dirname(new URL(import.meta.url).pathname.slice(1)), '..')
+// fileURLToPath, not pathname.slice(1): a URL percent-encodes, so a repository
+// under a path with a space or a non-ASCII character resolves to a directory
+// that does not exist and the dist check below reports the binaries missing.
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST_RELAY = join(REPO, 'dist', 'engramux.exe')
 const DIST_SERVICE = join(REPO, 'dist', 'engramux-service.exe')
 
@@ -118,8 +136,8 @@ function mergeEvents(hooks, makeHook) {
 
     if (!remove) {
       // Appended last, so an existing gate or guard still runs first.
-      const matcher = EVENTS[event]
-      kept.push(matcher === null ? { hooks: [makeHook()] } : { matcher, hooks: [makeHook()] })
+      const { matcher } = EVENTS[event]
+      kept.push(matcher === null ? { hooks: [makeHook(event)] } : { matcher, hooks: [makeHook(event)] })
     }
 
     if (kept.length > 0) hooks[event] = kept
@@ -192,13 +210,13 @@ install(CLAUDE, 'claude-code', () => ({
 
 // Codex: commandWindows as a single string. `command` is set to the same thing
 // so the entry is not Windows-only by accident.
-install(CODEX, 'codex', () => {
+install(CODEX, 'codex', (event) => {
   const quoted = `"${RELAY.replaceAll('\\', '/')}"`
   return {
     type: 'command',
     command: quoted,
     commandWindows: quoted,
-    timeout: TIMEOUT_SECONDS,
+    timeout: EVENTS[event].codexTimeout ?? TIMEOUT_SECONDS,
     statusMessage: 'engramux capture',
   }
 }, (doc) => (doc.hooks ??= {}))
