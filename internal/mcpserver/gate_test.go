@@ -277,6 +277,97 @@ func serveForTest(t *testing.T, h pipe.Handler) (endpoint, token string) {
 	return s.Endpoint(), doc.Token
 }
 
+// TestTheTokenAndThePortBothSurviveARestart is the defect a first revision of
+// this package shipped, held open by a test.
+//
+// The port was sticky and the token was minted every start, so on a machine
+// where the service is a logon-triggered task the two host configurations held
+// the previous logon's token from the moment the user logged in. Every tool
+// call answered 401, `doctor` reported it healthy because the URL still
+// matched, and no smoke test inside one service lifetime could see it.
+//
+// Two Listens over one directory are what a restart is. Both values have to
+// come back, because either one alone leaves a host configuration that does not
+// work: the URL without the credential, or the credential at an address nothing
+// answers.
+func TestTheTokenAndThePortBothSurviveARestart(t *testing.T) {
+	dir := t.TempDir()
+
+	first, firstToken := listenOnce(t, dir)
+	second, secondToken := listenOnce(t, dir)
+
+	if second != first {
+		t.Errorf("the endpoint moved across a restart: %q then %q", first, second)
+	}
+	if secondToken != firstToken {
+		// Neither value is printed: they are the tokens this test
+		// minted, and a mismatch is the whole finding.
+		t.Error("the bearer token was minted again across a restart, which is what breaks both hosts at every logon")
+	}
+}
+
+// TestATokenThisNeverWroteIsReplaced. A reused token goes straight into the
+// comparison every request is checked against, so the file it comes from is a
+// trust boundary even though the service wrote it: an empty one would make a
+// bare `Authorization: Bearer ` header compare equal.
+func TestATokenThisNeverWroteIsReplaced(t *testing.T) {
+	for _, tc := range []struct{ name, token string }{
+		{"empty", ""},
+		{"too short", "ABCDEFGHIJKLMNOPQRSTUVWXY"},
+		{"lower case, which the alphabet has none of", "abcdefghijklmnopqrstuvwxy2"},
+		{"a space, which would reach a TOML string and an argv", "ABCDEFGHIJKLM NOPQRSTUVWXY2"},
+		{"a quote, the same way", `ABCDEFGHIJKLM"NOPQRSTUVWXY2`},
+		{"a digit outside base32", "ABCDEFGHIJKLMNOPQRSTUVWXY9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := mcpconf.Write(dir, "http://127.0.0.1:1/mcp", tc.token); err != nil {
+				t.Fatalf("write %s: %v", mcpconf.Name, err)
+			}
+			if got := reusableToken(dir); got != "" {
+				t.Errorf("a token of %d characters was reused", len(got))
+			}
+		})
+	}
+
+	// And the control: what this package writes is reused, or the six
+	// cases above would pass on a function that always refused.
+	dir := t.TempDir()
+	_, token := listenOnce(t, dir)
+	if reusableToken(dir) != token {
+		t.Error("a token this package minted was not reused")
+	}
+}
+
+// listenOnce binds, publishes, and closes again without ever serving, and
+// returns the endpoint and the token that were published.
+func listenOnce(t *testing.T, dir string) (endpoint, token string) {
+	t.Helper()
+
+	s, err := Listen(t.Context(), dir, stubHandler())
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	// Closed rather than served: the next Listen has to be able to take the
+	// same port back, which is the half of this that is about the port.
+	if err := s.ln.Close(); err != nil {
+		t.Fatalf("close the listener: %v", err)
+	}
+
+	b, err := os.ReadFile(mcpconf.Path(dir))
+	if err != nil {
+		t.Fatalf("read %s: %v", mcpconf.Name, err)
+	}
+	var doc struct {
+		URL   string `json:"url"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("decode %s: %v", mcpconf.Name, err)
+	}
+	return doc.URL, doc.Token
+}
+
 // stubHandler answers every request type with a fixed document.
 //
 // The transport clauses are about what reaches a handler, not about what a

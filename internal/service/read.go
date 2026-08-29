@@ -105,11 +105,11 @@ func asJSON(b []byte) json.RawMessage {
 // a project is created by ingest.
 //
 // ponytail: a session id is untrusted width, because host_session_id is
-// whatever a payload said, and nothing truncates it. The ceiling is
-// ipc.MaxFrameLen, at which point WriteFrame refuses and the caller reports a
-// failed read - the same ceiling the cell breakdown has. Truncating is what an
-// event name gets and an id must not: a shortened name is still readable and a
-// shortened id is not an id.
+// whatever a payload said, and nothing truncates it. Over the pipe the ceiling
+// is ipc.MaxFrameLen, at which point WriteFrame refuses and the caller reports
+// a failed read; over MCP there is none, for the reason [cells] gives at
+// length. Truncating is what an event name gets and an id must not: a shortened
+// name is still readable and a shortened id is not an id.
 func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
 	if req.Project == "" {
 		return ipc.ListSessionsReply{}, ipc.ErrNoProject

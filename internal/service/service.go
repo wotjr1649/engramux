@@ -545,9 +545,10 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 // It is the one field of a hit with no bound anywhere else: the column has no
 // CHECK, and internal/store takes hook_event_name from the payload verbatim, so
 // one event with a multi-megabyte name would make every search that matched it
-// fail at ipc.WriteFrame - which the CLI can only report as a failed read.
-// A shortened name is a worse answer than the real one and a much better one
-// than no answer at all.
+// fail at ipc.WriteFrame - which the CLI can only report as a failed read - and
+// would put the same megabytes in an MCP response, which has no frame to refuse
+// it (see [cells]). A shortened name is a worse answer than the real one and a
+// much better one than no answer at all.
 //
 // 64 is what the CLI prints: `engramux search` formats the name with %.64q,
 // which truncates its input to 64 runes, so nothing past this ever reached a
@@ -582,10 +583,14 @@ func truncateRunes(s string, n int) string {
 // [ipc.Cell] says why that is the answer rather than a zero-filled grid.
 //
 // ponytail: the reply grows with the number of distinct cells, and nothing
-// caps it. The ceiling is ipc.MaxFrameLen, at which point WriteFrame refuses
-// and the CLI reports a failed read rather than a short answer. Real traffic
-// is spec 4.1's 11 event names across two hosts; the upgrade path is a LIMIT
-// and a truncation flag, which needs a number nothing has needed yet.
+// caps it. Over the pipe the ceiling is ipc.MaxFrameLen, at which point
+// WriteFrame refuses and the CLI reports a failed read rather than a short
+// answer. **Over MCP there is no ceiling at all** - that surface marshals
+// straight to an HTTP response and never touches WriteFrame - so the two
+// surfaces do not fail alike, and this is the one place that says so. Real
+// traffic is spec 4.1's 11 event names across two hosts; the upgrade path is a
+// LIMIT and a truncation flag, which needs a number nothing has measured, and
+// an unmeasured cap is what AGENTS.md forbids.
 func cells(ctx context.Context, db *sql.DB) ([]ipc.Cell, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT host, event_name, count(*), min(received_at), max(received_at)

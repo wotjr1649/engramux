@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -78,9 +80,30 @@ type Server struct {
 // holding the URL survives an ordinary restart, and port 0 is the fallback, so
 // the bind is its own probe and no race with a prober exists.
 //
-// The token is minted per start (spec 5.9), so a stale mcp.json never
-// authenticates against a new service. That is also why nothing reads a token
-// back off disk - see internal/mcpconf.
+// # The token is sticky too, and it has to be
+//
+// A previous revision minted a token on every start, which spec 5.9 called
+// "minted per service start". It made the product break at every logon. The
+// service is a logon-triggered task, so each logon minted a new token while the
+// two host configurations still carried the previous one, and every tool call
+// answered 401 until the installer was re-run. `doctor` reported it healthy,
+// because the sticky port kept the URL correct and the URL is all it compares.
+//
+// Rotation bought nothing it was there for. The token's whole life is as a
+// static header inside `~/.codex/config.toml` and Claude Code's user
+// configuration, where nothing rotates it, so rotating this copy shortens no
+// exposure window - it only stops the two clients matching. What it cost is a
+// credential that is invalid more often than it is valid.
+//
+// So the previous start's token is reused, and a new one is minted only when
+// there is none to reuse or the one on disk is not a shape this ever wrote. The
+// escape hatch is the file: delete mcp.json, restart, re-run the installer.
+//
+// The reader is here rather than in internal/mcpconf, and that is the whole of
+// what keeps spec 6.1's rule structural. `engramux doctor` reads mcp.json and
+// lives in the relay binary; that binary does not link this package, so it
+// cannot obtain a token by any route rather than being trusted not to print
+// one. internal/mcpconf keeps a read side with no field for a token.
 func Listen(ctx context.Context, dir string, h pipe.Handler) (*Server, error) {
 	srv, err := New(h)
 	if err != nil {
@@ -100,11 +123,14 @@ func Listen(ctx context.Context, dir string, h pipe.Handler) (*Server, error) {
 		return nil, err
 	}
 
-	// rand.Text is at least 128 bits of randomness in the RFC 4648 base32
-	// alphabet, so it needs no encoding step of its own and carries nothing
-	// that has to be escaped into a header, a JSON document or a TOML
-	// string.
-	token := rand.Text()
+	token := reusableToken(dir)
+	if token == "" {
+		// rand.Text is at least 128 bits of randomness in the RFC 4648
+		// base32 alphabet, so it needs no encoding step of its own and
+		// carries nothing that has to be escaped into a header, a JSON
+		// document or a TOML string.
+		token = rand.Text()
+	}
 	endpoint := "http://" + ln.Addr().String() + endpointPath
 	if err := mcpconf.Write(dir, endpoint, token); err != nil {
 		_ = ln.Close()
@@ -119,6 +145,51 @@ func Listen(ctx context.Context, dir string, h pipe.Handler) (*Server, error) {
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	}, nil
+}
+
+// minTokenChars is the shortest string [reusableToken] will accept.
+//
+// crypto/rand's Text returns 26 characters of the RFC 4648 base32 alphabet
+// today, and its own documentation reserves the right to return longer texts to
+// keep its 128-bit floor. So this is a floor and not an equality: a longer
+// token from a future toolchain is reused, and a shorter one is not.
+const minTokenChars = 26
+
+// reusableToken is the token the previous start published, or "" when there is
+// none this start may reuse.
+//
+// Every failure answers "" rather than an error, because the caller's next move
+// is the same for all of them: mint one. A missing file is a first start, an
+// unparseable one is a file somebody edited, and neither is a reason to leave
+// the endpoint unserved.
+//
+// The shape check is not tidiness. An empty token would make a bare
+// `Authorization: Bearer ` header compare equal, which is every unauthenticated
+// request; a token carrying a space or a quote would go into a TOML string and
+// a command-line argument by way of the installer. Accepting only what this
+// package itself writes closes both without knowing which one the file has.
+func reusableToken(dir string) string {
+	//nolint:gosec // G304: dir is the service's own data directory, joined
+	// with internal/mcpconf's constant. No part of it is input.
+	b, err := os.ReadFile(mcpconf.Path(dir))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return ""
+	}
+	if len(doc.Token) < minTokenChars {
+		return ""
+	}
+	for _, r := range doc.Token {
+		if (r < 'A' || r > 'Z') && (r < '2' || r > '7') {
+			return ""
+		}
+	}
+	return doc.Token
 }
 
 // Endpoint is the URL [Listen] published. It carries no token.

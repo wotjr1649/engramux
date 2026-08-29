@@ -193,5 +193,47 @@ func boundedRead[T any](ctx context.Context, g *readGate, fn func(context.Contex
 		return zero, err
 	}
 	defer g.releaseRead()
+	holdTheGate(ctx)
 	return fn(ctx)
+}
+
+// readHold is how long a read holds the gate before it does any work. It is
+// zero in every shipped path and only a test writes to it.
+//
+// # What it is for, and why a seam was worth it
+//
+// The property it exists to test is that **both surfaces share one gate**: an
+// MCP tool call and a CLI read contend with each other, because [handlers] is
+// built once and given to internal/pipe and internal/mcpserver alike. That is
+// the central claim of spec 5.9's contention design, and nothing held it - a
+// deliberate break that gave the MCP server a [readGate] of its own left every
+// test in three packages green.
+//
+// The obvious instrument does not work. Timing an ingest against many
+// concurrent MCP readers passes with two gates, because a second gate serialises
+// those readers among themselves and only two reads ever reach the pool - which
+// is the same "passes with any two of them" trap the three mechanisms above
+// already have a comment about. What discriminates is *overlap*: two reads on
+// one gate take twice as long as two reads on two. Overlap needs a read whose
+// duration a test can set, and a query's duration is not.
+//
+// So it is a var, the way readDeadline and drainInterval are, and it is applied
+// after the gate is taken rather than before, so that the wait for the gate and
+// the hold on it stay distinguishable. It is inside the deadline: a hold longer
+// than readDeadline is a read that times out, which is the honest behaviour and
+// keeps this from being a way to bypass the bound it sits under.
+var readHold time.Duration
+
+// holdTheGate is [readHold], interruptible. A plain sleep would outlive a
+// cancelled context and make the gate look wedged when it is only paused.
+func holdTheGate(ctx context.Context) {
+	if readHold <= 0 {
+		return
+	}
+	t := time.NewTimer(readHold)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
 }

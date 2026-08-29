@@ -13,12 +13,18 @@
 //
 // # Nothing here reads the token back
 //
-// The service mints a token per start and writes it; it never needs to read
-// one. The installer reads the file to write a host configuration, and the
-// installer is not this package. So the only reader here is [URL], which
-// decodes the endpoint and stops - the token is not a value callers are asked
-// not to print, it is a value they cannot obtain. That is spec 6.1's rule about
-// a secret made structural rather than editorial.
+// The only reader here is [URL], which decodes the endpoint and stops. There is
+// no field for a token on the way in, so no caller of this package can be
+// handed one - spec 6.1's rule about a secret, made structural rather than
+// editorial.
+//
+// The service does read the token back: the token is sticky across a restart,
+// or the static header in each host's configuration would be stale from the
+// next logon onwards. That reader is in internal/mcpserver rather than here,
+// and the difference is what keeps the property. `engramux doctor` reads this
+// file and lives in the relay binary; that binary does not link
+// internal/mcpserver, which pulls in the MCP SDK, so it cannot reach a token by
+// any route rather than being trusted not to print one.
 package mcpconf
 
 import (
