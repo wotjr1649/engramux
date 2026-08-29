@@ -247,26 +247,7 @@ func run(ctx context.Context, dir string) error {
 		})
 	}()
 
-	serveErr := pipe.Serve(ctx, l, pipe.Handler{
-		// The seam internal/pipe exists for: ipc cannot import store, so
-		// the database reaches the accept loop as a closure and nothing
-		// else (spec 5.4's one connection is what this is closing over).
-		Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
-			return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
-		},
-		Status: func(ctx context.Context) (ipc.StatusReply, error) {
-			return status(ctx, db, dbPath, spoolPath, started)
-		},
-		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
-			return searchEvents(ctx, db, req)
-		},
-		GetEvent: func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error) {
-			return getEvent(ctx, db, req)
-		},
-		ListSessions: func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
-			return listSessions(ctx, db, req)
-		},
-	})
+	serveErr := pipe.Serve(ctx, l, handlers(db, dbPath, spoolPath, started, newReadGate()))
 
 	// Serve has returned, so no handler is using the pool any more. Stop the
 	// drain and the checkpointer and wait for them before the deferred Close
@@ -283,6 +264,58 @@ func run(ctx context.Context, dir string) error {
 		return nil
 	}
 	return serveErr
+}
+
+// handlers is everything internal/pipe answers a request with, wired to one
+// database and one read gate.
+//
+// It is a function rather than a literal inside [run] so that a test can hold
+// the *production* wiring rather than a copy of it. The order reads and ingest
+// take on the single connection is a property of these five closures and of
+// nothing else, so a test that built its own would measure its own wiring. The
+// gate is a parameter for the same reason: a test needs to look at the one these
+// closures use, and [run] is the only caller that mints one.
+//
+// # Reads are gated and bounded; ingest is neither
+//
+// Every read goes through [boundedRead]: a query deadline, then a gate that
+// allows one read at a time and lets a pending ingest go first. Ingest only
+// marks itself pending and runs - it waits for the connection and for nothing
+// here. I-04 is why: a captured event is never silently dropped, and a relay
+// that blows spec 5.3's 800 ms post-dial budget spools and costs latency, while
+// a read that waits costs nobody anything.
+//
+// The seam internal/pipe exists for is the same as it was: ipc cannot import
+// store, so the database reaches the accept loop as a closure and nothing else
+// (spec 5.4's one connection is what these close over).
+func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *readGate) pipe.Handler {
+	return pipe.Handler{
+		Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
+			gate.enterIngest()
+			defer gate.leaveIngest()
+			return store.Ingest(ctx, db, env, store.SourcePipe, time.Now())
+		},
+		Status: func(ctx context.Context) (ipc.StatusReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.StatusReply, error) {
+				return status(ctx, db, dbPath, spoolPath, started)
+			})
+		},
+		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.SearchReply, error) {
+				return searchEvents(ctx, db, req)
+			})
+		},
+		GetEvent: func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.GetEventReply, error) {
+				return getEvent(ctx, db, req)
+			})
+		},
+		ListSessions: func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.ListSessionsReply, error) {
+				return listSessions(ctx, db, req)
+			})
+		},
+	}
 }
 
 // checkpointOnTheWayOut is spec 5.4's checkpoint on shutdown. It runs after the

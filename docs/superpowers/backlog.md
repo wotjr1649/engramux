@@ -47,7 +47,6 @@ of that design.
 |---|---|---|
 | 24 | spec 6 vs. the tree | **The 512 KiB field cap is documented but not implemented.** Spec 6 says field values are capped by a limiter that preserves JSON validity. Searching the non-test tree for it finds comments and the query builder's `maxTokenBytes`, and nothing that enforces it; `readStdin` is explicitly unbounded and says so. A stored payload is therefore bounded only by `ipc.MaxFrameLen`. Either implement the cap or correct spec 6 |
 | 25 | `scripts/install-hooks.mjs` | Writes each host configuration with a direct `writeFileSync`. Spec 5.6 requires every write to be to a temporary file followed by an atomic rename. The Claude file is fully rewritten before the Codex file is parsed, so a failure between them leaves a split state that only the timestamped backup recovers |
-| 26 | reply write path | **Observed live, once, 2026-08-29 21:03:44 on the installed service (PID 11292, uptime 1h24m, 10,300 events, spool 0).** A single `engramux status` failed with `read the reply: ipc: read frame length: EOF`; the service logged `pipe: write reply` / `ipc: write frame length: i/o timeout` at the same instant. An immediate retry succeeded and the service stayed up throughout. One human client, one CLI invocation, and the reply write still exceeded its deadline — before MCP exists. Nothing reproduces it on demand and nothing in the suite would catch it, which is why it is a row. It is the observed half of what the reviews reason about abstractly under contention |
 
 ## Phase 5 prerequisites this review surfaced
 

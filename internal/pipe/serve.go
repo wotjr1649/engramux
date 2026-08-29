@@ -194,6 +194,25 @@ func serveConn(ctx context.Context, conn net.Conn, h Handler) {
 		// client's own deadline is what covers it.
 		return
 	}
+	// The reply gets its own deadline rather than whatever the handler left
+	// of the one above, and this is a fix rather than a tidy-up.
+	//
+	// One deadline for the whole connection covers the read, the handler and
+	// the write. The handler is deliberately not bounded by it - see
+	// [requestTimeout] - so a handler that runs long leaves the write
+	// nothing, and the write then fails with `i/o timeout` while the client
+	// sees the connection close with no frame on it. That was observed once
+	// on the installed service and could not be reproduced on demand;
+	// TestASlowHandlerStillGetsItsReplyOut reproduces it by making the
+	// handler slow, which is the condition that was never suspected.
+	//
+	// It does not extend what a client may hold a connection for by stalling:
+	// a stalled client sends no request, so no handler runs and this line is
+	// never reached. The deadline above is still the whole of that bound.
+	if err := conn.SetWriteDeadline(time.Now().Add(requestTimeout)); err != nil {
+		slog.WarnContext(ctx, "pipe: set the reply deadline", "error", err)
+		return
+	}
 	if err := ipc.WriteFrame(conn, reply); err != nil {
 		slog.WarnContext(ctx, "pipe: write reply", "error", err)
 	}
