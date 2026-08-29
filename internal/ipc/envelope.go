@@ -7,13 +7,18 @@ import "encoding/json"
 // uses.
 type RequestType string
 
-// The five Phase 1 request types, spelled exactly as spec 5.2 spells them.
+// The request types spec 5.2 names: the five Phase 1 ones, then the two Phase 5
+// adds for the tool surface (spec 5.9).
 const (
 	IngestEvent RequestType = "IngestEvent"
 	Status      RequestType = "Status"
 	Doctor      RequestType = "Doctor"
 	Search      RequestType = "Search"
 	Drain       RequestType = "Drain"
+	// GetEvent reads one whole event back, by id and project together.
+	GetEvent RequestType = "GetEvent"
+	// ListSessions lists one project's sessions.
+	ListSessions RequestType = "ListSessions"
 )
 
 // Envelope is the JSON document a frame's payload holds. Payload is kept as

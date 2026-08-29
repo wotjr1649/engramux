@@ -259,6 +259,12 @@ func run(ctx context.Context, dir string) error {
 		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
 			return searchEvents(ctx, db, req)
 		},
+		GetEvent: func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error) {
+			return getEvent(ctx, db, req)
+		},
+		ListSessions: func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
+			return listSessions(ctx, db, req)
+		},
 	})
 
 	// Serve has returned, so no handler is using the pool any more. Stop the

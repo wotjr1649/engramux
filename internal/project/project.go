@@ -20,6 +20,7 @@ package project
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,9 +83,14 @@ type Project struct {
 // substituted drives. Each of those is a different string for the same
 // directory and this package treats them as different projects.
 func Identify(path string) Project {
+	return identify(path, math.MaxInt)
+}
+
+// identify is [Identify] with the walk bound supplied.
+func identify(path string, maxLook int) Project {
 	clean := filepath.Clean(path)
 	if filepath.IsAbs(clean) {
-		clean = worktreeRoot(clean)
+		clean = worktreeRoot(clean, maxLook)
 	}
 	root := strings.ToLower(clean)
 	sum := sha256.Sum256([]byte(root))
@@ -96,7 +102,15 @@ func Identify(path string) Project {
 }
 
 // worktreeRoot walks up from dir and returns the first directory holding a
-// .git entry, or dir unchanged when there is none above it.
+// .git entry, or dir unchanged when there is none above it or none within
+// maxSteps of it.
+//
+// maxLook is how many directories may be looked at, dir included, so a maxLook
+// of n+1 climbs at most n ancestors. [Identify] passes [math.MaxInt] because the
+// ingest path must answer for whatever cwd a payload carried and I-04 does not
+// let it decline; [FromArgument] passes a real bound, because there the path
+// came from a caller. See that function for why the bound is on the argument
+// and not on every walk.
 //
 // A .git **file** counts as much as a .git directory. That is how git marks a
 // linked worktree - the file holds a `gitdir:` line pointing back at the
@@ -107,8 +121,9 @@ func Identify(path string) Project {
 //
 // [os.Lstat] rather than [os.Stat]: the marker's existence is the whole
 // question, and a .git symlink that dangles still marks a root.
-func worktreeRoot(dir string) string {
-	for cur := dir; ; {
+func worktreeRoot(dir string, maxLook int) string {
+	cur := dir
+	for range maxLook {
 		if _, err := os.Lstat(filepath.Join(cur, ".git")); err == nil {
 			return cur
 		}
@@ -118,4 +133,5 @@ func worktreeRoot(dir string) string {
 		}
 		cur = parent
 	}
+	return dir
 }

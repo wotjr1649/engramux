@@ -72,10 +72,20 @@ type StatusFunc func(ctx context.Context) (ipc.StatusReply, error)
 // matched - so a handler that failed must not be able to produce one.
 type SearchFunc func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error)
 
+// GetEventFunc answers a GetEvent request, and [ListSessionsFunc] a
+// ListSessions one. Both have [SearchFunc]'s contract exactly: the decoded
+// request in, the reply document out, Version and Type stamped by [Serve], and
+// an error answering ipc.Rejected because a nil event and an empty session list
+// are both real answers that a failed handler must not be able to produce.
+type (
+	GetEventFunc     func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error)
+	ListSessionsFunc func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
+)
+
 // Handler is what [Serve] answers requests with - one function per request
 // type it implements.
 //
-// A struct rather than a parameter per type, because spec 5.2's five types
+// A struct rather than a parameter per type, because spec 5.2's request types
 // arrive over several phases and a handler that is not supplied has one
 // behaviour: the request is refused. Ingest is the exception and is required,
 // because a service that cannot store an event has nothing to serve.
@@ -88,6 +98,10 @@ type Handler struct {
 	// Search answers a Search request. A nil Search refuses one, the same
 	// way.
 	Search SearchFunc
+	// GetEvent answers a GetEvent request, ListSessions a ListSessions
+	// one. A nil field refuses that type, the same way.
+	GetEvent     GetEventFunc
+	ListSessions ListSessionsFunc
 }
 
 // Serve accepts connections on l and answers each one, until l is closed or
@@ -269,6 +283,62 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		}
 		return b
 
+	case ipc.GetEvent:
+		if h.GetEvent == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no GetEvent handler")
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		// Decoded here for the reason the Search case is: the envelope
+		// check cannot see inside Payload, and a document that did not
+		// decode would otherwise become a zero request - which for this
+		// type is a request the handler refuses anyway, but only
+		// because it validates. Refusing it here does not depend on
+		// that.
+		var req ipc.GetEventRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			slog.WarnContext(ctx, "pipe: decode the get-event request", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply, err := h.GetEvent(ctx, req)
+		if err != nil {
+			// Neither the id nor the project is logged. The project
+			// is a path a caller sent and a log is an egress (I-10);
+			// the errors internal/project and internal/ipc return
+			// carry their own bounded copy when it is safe to.
+			slog.ErrorContext(ctx, "pipe: get event failed", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply.Version, reply.Type = ipc.Version, ipc.GetEvent
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode get-event reply", "error", err)
+			return nil
+		}
+		return b
+
+	case ipc.ListSessions:
+		if h.ListSessions == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no ListSessions handler")
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		var req ipc.ListSessionsRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			slog.WarnContext(ctx, "pipe: decode the list-sessions request", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply, err := h.ListSessions(ctx, req)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: list sessions failed", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply.Version, reply.Type = ipc.Version, ipc.ListSessions
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode list-sessions reply", "error", err)
+			return nil
+		}
+		return b
+
 	default:
 		// Doctor and Drain are the CLI reads I-08 routes over this
 		// pipe that this build does not implement. Rejected is the
@@ -277,7 +347,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		//
 		// It carries no reason, because ipc.Ack has no field for one.
 		// env.Type is safe to log verbatim here and only here: validate
-		// has already confirmed it is one of the five constants.
+		// has already confirmed it is one of spec 5.2's constants.
 		slog.WarnContext(ctx, "pipe: request type is not implemented in this build", "type", env.Type)
 		return encodeAck(ctx, ipc.Rejected, env.IngestID)
 	}
@@ -324,7 +394,7 @@ func validate(env ipc.Envelope) error {
 		if env.IngestID == "" {
 			return errIngestID
 		}
-	case ipc.Status, ipc.Doctor, ipc.Search, ipc.Drain:
+	case ipc.Status, ipc.Doctor, ipc.Search, ipc.Drain, ipc.GetEvent, ipc.ListSessions:
 	default:
 		// Bounded with a precision: the type is arbitrary bytes off the
 		// wire, capped only by ipc.MaxFrameLen, and this string reaches a
