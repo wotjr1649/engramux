@@ -60,8 +60,8 @@ func captureStdout(t *testing.T, f func()) string {
 
 	previous := os.Stdout
 	os.Stdout = file
+	defer func() { os.Stdout = previous }()
 	f()
-	os.Stdout = previous
 
 	if err := file.Close(); err != nil {
 		t.Fatalf("close the capture file: %v", err)

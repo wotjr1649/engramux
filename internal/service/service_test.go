@@ -529,7 +529,8 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 		n    int
 		want string
 	}{
-		{name: "under the bound is untouched", in: "PostToolUse", n: 5, want: "PostT"},
+		{name: "over the bound is cut", in: "PostToolUse", n: 5, want: "PostT"},
+		{name: "under the bound is untouched", in: "abc", n: 5, want: "abc"},
 		{name: "exactly the bound is untouched", in: "abcde", n: 5, want: "abcde"},
 		{name: "empty is empty", in: "", n: 5, want: ""},
 		{name: "multibyte cuts on a rune", in: "가나다라마바", n: 3, want: "가나다"},

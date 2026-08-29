@@ -1,6 +1,14 @@
 -- Phase 4 search index (spec 5.7). As with 00001, this file is the truth: the
 -- design document holds the decisions and no DDL.
 --
+-- This file was edited in place several times while Phase 4 was in development,
+-- the tokenizer clause among them, and that was safe only because no persistent
+-- database had applied it yet. Once it has been applied anywhere, its DDL is
+-- frozen: goose records the version and never re-runs it, so a tokenizer or
+-- column change from then on is a new migration followed by a `rebuild`, never
+-- an edit here. An edit here would leave an index whose DDL and whose contents
+-- disagree on every machine that already ran this version.
+--
 -- events_fts is an *external content* table. It stores the index and no copy of
 -- the text: `content='events'` points it at the base table, and an FTS row's
 -- rowid is the events rowid - which exists because events is an ordinary rowid
