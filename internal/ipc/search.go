@@ -16,6 +16,21 @@ import (
 type SearchRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
+	// Project scopes the search to one project, by path. **Empty means
+	// every project** (spec 5.9).
+	//
+	// That is the wire's meaning and it does not change: an existing
+	// invocation sends no project and must keep returning what it always
+	// returned, and a field with one meaning is one thing for a reader of
+	// a frame to know. The MCP tool schema is where the argument is
+	// *required*, because there the SDK enforces it structurally and the
+	// caller is a model that has no working directory to mean.
+	//
+	// It is a path and not the derived project id: a caller knows where its
+	// own worktree is and does not know what this product hashes it to.
+	// internal/project's FromArgument turns one into the other and refuses
+	// the shapes that must not be walked.
+	Project string `json:"project"`
 }
 
 // The bounds on Limit. Both are here rather than in internal/search because

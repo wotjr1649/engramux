@@ -44,6 +44,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/pipe"
+	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/search"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
@@ -426,7 +427,18 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}
-	hits, err := search.Search(ctx, db, req.Query, limit)
+	// An empty project is every project (spec 5.9), so it never reaches
+	// project.FromArgument - which refuses "" as not absolute, and is right
+	// to for the two request types where a project is required.
+	var projectID string
+	if req.Project != "" {
+		p, err := project.FromArgument(req.Project)
+		if err != nil {
+			return ipc.SearchReply{}, err
+		}
+		projectID = p.ID
+	}
+	hits, err := search.Search(ctx, db, req.Query, projectID, limit)
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}

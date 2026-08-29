@@ -61,6 +61,64 @@ func TestPhase5GateGetEventChecksTheProjectWithTheId(t *testing.T) {
 	}
 }
 
+// TestPhase5GateASearchScopedToOneProjectNeverReturnsAnother is spec 8's Phase
+// 5 isolation clause at the search surface, and the half
+// [TestPhase5GateGetEventChecksTheProjectWithTheId] does not cover.
+//
+// The two events carry the same searchable word, so the unscoped control finds
+// both and each scoped search finds exactly its own. Without the shared word the
+// scoping would be indistinguishable from the query simply not matching.
+//
+// It is a filtering-correctness clause. §2 puts the whole SID inside the trust
+// boundary and the caller names its own project; nothing here is a permission
+// check.
+func TestPhase5GateASearchScopedToOneProjectNeverReturnsAnother(t *testing.T) {
+	db, a, b := twoProjects(t)
+	// The word both payloads carry - see twoProjects, where each prompt is
+	// "the event of <project directory>".
+	const shared = "event"
+
+	all, err := searchEvents(t.Context(), db, ipc.SearchRequest{Query: shared})
+	if err != nil {
+		t.Fatalf("the unscoped search: %v", err)
+	}
+	if len(all.Hits) != 2 {
+		t.Fatalf("the unscoped search returned %d hits, want both events - "+
+			"the scoped assertions below would prove nothing", len(all.Hits))
+	}
+
+	for _, p := range []fixtureProject{a, b} {
+		got, err := searchEvents(t.Context(), db, ipc.SearchRequest{Query: shared, Project: p.root})
+		if err != nil {
+			t.Fatalf("the search scoped to %s: %v", filepath.Base(p.root), err)
+		}
+		if len(got.Hits) != 1 {
+			t.Fatalf("the search scoped to %s returned %d hits, want its own 1",
+				filepath.Base(p.root), len(got.Hits))
+		}
+		if got.Hits[0].ID != p.id {
+			t.Errorf("the search scoped to %s returned event %q, want its own %q",
+				filepath.Base(p.root), got.Hits[0].ID, p.id)
+		}
+	}
+}
+
+// TestSearchRefusesAProjectItMustNotWalk. An empty project is every project and
+// must not reach the walk at all; every other shape the walk refuses is refused
+// here too.
+func TestSearchRefusesAProjectItMustNotWalk(t *testing.T) {
+	db, _, _ := twoProjects(t)
+
+	if _, err := searchEvents(t.Context(), db, ipc.SearchRequest{Query: "event"}); err != nil {
+		t.Fatalf("an empty project is every project, not a refusal: %v", err)
+	}
+	for _, project := range []string{filepath.Join("nested", "dir"), `\\host\share\dev`, "."} {
+		if _, err := searchEvents(t.Context(), db, ipc.SearchRequest{Query: "event", Project: project}); err == nil {
+			t.Errorf("the search was answered for project %q rather than refused", project)
+		}
+	}
+}
+
 // TestGetEventMasksTheWholeReply is the egress clause at this surface. It has
 // [TestPhase5GateNoReplyFieldCarriesAUserPath]'s shape and reuses its sweep:
 // whatever a future field carries, it is in the document this walks.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
@@ -17,17 +18,40 @@ import (
 // reach the index. A service that is down therefore fails here, exactly as
 // [status] does, rather than producing a second, lesser answer.
 //
-// The words are joined by single spaces and sent as one query. Nothing is
-// interpreted here - not a leading dash, not a quote, not an operator - because
+// The words are joined by single spaces and sent as one query. Nothing inside
+// the query is interpreted - not a dash, not a quote, not an operator - because
 // internal/search quotes every token before it reaches MATCH, and 1.0
 // deliberately offers no query language.
+//
+// # One exception, and it is only in first position
+//
+// `--project <path>` scopes the search, and it is read only as the first two
+// arguments (spec 5.9). The cost is stated rather than hidden: a search for the
+// literal words "--project something" can no longer be typed. Reading the flag
+// anywhere in the list would cost more - every query carrying those bytes
+// anywhere in it - and reading it nowhere would leave this command unable to
+// reach the scoping the tool surface has.
+//
+// # This command's default stays global, and there is no `--all`
+//
+// Omitting the flag searches every project, which is what this command has
+// always done and what an existing invocation must keep doing. A flag to
+// *un*-scope would therefore be a flag for the default, and it would only be
+// worth having if the default flipped - which would silently change what every
+// existing invocation returns. The MCP tool schema is where a project is
+// required, because there the caller is a model with no working directory.
 func search(args []string) int {
-	if len(args) == 0 {
-		warn("usage: engramux search <words…>")
+	scope, words, err := searchScope(args)
+	if err != nil {
+		warn("search: %v", err)
+		return 2
+	}
+	if len(words) == 0 {
+		warn("usage: engramux search [--project <path>] <words…>")
 		return 2
 	}
 
-	reply, err := askSearch(strings.Join(args, " "))
+	reply, err := askSearch(ipc.SearchRequest{Query: strings.Join(words, " "), Project: scope})
 	if err != nil {
 		warn("search: %v", err)
 		return 1
@@ -64,6 +88,36 @@ func search(args []string) int {
 	return 0
 }
 
+// projectFlag is the one argument [search] interprets.
+const projectFlag = "--project"
+
+// searchScope splits args into the project to scope to and the words to search
+// for.
+//
+// The flag is read only in first position, and only in its two-argument form.
+// `--project=<path>` is not accepted, because accepting one spelling of a flag
+// and not the other is a smaller surprise than an argument parser this binary
+// does not otherwise have - main's whole argument handling is one switch in
+// front of the relay path.
+//
+// A relative path is made absolute here rather than sent as typed. The service
+// refuses a relative path outright, which is the only correct thing it can do
+// with one: it would otherwise resolve against a long-lived process Task
+// Scheduler started, in a directory that has nothing to do with the question.
+func searchScope(args []string) (project string, words []string, err error) {
+	if len(args) == 0 || args[0] != projectFlag {
+		return "", args, nil
+	}
+	if len(args) < 2 {
+		return "", nil, fmt.Errorf("%s needs a path", projectFlag)
+	}
+	abs, err := filepath.Abs(args[1])
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve %.128q: %w", args[1], err)
+	}
+	return abs, args[2:], nil
+}
+
 // askSearch sends one Search request and returns the reply it can accept.
 //
 // The reply is checked with [ipc.SearchReply.Verify] before a single hit is
@@ -75,12 +129,12 @@ func search(args []string) int {
 // No limit is sent. The command has no flag for one, so the service applies
 // [ipc.DefaultSearchLimit]; a limit is a wire field rather than a CLI feature
 // until something asks for it.
-func askSearch(query string) (ipc.SearchReply, error) {
+func askSearch(req ipc.SearchRequest) (ipc.SearchReply, error) {
 	var zero ipc.SearchReply
 
-	payload, err := json.Marshal(ipc.SearchRequest{Query: query})
+	payload, err := json.Marshal(req)
 	if err != nil {
-		return zero, fmt.Errorf("encode the query: %w", err)
+		return zero, fmt.Errorf("encode the request: %w", err)
 	}
 	raw, err := roundTrip(ipc.Search, payload)
 	if err != nil {

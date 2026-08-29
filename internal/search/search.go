@@ -92,19 +92,14 @@ type Hit struct {
 // limit goes to LIMIT unmodified, and SQLite reads a negative LIMIT as "no
 // limit". [github.com/wotjr1649/engramux/internal/ipc.SearchRequest.EffectiveLimit]
 // is what the pipe surface bounds it with before it gets here.
-func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, error) {
+func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) ([]Hit, error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT events.id, events.host, events.event_name, events.received_at, events.payload
-		FROM events_fts
-		JOIN events ON events.rowid = events_fts.rowid
-		WHERE events_fts MATCH ?
-		ORDER BY rank
-		LIMIT ?`, matchExpression(tokens), limit)
+	query, args := matchQuery(tokens, projectID, limit)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search: match: %w", err)
 	}
@@ -146,4 +141,44 @@ func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, err
 		hits[i].Excerpt = excerpt(r.payload, tokens)
 	}
 	return hits, nil
+}
+
+// matchQuery builds the statement and its arguments: the MATCH, an optional
+// project filter, and the limit.
+//
+// # The filter is a predicate on events and it cannot be anything else
+//
+// events_fts is an external-content table with one indexed column, and spec 5.7
+// measured why: a `project_id UNINDEXED` column beside the leaves planned
+// identically to the same MATCH unfiltered, so the constraint never reached the
+// virtual table's index and the column bought one byte. The filter is therefore
+// applied to the joined `events` row, after the MATCH has produced it and before
+// the LIMIT counts it. What that costs when a small project's limit makes SQLite
+// walk a long ranked list is measured in BenchmarkProjectScope, and spec 5.7
+// carries the number.
+//
+// # An empty project is every project, and the statement is then the old one
+//
+// The unscoped statement is byte-identical to the one this package sent before
+// scoping existed, rather than being the scoped one with a predicate that
+// happens to be true. A disjunction like `(? = ” OR project_id = ?)` would read
+// as tidier and would put an unmeasured expression in front of every existing
+// invocation for the sake of one fewer string.
+func matchQuery(tokens []string, projectID string, limit int) (string, []any) {
+	const (
+		head = `
+		SELECT events.id, events.host, events.event_name, events.received_at, events.payload
+		FROM events_fts
+		JOIN events ON events.rowid = events_fts.rowid
+		WHERE events_fts MATCH ?`
+		tail = `
+		ORDER BY rank
+		LIMIT ?`
+	)
+	if projectID == "" {
+		return head + tail, []any{matchExpression(tokens), limit}
+	}
+	return head + `
+		  AND events.project_id = ?` + tail,
+		[]any{matchExpression(tokens), projectID, limit}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,4 +219,81 @@ func TestSearchWithNoWordsIsRefused(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout = %q, want nothing", out)
 	}
+}
+
+// TestSearchScopeReadsTheFlagOnlyInFirstPosition holds the one thing this
+// command interprets, and the boundary around it.
+//
+// The words are otherwise untouched: internal/search quotes every token before
+// it reaches MATCH and 1.0 offers no query language, so a dash inside a query is
+// a dash. That is why the flag is read in first position only, and why the same
+// two words later in the list stay part of the query.
+//
+// The resolved path is asserted as absolute rather than as an exact string: the
+// working directory a test runs in is not this test's to know, and what the
+// service requires is that the path is absolute at all.
+func TestSearchScopeReadsTheFlagOnlyInFirstPosition(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "repo")
+
+	t.Run("absent", func(t *testing.T) {
+		project, words, err := searchScope([]string{"run-time", "budget"})
+		if err != nil {
+			t.Fatalf("searchScope: %v", err)
+		}
+		if project != "" {
+			t.Errorf("project = %q, want empty - the default is every project", project)
+		}
+		if !slices.Equal(words, []string{"run-time", "budget"}) {
+			t.Errorf("words = %q, want the two that were typed", words)
+		}
+	})
+
+	t.Run("first, absolute", func(t *testing.T) {
+		project, words, err := searchScope([]string{"--project", abs, "run-time"})
+		if err != nil {
+			t.Fatalf("searchScope: %v", err)
+		}
+		if project != abs {
+			t.Errorf("project = %q, want %q", project, abs)
+		}
+		if !slices.Equal(words, []string{"run-time"}) {
+			t.Errorf("words = %q, want the query with the flag taken off", words)
+		}
+	})
+
+	t.Run("first, relative", func(t *testing.T) {
+		project, words, err := searchScope([]string{"--project", filepath.Join("nested", "dir"), "run-time"})
+		if err != nil {
+			t.Fatalf("searchScope: %v", err)
+		}
+		if !filepath.IsAbs(project) {
+			t.Errorf("project = %q, want an absolute path - the service refuses a relative one", project)
+		}
+		if !strings.HasSuffix(project, filepath.Join("nested", "dir")) {
+			t.Errorf("project = %q, want it to end in the path that was given", project)
+		}
+		if !slices.Equal(words, []string{"run-time"}) {
+			t.Errorf("words = %q, want the query with the flag taken off", words)
+		}
+	})
+
+	t.Run("not first, so it is query text", func(t *testing.T) {
+		in := []string{"run-time", "--project", abs}
+		project, words, err := searchScope(in)
+		if err != nil {
+			t.Fatalf("searchScope: %v", err)
+		}
+		if project != "" {
+			t.Errorf("project = %q, want empty - the flag is read in first position only", project)
+		}
+		if !slices.Equal(words, in) {
+			t.Errorf("words = %q, want every argument", words)
+		}
+	})
+
+	t.Run("with no path", func(t *testing.T) {
+		if _, _, err := searchScope([]string{"--project"}); err == nil {
+			t.Error("a flag with no path was accepted")
+		}
+	})
 }
