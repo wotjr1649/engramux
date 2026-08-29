@@ -26,9 +26,9 @@ waiting on that clock.
 |---|---|
 | Branch | `phase-6-hardening-and-soak`, off `main` at `26b5805`. **Not merged and not pushed** — session 06 left that to the user |
 | Last full verification, on that branch | `go test -p 1 -count=1 ./...` **16 packages ok** · pinned linter `0 issues.`, **exit 0** (the exit code, not the summary line) · `./scripts/race.sh` **exit 0, 16 ok, 0 `DATA RACE`** |
-| Shipped code changed | **None.** Zero non-test `.go` files differ from `main`. That is deliberate and it is the soak's precondition — see §3 |
+| Shipped code changed | **None**, and it was checked rather than assumed. One non-`_test.go` file differs from `main` — `internal/secret/secrettest/secrettest.go`, which gained `Sample.Needle` — and `go list -deps ./cmd/engramux-service ./cmd/engramux` does not reach that package: it is imported by `_test.go` files only, so it is in neither binary. That is the soak's precondition; see §3 |
 | `dist/` and the installation | Untouched since session 05. `engramux.exe` 4,285,440 B, `engramux-service.exe` 13,919,232 B, installed and running |
-| The live service | Started **2026-08-30 04:00:19 +09:00** and has not restarted since. One `ERROR` line since that start, at 04:59:51, and §2 says what it was |
+| The live service | Started **2026-08-30 04:00:19 +09:00** and has not restarted since. Two `ERROR` lines since that start, at 04:59:51 and 06:00:01, and §2 says what they were |
 | Phases | 1–5 done and gated. **6's `[auto]` half is done and gated; its `[manual]` half is the soak** |
 
 ---
@@ -38,32 +38,46 @@ waiting on that clock.
 **The clock ends 2026-09-02 04:00 +09:00**, 72 hours after the start above. It is the service's own
 uptime that counts, not the sampler's — the sampler can stop and restart without costing anything.
 
-**The record is `.capture/soak/soak.tsv`**, gitignored, one TSV line per sample. `bash
-scripts/soak-sample.sh` takes one; `--every 1800` loops. The loop session 06 started **died with
-that session**, so the first thing to do is check the last `ts` in the file and start another one.
-Surviving a logoff needs a scheduled task, which is the user's to create and not an agent's.
+**The record is `.capture/soak/soak.tsv`**, gitignored, one TSV line per sample, and **the series
+in it starts at 2026-08-30 06:02:02** — everything before that is `soak-shakedown.tsv` and is not a
+series. `bash scripts/soak-sample.sh` takes one sample; `--every 1800` loops. The loop session 06
+started dies with that session, so the first thing to do is check the last `ts` and the `pid` column
+and start another one. **Start exactly one**: two loops appending to one log is not hypothetical, it
+happened three times over in session 06, and `AGENTS.md` has the row on the two mechanisms — a
+harness that stops a background command kills the wrapper and not the `bash`, and a running `bash`
+keeps executing the `sample()` it parsed before you rewrote the file. Check `ps -W` for
+`/usr/bin/sleep` before starting one, and `kill -9` both the loop and its sleep. Surviving a logoff
+needs a scheduled task, which is the user's to create and not an agent's.
 
-**What it has already said, at about one hour in.** Events 12,587 → 12,792. `.db` 135.1 MB →
-140.3 MB. WAL sawtoothing between 0.8 and 4.1 MB, so the checkpoint runs. Spool 0 throughout.
-Working set 25–30 MB with no trend yet. Handles 201 → 211, threads 15 → 16. One hour is not a
-series; do not read a trend into any of it.
+**What the shakedown said, over 90 minutes and 9 samples.** Events 12,587 → 13,119. `.db` 135.1 →
+145.9 MB. WAL 0 → 3.19 MB, so the checkpoint runs and truncates. Spool 0 throughout. Working set
+25.3 → 31.8 MB. Handles 201 → 223, threads 15 → 17. That is not a series and none of it is a
+trend — the `.db` figure alone would extrapolate to about 600 MB over 72 hours, which is the sort
+of thing to *measure* rather than to believe from two points through a lot of noise.
 
-**The one thing it did turn up**, and it is worth understanding before you see it again. The
-04:59:51 sample recorded `read-failed`: the service was up — the sampler reads the working set
-before it calls `status`, so the row proves it — and `status` still lost to the 4 s read deadline
-with `service: group events by cell: context deadline exceeded`. The machine was saturated by the
-race-detector suite at the time, and the same command five minutes later answered in full. §7.1's
-read-deadline row carries it. **One occurrence under a load nothing else would produce is not
-evidence the number is wrong.** A second one with nothing else running is, and if you see one:
-record it, do not change the deadline in the same breath, because that restarts the clock (§3).
+**The one thing it did turn up**, and it is worth understanding before you see it again. `status`
+lost to the 4 s read deadline **twice**, at 04:59:51 and 06:00:01, both with `service: group events
+by cell: context deadline exceeded`. The service was up through both — the working set on each row
+proves it, and its uptime never reset. **Both coincide with a race-detector run**, which saturates
+this machine for the better part of twenty minutes, and there is no occurrence outside one: 2 of 2.
+So the correlation is with load, not with the number, and two hours is not a base rate. §7.1's
+read-deadline row carries it. If you see one with nothing else running, that is the evidence:
+record it, and do not change the deadline in the same breath, because that restarts the clock (§3).
+
+Both were recorded as `down` by a pre-fix sampler that had no cell for "running and did not
+answer". It now writes `read-failed`, `down`, `unknown` and `parse-failed` as four separate states
+and leaves what it could not read as `-`, so a `down` in the live series means the process was
+genuinely absent.
 
 ---
 
 ## 3. Why nothing was rebuilt, and what that constrains
 
 The soak's precondition is that the binary stops changing. Session 06 therefore added tests, a
-script and spec prose, and touched **no** shipped Go file — so the running service is still the
-merged Phase 5 build, and its uptime is still the soak's clock.
+script and spec prose, and nothing it touched is linked into either binary — so the running service
+is still the merged Phase 5 build, and its uptime is still the soak's clock. "Not a `_test.go` file"
+is the wrong test for that, and `go list -deps` over the two `cmd/` packages is the right one:
+`internal/secret/secrettest` is ordinary Go source that no shipped package imports.
 
 This constrains you the same way. Any change to a non-test `.go` file, followed by a rebuild and a
 reinstall, ends the soak and starts a new one at zero. That is not a reason to leave a real defect
@@ -79,7 +93,8 @@ it. Documentation, tests and scripts are free.
   through all eleven documents that leave the machine: the four reply documents, the four MCP tool
   results over an in-memory transport, and three tool errors — `status` has no argument for a
   caller to put a path in. Two assertions per document, a `secret.Detect` sweep and a literal search
-  for each sample's own bytes, because they fail on different bugs.
+  for each sample's `Needle` - its generated body, not the whole of `Secret` - because the two fail on
+  different bugs and the whole of `Secret` was the wrong needle for both.
 - **`TestPhase6TheMaskedCorpusIsCleanUnderARescan`** in `internal/secret`. Every real capture
   masked and rescanned. Skips itself when `.capture/` is absent.
 - **`scripts/soak-sample.sh`.** Reads everything from outside the service.
@@ -87,10 +102,19 @@ it. Documentation, tests and scripts are free.
   `doctor`, the installer's output, the CLI's own printing, the spool and the relay's stderr are the
   five, and each reason is different. Do not re-derive them.
 
-**Eleven deliberate breaks, one per mask, every one caught.** One of them is worth carrying: the
-corpus rescan is **not** broken by changing the placeholder's spelling, because `placeholder` and
+**Twelve deliberate breaks, one per mask, every one caught.** One is worth carrying: the corpus
+rescan is **not** broken by changing the placeholder's spelling, because `placeholder` and
 `isPlaceholder` read the same constant and move together. The mutation that isolates idempotence is
 `isPlaceholder` returning false.
+
+**The audit was reviewed before it was merged, and the review found three inert assertions in it** —
+none of which any of the twelve breaks, the suite, the linter or the race detector had caught,
+because an assertion that cannot fail also cannot fail *loudly*. They are worth reading as a
+pattern, in §7.1's redaction-audit row: a needle that was the whole secret rather than its
+generated body, three carrier fields that were placed but not put in the list the literal half
+iterates, and eight MCP sweeps with no vacuity guard over a document that marshals to
+`{"content":null}` when empty. `secrettest.Sample.Needle` exists because of the first, and its doc
+comment is where that reasoning now lives.
 
 ---
 
@@ -102,9 +126,11 @@ mistake — the clock restarted with it, and §8's gate is not met however good 
 
 **T2 — Write the series up.** §7.3's soak row moves to §7.1 with what the 72 hours actually showed:
 the WAL's range, the database's growth rate, the working set's trend or absence of one, the handle
-and thread counts, and how many samples recorded `read-failed`. The working set is the MCP session
-map's only instrument, so its trend is the answer to the one question §5.9 left open — and a flat
-working set says nothing about the map's size, only that it is not growing without bound.
+and thread counts, and how many samples recorded each of `read-failed`, `down`, `unknown` and
+`parse-failed` — they mean four different things and only the first is about the read deadline. The
+working set is the MCP session map's only instrument, so its trend is the answer to the one question
+§5.9 left open — and a flat working set says nothing about the map's size, only that it is not
+growing without bound.
 
 **T3 — Whatever the series turned up.** If it turned up nothing, Phase 6 is done and 1.0's phase
 gates are all green, which is a decision about what happens next rather than a task in this file.
@@ -118,6 +144,7 @@ gates are all green, which is a decision about what happens next rather than a t
 | Backlog 28, the token in three files with inherited ACLs | Unchanged from session 06's brief: a design change, not a bug fix, and §5.9 already accepts the exposure. It also costs a rebuild, so it is not soak-compatible |
 | `doctor` cannot see a token mismatch | Accepted, deliberately. Unchanged |
 | Backlog 27, a refusal with no reason | Narrowed, not closed. The tool surface carries its reason; the CLI still reads a bare rejected `Ack` |
+| **Backlog 29**, `events.id` reaching a reader unmasked and unbounded | New, raised by the Phase 6 review on code that predates it. The session id beside it in the same reply is masked and the event name is masked and bounded; this one is neither. It is a row and not a defect because the id is relay-minted rather than payload-derived, so a secret-shaped one needs this user's own processes to write it — §6.1 records it as the second known perimeter. The fix is one `secret.MaskString` on each of two fields, and it costs a rebuild, so it is not soak-compatible |
 | Backlog 24, the unimplemented 512 KiB cap | Still a row |
 | The 23 remaining backlog rows | Untouched unless a task is already standing in that file |
 | An MCP reply has no size ceiling | Still stated in three comments and §5.9's tool table, still left that way |
@@ -134,5 +161,5 @@ gates are all green, which is a decision about what happens next rather than a t
 3. **Check the linter's exit code, never its summary line.**
 4. **`./scripts/race.sh` takes about twenty minutes**, almost all of it `internal/search` at 840 s.
    Start it early and do something else. While it runs the machine is saturated, and §2's
-   `read-failed` sample is what that looks like from the soak's side — so a sample taken during a
-   race run is not evidence about the deadline.
+   failed sample is what that looks like from the soak's side — so a sample taken during a race run
+   is not evidence about the deadline.

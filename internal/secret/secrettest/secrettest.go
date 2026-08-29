@@ -19,6 +19,8 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"os"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -41,6 +43,39 @@ type Sample struct {
 	// the whole of Value for the classes that are masked whole, and the token,
 	// password or username alone for the classes that keep their context.
 	Secret string
+}
+
+// alnumRun matches a run of the characters every generated body is drawn from.
+var alnumRun = regexp.MustCompile(`[A-Za-z0-9]+`)
+
+// Needle is the longest run of ASCII letters and digits inside [Sample.Secret],
+// and it is what an egress test should search for rather than Secret itself.
+//
+// Both reasons were found by review rather than by a failing test, which is
+// what a silently inert assertion looks like.
+//
+//   - **Secret is too much.** Searching for the whole of it catches only a mask
+//     that removed nothing. A mask that removes a shape's *prefix* and leaves
+//     the generated body behind leaks almost all of the credential, while
+//     Secret is no longer contiguous in the output and [secret.Detect] no
+//     longer matches either - the shape it matches on is the part that was
+//     removed. Both halves of such a test report clean. The body is the part
+//     that must not survive, and it is what this returns.
+//   - **Secret is the wrong bytes.** Spec 6.1's private-key shape carries real
+//     newlines, and every JSON encoder writes one as the two characters '\'
+//     and 'n' - so a raw search of an encoded document could not match whatever
+//     the mask did. A run of letters and digits survives JSON encoding
+//     unchanged, HTML escaping included.
+//
+// The run is the generated body in every shape [All] produces, 8 characters at
+// the shortest and 46 at the longest. A Secret with no letters or digits at all
+// is returned whole; nothing here generates one.
+func (s Sample) Needle() string {
+	runs := alnumRun.FindAllString(s.Secret, -1)
+	if len(runs) == 0 {
+		return s.Secret
+	}
+	return slices.MaxFunc(runs, func(a, b string) int { return len(a) - len(b) })
 }
 
 // b32 is the alphabet every generated body is drawn from: A-Z and 2-7, and

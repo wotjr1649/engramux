@@ -53,7 +53,7 @@ func TestLogHandlerMasksEveryShape(t *testing.T) {
 			out := logged(t, func(l *slog.Logger) {
 				l.Info("egress: "+s.Value, "detail", s.Value, "keep", "marker-value")
 			})
-			if bytes.Contains(out, []byte(s.Secret)) {
+			if bytes.Contains(out, []byte(s.Needle())) {
 				t.Fatalf("the %s secret survived the log handler:\n%s", s.Class, out)
 			}
 			rec := decodeLine(t, out)
@@ -91,7 +91,7 @@ func TestLogHandlerMasksBoundAndGroupedAttributes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := logged(t, tc.log)
-			if bytes.Contains(out, []byte(s.Secret)) {
+			if bytes.Contains(out, []byte(s.Needle())) {
 				t.Fatalf("the secret survived %s:\n%s", tc.name, out)
 			}
 			if !bytes.Contains(out, []byte("[redacted-api-key]")) {
@@ -128,7 +128,7 @@ func TestLogHandlerLeavesACarriedJSONDocumentParseable(t *testing.T) {
 	payload := `{"hook_event_name":"PreToolUse","tool_input":{"command":"echo ` + s.Value + `"}}`
 
 	out := logged(t, func(l *slog.Logger) { l.Info("egress", "payload", payload) })
-	if bytes.Contains(out, []byte(s.Secret)) {
+	if bytes.Contains(out, []byte(s.Needle())) {
 		t.Fatalf("the secret survived inside the carried document:\n%s", out)
 	}
 

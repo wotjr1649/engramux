@@ -30,7 +30,7 @@ go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Ph
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
 go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # spec §8's Phase 6 gate,
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
-bash scripts/soak-sample.sh --every 1800                                     # spec §8's Phase 6 soak
+bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
@@ -53,10 +53,12 @@ which five are deliberately out of scope is spec §8's Phase 6 row — do not re
 command prints a document or a file name — measured, 0 of the 24 and 0 of the 5 `-v` lines carry a
 drive-letter path — so unlike `TestPhase4Gate` their output is safe to paste.
 
-`scripts/soak-sample.sh` appends one TSV line to `.capture/soak/soak.tsv` and reads everything
-from outside the service, because the soak's precondition is that the binary stops changing. A
-`--every` loop dies with the shell that started it; surviving a logoff needs a scheduled task,
-which is the user's to create.
+`scripts/soak-sample.sh` appends one TSV line to `.capture/soak/soak.tsv` and reads everything from
+outside the service, because the soak's precondition is that the binary stops changing. The command
+above is the one-shot form on purpose: every other line in that block exits, and `--every 1800` —
+which is how the soak is actually run — does not. It dies with the shell that started it anyway;
+surviving a logoff needs a scheduled task, which is the user's to create. A missing prerequisite,
+a bad `--every`, or a log it cannot append to are all exits rather than a loop that writes nothing.
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.
@@ -149,6 +151,7 @@ row on its own, delete the row — the test is the better owner.
 | A log redactor runs, and secrets are still in the log | `slog.Record.Attrs` hands the callback an `Attr` **by value** — assigning to `a.Value` is a no-op. Rebuild the record with `slog.NewRecord` and `AddAttrs` |
 | Redaction produces JSON that no longer parses | A `\S+` token pattern swallows the closing quote and brace. The payload must stay valid JSON (spec §6) |
 | You paste a `TestPhase4Gate` run into a report, a commit message or a chat, and ship a real path | Its corpus mode logs the query it derived for each class, and those are cut from the captures — 900 of 902 of which carry the user's directory. Measured: exactly **1 line** carries a drive-letter path with the OS user name in it — 1 of the 45 lines of a corpus-mode run, or 1 of the 84 the Commands line above emits when it runs both modes. One line in a wall of counts is exactly what gets skimmed past, and `origin` is public. Redact everything after `candidate documents: ` before the output goes anywhere, or grep out `[A-Za-z]:[\\/]` first. The sweep is not affected — measured, 0 of its 17 lines carry a path — and neither is the fixtures mode |
+| A background `--every` loop keeps sampling after you stopped it, and two loops interleave rows into one log | Two separate mechanisms, both observed in one session. Stopping a backgrounded shell command from the agent harness kills the wrapper and leaves the `bash` running the loop — `ps -W` shows it, with a `/usr/bin/sleep` child, and only `kill -9` on both ends it. And a running `bash` keeps executing the *function it already parsed*, so rewriting the script does not update a loop that is mid-flight: it keeps writing the old row format into the new file. Kill the loop before editing the script, then start one. `soak-sample.sh` now writes its own pid in every row and refuses a log whose header is not its own, which makes both failures visible rather than preventing them — nothing inside a script can prevent either |
 | A snapshot of the database taken after stopping the service is torn, and nothing says so | `schtasks /end` is a hard kill, not a clean close: the service does not get to checkpoint, so the WAL survives the stop holding committed frames the `.db` does not have yet. A snapshot is therefore the **pair** — `.db` and `.db-wal` copied together — and the `.db` alone is a database missing whatever the WAL still held. The pair measured this way had 181,312 B of WAL beside it. `-shm` is not in the pair and does not need to be: §5.4's exclusive locking means it never exists |
 | The database file more than doubles, and the first start on the new binary pauses | Migration `00002` backfills `events.leaves` — a second copy of every payload's string text — and then rebuilds the whole FTS index, both in one transaction, so the WAL reaches the size of the migrated database before anything is checkpointed. One cost per database rather than per start, but it is not instant and the disk needs room for the file and its WAL at once. Spec §7.1 has the figures |
 | You add `snippet()` or `highlight()` to a query, and the markers land in the wrong place — or a corruption error never surfaces | `events_fts` is an **external content** table, so both functions take their text from `events` and their markers from the index, and a desync moves the markers silently instead of failing. Worse: `snippet()` against a missing base row returns some rows and *then* fails with `database disk image is malformed`, which appears only in `rows.Err()` — a loop that ignores it sees a short result and no error at all. Both would also cut the **stored** payload, which is the one thing I-10 forbids. Build the excerpt in Go from the masked payload, as `internal/search/excerpt.go` does. Nothing in this repository catches a new `snippet()` call, which is why this is a row and not a test |

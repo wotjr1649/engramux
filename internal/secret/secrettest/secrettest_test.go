@@ -60,6 +60,57 @@ func TestSecretIsTheRemovablePartOfValue(t *testing.T) {
 	}
 }
 
+// TestNeedleIsALiveSubstringOfTheSecret pins what every egress test's absence
+// assertion is built on.
+//
+// Three properties, and each one alone is satisfied by a Needle that would make
+// those assertions vacuous: it has to be a substring of Secret, or it is not
+// evidence about the secret at all; it has to be long enough not to collide
+// with ordinary text in a reply document; and it has to survive JSON encoding
+// unchanged, because every document a sweep reads came out of an encoder.
+func TestNeedleIsALiveSubstringOfTheSecret(t *testing.T) {
+	for _, s := range secrettest.All() {
+		t.Run(string(s.Class)+"/"+s.Shape, func(t *testing.T) {
+			n := s.Needle()
+			if !strings.Contains(s.Secret, n) {
+				t.Fatalf("Needle is not a substring of Secret")
+			}
+			// 8 is the shortest generated body in the table, the
+			// user directory name. Anything shorter than that would
+			// be a run this found in a shape's fixed prefix rather
+			// than in the part that was generated.
+			if len(n) < 8 {
+				t.Fatalf("Needle is %d characters, too short to be the generated body", len(n))
+			}
+			b, err := json.Marshal(n)
+			if err != nil {
+				t.Fatalf("marshal the needle: %v", err)
+			}
+			if string(b[1:len(b)-1]) != n {
+				t.Fatalf("the needle is rewritten by JSON encoding, so a search of an "+
+					"encoded document could not find it: %d bytes became %d", len(n), len(b)-2)
+			}
+		})
+	}
+}
+
+// TestAllCoversEverySpec61Shape pins the count spec 7.1 cites for the Phase 6
+// audit.
+//
+// The audit's premise is that its payload carries every class, which a set of
+// samples satisfies while missing individual shapes: drop the ghr_ sample and
+// the other fourteen API-key shapes keep the class in the set. Then a rule for
+// that prefix could be removed and the gate would still pass. The number is the
+// only thing that catches it, and it is in the spec, so it is pinned here and
+// the two move together.
+func TestAllCoversEverySpec61Shape(t *testing.T) {
+	const shapes = 36
+	if got := len(secrettest.All()); got != shapes {
+		t.Fatalf("All returns %d shapes, want %d. If a shape was added or removed on purpose, "+
+			"spec 7.1's redaction-audit row carries this number too", got, shapes)
+	}
+}
+
 // TestEveryClassHasASample fails when a class is added to the ruleset without a
 // generator, which would leave it detected by nothing.
 func TestEveryClassHasASample(t *testing.T) {

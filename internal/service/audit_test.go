@@ -54,12 +54,15 @@ import (
 // # Both a detector sweep and a literal search
 //
 // [secret.Detect] over the marshalled document is the assertion, and the
-// literal search for each sample's own bytes is beside it rather than instead
-// of it. They fail on different bugs: the detector catches a field nobody
-// masked whatever it carries, and the literal search catches a mask that
-// removed a class *tag* while leaving the bytes - which is what a placeholder
-// widened to swallow its neighbour would do, and which [secret.Detect] would
-// then report clean.
+// literal search is beside it rather than instead of it. They fail on different
+// bugs: the detector catches a field nobody masked whatever it carries, and the
+// literal search catches a mask that removed the *shape* a rule matches on and
+// left the credential body behind - which the detector then reports clean,
+// because the part it matches on is the part that was removed.
+//
+// What the literal search looks for is [secrettest.Sample.Needle] and not
+// Sample.Secret, and that distinction is the whole of what makes the second
+// assertion real rather than decorative. Its doc comment has the two reasons.
 //
 // # Nothing here prints a document
 //
@@ -70,8 +73,7 @@ func TestPhase6RedactionAudit(t *testing.T) {
 	dir := t.TempDir()
 	db := openMigrated(t, filepath.Join(dir, dbName))
 
-	samples := secrettest.All()
-	payload := auditPayload(t, samples)
+	payload, samples := auditPayload(t)
 
 	// The premise. A payload the detector finds nothing in would satisfy
 	// every assertion below by carrying nothing to leak, and a shape that
@@ -79,6 +81,18 @@ func TestPhase6RedactionAudit(t *testing.T) {
 	// silently.
 	if got, want := secret.Detect(payload), secret.Classes(); !slices.Equal(got, want) {
 		t.Fatalf("the audit payload is tagged %v, want every class this ruleset reports, %v", got, want)
+	}
+	// The other half of the premise, and the one that was missing. A needle
+	// that is not in the document to begin with makes auditClean's literal
+	// half hold for a reason that has nothing to do with masking - which is
+	// what a raw Sample.Secret did for three shapes, silently, until review
+	// found it. Requiring every needle here is what keeps that from
+	// happening again to a shape nobody is looking at.
+	for _, s := range samples {
+		if !bytes.Contains(payload, []byte(s.Needle())) {
+			t.Fatalf("the %s sample's bytes are not in the audit payload, so the literal "+
+				"half of every sweep below is inert for it", s.Shape)
+		}
 	}
 
 	if ack, err := store.Ingest(t.Context(), db, ipc.Envelope{
@@ -161,6 +175,11 @@ func TestPhase6RedactionAudit(t *testing.T) {
 				if res.IsError {
 					t.Fatalf("%s was refused, so this sweeps a refusal and not a result", tc.tool)
 				}
+				auditAnswered(t, tc.tool, res)
+				if res.StructuredContent == nil {
+					t.Fatalf("the %s result carries no structured content, so half of what a "+
+						"model reads is not in the sweep below", tc.tool)
+				}
 				auditClean(t, "the "+tc.tool+" result", samples, res)
 			})
 		}
@@ -189,6 +208,7 @@ func TestPhase6RedactionAudit(t *testing.T) {
 				if !res.IsError {
 					t.Fatalf("%s accepted a UNC project, so this sweeps a result and not a refusal", tc.tool)
 				}
+				auditAnswered(t, tc.tool, res)
 				auditClean(t, "the "+tc.tool+" refusal", samples, res)
 			})
 		}
@@ -219,19 +239,43 @@ const (
 	// auditDatabasePath is the shape spec 5.6's layout has under a real user
 	// profile. status masks it; doctor deliberately does not, and doctor is
 	// out of this audit's scope for that reason (spec 8, Phase 6).
+	//
+	// Its user directory is auditUser, the same as auditProject's, so the
+	// cwd sample's own bytes are what a sweep of the status reply searches
+	// for - a fifth sample for this one would carry an identical needle.
 	auditDatabasePath = `C:\Users\auditor\AppData\Local\engramux\engramux.db`
+
+	// auditUser is the invented user directory name inside the three paths
+	// above, and it is what ClassUserPath captures out of each of them - so
+	// it is the substring that must not survive any of them.
+	auditUser = "auditor"
 )
 
 // auditPayload is one hook event carrying every generated sample, each in its
-// own leaf, plus a user path in the three fields around the payload text that
-// reach an egress.
+// own leaf, plus a user path in the fields around the payload text that reach
+// an egress. It returns the payload and every sample whose bytes must not
+// survive a sweep.
+//
+// # The three field samples are returned, not just placed
+//
+// hook_event_name, session_id and cwd each carry a user path, and each is a
+// field the reply documents were leaking before anything masked it. Placing a
+// value there is only half of covering it: [auditClean]'s literal half searches
+// for the samples it is given, so a value placed but not returned is covered by
+// the detector alone. That is the weaker of the two assertions - it reports
+// clean on a mask that writes a placeholder and leaves the bytes beside it,
+// because isPlaceholder skips the span it wrote.
+//
+// secrettest.Of generates a fresh value per call, so these have to be captured
+// once and reused rather than called twice.
 //
 // It is built with json.Marshal rather than written out as a literal, so the
 // backslashes and the newlines inside a private key are escaped by the encoder
 // and the stored bytes are the ones a host would have sent.
-func auditPayload(t *testing.T, samples []secrettest.Sample) []byte {
+func auditPayload(t *testing.T) ([]byte, []secrettest.Sample) {
 	t.Helper()
 
+	samples := secrettest.All()
 	leaves := make(map[string]any, len(samples)+4)
 	for i, s := range samples {
 		// A neutral key. A key naming a credential makes the whole leaf
@@ -240,16 +284,22 @@ func auditPayload(t *testing.T, samples []secrettest.Sample) []byte {
 		// samples indistinguishable in a failure.
 		leaves[fmt.Sprintf("sample_%02d", i)] = s.Value
 	}
-	leaves["hook_event_name"] = secrettest.Of(secret.ClassUserPath).Value
-	leaves["session_id"] = secrettest.Of(secret.ClassUserPath).Value
+
+	eventName, sessionID := secrettest.Of(secret.ClassUserPath), secrettest.Of(secret.ClassUserPath)
+	eventName.Shape, sessionID.Shape = "hook_event_name", "session_id"
+	leaves["hook_event_name"] = eventName.Value
+	leaves["session_id"] = sessionID.Value
 	leaves["cwd"] = auditProject
 	leaves["prompt"] = "the event says " + auditTerm + " and nothing else"
+	samples = append(samples, eventName, sessionID, secrettest.Sample{
+		Class: secret.ClassUserPath, Shape: "cwd", Value: auditProject, Secret: auditUser,
+	})
 
 	b, err := json.Marshal(leaves)
 	if err != nil {
 		t.Fatalf("marshal the audit payload: %v", err)
 	}
-	return b
+	return b, samples
 }
 
 // auditSession opens one MCP session against a server built over h.
@@ -293,6 +343,21 @@ func auditCall(t *testing.T, cs *mcp.ClientSession, tool string, args map[string
 	return res
 }
 
+// auditAnswered is the vacuity guard the MCP sweeps need and the reply
+// documents get from their own field checks.
+//
+// [mcp.CallToolResult.Content] has no omitempty, so a result with no content
+// block marshals to `{"content":null}` - a document [auditClean] reports clean
+// because there is nothing in it to find. Every call this test makes has an
+// answer, a refusal included, so an empty one is a broken sweep and not a pass.
+func auditAnswered(t *testing.T, tool string, res *mcp.CallToolResult) {
+	t.Helper()
+
+	if len(res.Content) == 0 {
+		t.Fatalf("the %s result carries no content block, so the sweep below reads an empty document", tool)
+	}
+}
+
 // auditClean marshals what leaves the machine and requires both that the
 // detector reports nothing in it and that no sample's own bytes are in it.
 func auditClean(t *testing.T, what string, samples []secrettest.Sample, doc any) {
@@ -307,7 +372,7 @@ func auditClean(t *testing.T, what string, samples []secrettest.Sample, doc any)
 		t.Errorf("%s carries %v", what, classes)
 	}
 	for _, s := range samples {
-		if bytes.Contains(b, []byte(s.Secret)) {
+		if bytes.Contains(b, []byte(s.Needle())) {
 			// The shape, never the value.
 			t.Errorf("%s still carries the %s bytes of a %s sample", what, s.Shape, s.Class)
 		}
