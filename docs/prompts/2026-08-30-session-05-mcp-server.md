@@ -174,10 +174,10 @@ before write.
 All observed last session.
 
 1. **Write any file containing backslashes with a file-write tool**, and **verify the bytes
-   afterwards**. A `Write` call turned a six-character JSON escape for U+001B into a raw ESC byte inside a Go
-   comment, and an
-   `Edit` turned `''` into a U+201D. Both compiled. `LC_ALL=C grep -nP '[^\x00-\x7F]'` over the
-   files you changed is the check.
+   afterwards**. A `Write` call turned a six-character escape for U+001B into a raw ESC byte inside
+   a Go comment; an `Edit` turned a pair of apostrophes into U+201D; and the sentence you are
+   reading did it a third time. All three compiled or rendered.
+   `LC_ALL=C grep -nP '[^\x00-\x7F]'` over the files you changed is the check.
 2. **A `python - <<'PY'` heredoc that asserts its replacement found nothing writes nothing** — and
    the earlier replacements in the same script are lost with it. Two edits were silently skipped
    that way, one of them the CLI switch, which the linter caught only as `func is unused`.
