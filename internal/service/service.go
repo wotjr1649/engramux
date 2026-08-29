@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/mcpserver"
 	"github.com/wotjr1649/engramux/internal/pipe"
 	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/search"
@@ -247,7 +248,14 @@ func run(ctx context.Context, dir string) error {
 		})
 	}()
 
-	serveErr := pipe.Serve(ctx, l, handlers(db, dbPath, spoolPath, started, newReadGate()))
+	// One Handler for both surfaces. The MCP tools call these closures
+	// directly rather than dialing the pipe, so a tool call takes the same
+	// read gate a CLI read takes - see internal/mcpserver for why that is
+	// the point and not a shortcut.
+	h := handlers(db, dbPath, spoolPath, started, newReadGate())
+	serveMCP(bgCtx, &wg, dir, h)
+
+	serveErr := pipe.Serve(ctx, l, h)
 
 	// Serve has returned, so no handler is using the pool any more. Stop the
 	// drain and the checkpointer and wait for them before the deferred Close
@@ -321,6 +329,45 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 			})
 		},
 	}
+}
+
+// serveMCP starts spec 5.9's MCP endpoint on wg, and does not stop the service
+// when it cannot start.
+//
+// # A failure here is logged, not returned
+//
+// I-04 is why this product exists: the thing that must keep working is capture.
+// The MCP endpoint is a reader, and every failure it can have on the way up -
+// no port free on the loopback interface, a data directory that will not take
+// mcp.json - leaves ingest, the pipe and the drain entirely able to run. A
+// service that refused to start over a reader would turn a port conflict into
+// lost events.
+//
+// What makes the failure visible rather than silent is `doctor`: with no
+// mcp.json, or one naming a URL nothing answers, it reports the endpoint as
+// unreachable. The log line here is the other half.
+//
+// It takes bgCtx rather than ctx, so the shutdown order holds: the endpoint
+// stops when the accept loop does, and [Server.Serve] does not return until its
+// in-flight tool calls have finished - which has to be before the deferred
+// db.Close, because those calls are reading through it.
+func serveMCP(ctx context.Context, wg *sync.WaitGroup, dir string, h pipe.Handler) {
+	m, err := mcpserver.Listen(ctx, dir, h)
+	if err != nil {
+		slog.Error("engramux-service: the MCP endpoint did not start", "error", err)
+		return
+	}
+	// The endpoint, never the token (spec 6.1). mcp.json holds both and is
+	// the only place the token is.
+	slog.Info("engramux-service: MCP serving", "endpoint", m.Endpoint())
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := m.Serve(ctx); err != nil {
+			slog.Error("engramux-service: the MCP endpoint stopped", "error", err)
+		}
+	}()
 }
 
 // checkpointOnTheWayOut is spec 5.4's checkpoint on shutdown. It runs after the
