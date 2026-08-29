@@ -19,11 +19,11 @@ the filesystem layout, §8's Phase 5 row, §10's closed questions 1 and 3.
 
 | | |
 |---|---|
-| Branch | `phase-5-prerequisites`, pushed, **7 commits ahead of `main`**. It has not been merged: §2 below says what merging it waits on |
+| Branch | `phase-5-prerequisites`, pushed. It has not been merged: §2 below says what merging it waits on |
 | `main` | `60008a2`, pushed. Untouched last session |
 | Last full verification, at `c057c26` | `go test -p 1 -count=1 ./...` **14 packages ok** · pinned linter `0 issues.`, **exit 0** (exit code checked, not the summary line) · both `CGO_ENABLED=0` builds ok, the service with `-H=windowsgui` · **`./scripts/race.sh` exit 0, no data races** — it had not been run since `643db43` and now has been |
-| `dist/` | Rebuilt at `c057c26` and **not installed**. `dist-rollback/` holds the Phase 4 binaries it replaced; that directory is the rollback and is gitignored by `*.exe` |
-| The live service | Still the **Phase 4** binaries. Nothing was installed last session — the apply step was offered to the user and is where this session starts (§5) |
+| `dist/` | Rebuilt at `c057c26` and **installed**. `dist-rollback/` holds the Phase 4 binaries it replaced; that directory is the rollback and is gitignored by `*.exe` |
+| The live service | Running the binaries this branch built, restarted 2026-08-30 00:52. It drained the 6 events the relay spooled during the stop, which is I-04 end to end |
 | Phases | 1, 2, 3, 4 done and gated. **5 is half done**, 6 waits on it |
 
 ---
@@ -104,16 +104,30 @@ otherwise be measured again.
 
 ---
 
-## 5. First action, and it needs the user
+## 5. It is installed, and here is what it answered
 
-**The apply step was not run.** `dist/` holds new binaries and the live service is still Phase 4, so
-nothing this session's work does is visible to a host yet. An agent does not edit host configuration
-(`AGENTS.md`): ask the user to stop the service, run the installer's apply step, and start it again.
-Then verify against the real database — `engramux doctor` is now the command that says the most, and
-its tokenizer line is the one nobody has seen against a real installation.
+The user ran the apply step at the end of session 04 — stop, copy, start — and the whole surface was
+exercised against the real database. What it said, because these are the numbers nobody had:
 
-The rollback is `dist-rollback/`. There is no migration this session, so a database snapshot is not
-the rollback and is not needed.
+- **`doctor`, exit 0.** `index tokenizer  agrees with the migration ("unicode61 remove_diacritics 2")`.
+  That is backlog 18's question, asked of a real installation for the first time, and the answer is
+  agreement. The local half printed both binary paths, the data directory, a spool of 0, and the log
+  line showing the drain replaying the 6 events captured while the service was down.
+- **`status` shows the masked path and `doctor` the real one**, which is the split §5.9 specifies,
+  seen working rather than reasoned about.
+- **`sessions` and `search --project .`** resolved this repository's working directory to its project
+  and answered from it. `event <id>` returned a 12,301-byte masked payload tagged `user-path`; the
+  same id under another project answered "no such event in this project".
+- **The UNC guard fires on both spellings.** Verified from a script file rather than an inline
+  command, because the first attempt appeared to show a UNC path being accepted and that was an
+  artifact: the backslashes had been collapsed before any shell saw them, so what reached the service
+  was a rooted-but-driveless path, which `filepath.Abs` correctly resolves against the current drive
+  and which is correctly accepted. Git Bash preserves a single-quoted `\\host\share\dev` exactly. The
+  guard was never wrong, and neither was the shell — the command that tested it was. §8's first item
+  is the same failure in a third costume.
+
+The rollback is `dist-rollback/`. There was no migration, so a database snapshot is not the rollback
+and is not needed.
 
 ---
 
