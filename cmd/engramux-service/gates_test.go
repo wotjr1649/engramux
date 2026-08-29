@@ -59,8 +59,23 @@ type cliResult struct {
 	stderr string
 }
 
-// cli runs the CLI half of the relay binary.
+// cli runs the CLI half of the relay binary with this process's LOCALAPPDATA,
+// which is the real one. Every command whose answer comes over the pipe is
+// unaffected by that.
 func cli(t *testing.T, args ...string) cliResult {
+	t.Helper()
+	return cliIn(t, os.Getenv("LOCALAPPDATA"), args...)
+}
+
+// cliIn runs the CLI half of the relay binary with a LOCALAPPDATA of the
+// caller's choosing.
+//
+// `doctor` is what needs it. Its local half reads files rather than asking the
+// service - the spool, the log, and spec 5.6's mcp.json - so a `doctor` given a
+// different LOCALAPPDATA from the service it is dialing reports one
+// installation's pipe beside another's directory. Every other command here
+// answers from the pipe alone and does not care.
+func cliIn(t *testing.T, local string, args ...string) cliResult {
 	t.Helper()
 	// `status` and `doctor` dial the derived name; the CLI inherits this
 	// process's environment, so it reaches the same service start did.
@@ -68,6 +83,7 @@ func cli(t *testing.T, args ...string) cliResult {
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built, args are the caller's literals
 	cmd := exec.CommandContext(t.Context(), relayBin, args...)
+	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -576,7 +592,7 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 		"LeastPrivilege",
 	}
 
-	up := cli(t, "doctor", name)
+	up := cliIn(t, local, "doctor", name)
 	if up.exit != 0 {
 		t.Fatalf("engramux doctor exited %d with everything in place, want 0:\n%s\n%s", up.exit, up.stdout, up.stderr)
 	}
@@ -600,7 +616,7 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 
 	svc.stop(t)
 
-	down := cli(t, "doctor", name)
+	down := cliIn(t, local, "doctor", name)
 	if down.exit == 0 {
 		t.Errorf("engramux doctor exited 0 with no service running:\n%s", down.stdout)
 	}

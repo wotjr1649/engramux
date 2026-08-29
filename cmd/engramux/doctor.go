@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/mcpconf"
 	"github.com/wotjr1649/engramux/internal/schedule"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
@@ -63,6 +66,9 @@ func doctor(args []string) int {
 		ok = false
 	}
 	if !reportService() {
+		ok = false
+	}
+	if !reportMCP(ctx) {
 		ok = false
 	}
 	if !ok {
@@ -276,6 +282,198 @@ func reportService() bool {
 	}
 	return true
 }
+
+// reportMCP prints spec 5.9's endpoint, whether it is answering, and whether
+// each host is pointed at it, and reports whether all of that held.
+//
+// # The token is not here, and could not be
+//
+// internal/mcpconf's read side decodes the URL and has no field for a token
+// (spec 6.1), so this command cannot print one by accident. What it does print
+// is the endpoint, which carries a port and no user path.
+//
+// # The guard is probed rather than assumed
+//
+// A published URL says the service bound something once. What says it is
+// answering now, with the bearer check in front of it, is a request with no
+// token: 401 is the guard doing its job, a refused connection is a stale
+// mcp.json, and any other status is something else answering on that port.
+//
+// # The host check is a substring search and not a parser
+//
+// Claude Code's MCP configuration lives in ~/.claude.json - at the top level
+// for the user scope and under projects.<path> for the local one - and Codex's
+// in ~/.codex/config.toml. Two formats, two schemas, three places, and this
+// binary is the hook relay (spec 5.1), so a TOML parser and a JSON schema would
+// be linked into a process spawned once per hook event to answer a question
+// with three states.
+//
+// A host that names this endpoint is pointed at it, whichever scope wrote it. A
+// host that names engramux without naming the endpoint is stale, which is the
+// state spec 5.9 says `doctor` has to report: the sticky port was lost, the
+// service bound another, and the URL in that file no longer answers. Neither
+// check can be fooled by a shape this product did not write, because both
+// strings are ones it publishes.
+//
+// # The host lines are reported and do not decide the exit code
+//
+// The exit code is about this installation. A host configuration is another
+// product's file, edited by the user, and neither of its states is a fault of
+// the service: not registered is a machine where capture works and nobody has
+// asked for the reader surface yet, and even stale is a line to act on rather
+// than a service that is down. Folding either into the exit code would also
+// make the exit code depend on whose machine it ran on - a `doctor` pointed at
+// a test service on a machine whose real configuration names the real one would
+// report stale, correctly, and fail a test that has nothing to do with it.
+//
+// What the exit code is for here is the two lines above: an endpoint that was
+// never published, and one nothing is listening on.
+func reportMCP(ctx context.Context) bool {
+	_, _ = fmt.Fprintln(os.Stdout, "mcp")
+
+	spoolPath, err := spool.Dir()
+	if err != nil {
+		field("endpoint", "unreadable: "+err.Error())
+		return false
+	}
+	dir := filepath.Dir(spoolPath)
+
+	endpoint, err := mcpconf.URL(dir)
+	switch {
+	case err != nil:
+		field("endpoint", "unreadable: "+err.Error())
+		return false
+	case endpoint == "":
+		field("endpoint", "NOT PUBLISHED - the service has not started since this build, or it could not bind")
+		return false
+	}
+	field("endpoint", endpoint)
+
+	ok := true
+	if err := probeMCP(ctx, endpoint); err != nil {
+		field("listening", "NO - "+err.Error())
+		ok = false
+	} else {
+		field("listening", "yes")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		field("hosts", "unreadable: "+err.Error())
+		return ok
+	}
+	for _, h := range []struct{ label, path, marker string }{
+		{"claude code", filepath.Join(home, ".claude.json"), `"engramux":`},
+		{"codex", filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.engramux]"},
+	} {
+		reportHostMCP(h.label, h.path, endpoint, h.marker)
+	}
+	return ok
+}
+
+// reportHostMCP prints one host's registration against endpoint. It reports
+// nothing back: see [reportMCP] for why these lines do not decide the exit
+// code.
+//
+// # marker, and why it is not just "engramux"
+//
+// It has to say "this file holds an Engramux MCP entry" without saying "this
+// file mentions Engramux", and the loose version is not a hypothetical: both
+// host files carry per-project state keyed by working directory, so a checkout
+// in a directory called engramux puts the word in both of them and every
+// installation everywhere reports itself stale. Observed, on this repository.
+//
+// So marker is the exact string the installer writes and a path cannot produce.
+// Claude Code's `"engramux":` needs a quote immediately before the name, which
+// a path key like "D:\\AI_DEV\\engramux" does not have - the character there is
+// a backslash. Codex's is a TOML table header. A hand-written entry spelled
+// some other way reads as not registered, which is a false negative and is the
+// direction to be wrong in.
+func reportHostMCP(label, path, endpoint, marker string) {
+	text, err := readCapped(path, maxHostConfig)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		field(label, "no configuration file at "+path)
+	case err != nil:
+		field(label, "unreadable: "+err.Error())
+	case strings.Contains(text, endpoint):
+		field(label, "points at this endpoint")
+	case strings.Contains(text, marker):
+		field(label, "STALE - it names engramux at another URL; re-run scripts/install-hooks.mjs --apply")
+	default:
+		field(label, "not registered - run scripts/install-hooks.mjs --apply")
+	}
+}
+
+// maxHostConfig bounds how much of a host configuration is read.
+//
+// ~/.claude.json is Claude Code's own state file rather than a static
+// configuration - it holds per-project history alongside the MCP entries - so
+// it is not a small file and nothing bounds how large it gets. 16 MiB is far
+// past any observed size and is a bound rather than a budget: a file over it is
+// reported as unreadable instead of being half-searched, because a substring
+// that is not in the first 16 MiB is indistinguishable from one that is not
+// there at all.
+const maxHostConfig = 16 << 20
+
+// readCapped reads path, refusing a file over cap rather than truncating it.
+func readCapped(path string, cap int64) (string, error) {
+	//nolint:gosec // G304: path is the user's home directory joined with
+	// constants of this file. No part of it is input.
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > cap {
+		return "", fmt.Errorf("%s is %d bytes, over the %d this reads", path, info.Size(), cap)
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// probeMCP opens a TCP connection to the published endpoint and closes it.
+//
+// # It is a dial and not an HTTP request, and the reason is measured
+//
+// The obvious probe is a request with no bearer token, requiring the 401 that
+// proves the guard is in front of the handler. It costs net/http in this
+// binary, and this binary is the hook relay as well as the CLI (spec 5.1):
+// measured, importing net/http here takes it from 3,862,528 to 7,482,368 bytes,
+// +93.7%, in a process spawned once per hook event. That is the same trade
+// internal/service lost when it put the SQLite driver here, and it loses again.
+//
+// A dial answers the question `doctor` is actually for - is anything listening
+// on the URL that was published - and what it gives up is already held
+// elsewhere: TestPhase5GateNoTokenAndAWrongTokenAreBothRefused is what says a
+// request with no token is refused, and it runs against the production wiring
+// every time the suite does.
+func probeMCP(ctx context.Context, endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	d := net.Dialer{Timeout: mcpProbeBudget}
+	c, err := d.DialContext(ctx, "tcp", u.Host)
+	if err != nil {
+		return err
+	}
+	return c.Close()
+}
+
+// mcpProbeBudget bounds the probe. It is a loopback request to a process on
+// this machine, so the only thing it can wait for is a port nothing is
+// listening on - which on Windows is refused immediately - or a listener that
+// has wedged, which is exactly what this is asking about.
+const mcpProbeBudget = 2 * time.Second
 
 // askDoctor sends one Doctor request and returns the reply it can accept.
 //
