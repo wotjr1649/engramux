@@ -21,8 +21,8 @@ the filesystem layout, §8's Phase 5 row, §10's closed questions 1 and 3.
 |---|---|
 | Branch | `phase-5-prerequisites`, pushed. It has not been merged: §2 below says what merging it waits on |
 | `main` | `60008a2`, pushed. Untouched last session |
-| Last full verification, at `c057c26` | `go test -p 1 -count=1 ./...` **14 packages ok** · pinned linter `0 issues.`, **exit 0** (exit code checked, not the summary line) · both `CGO_ENABLED=0` builds ok, the service with `-H=windowsgui` · **`./scripts/race.sh` exit 0, no data races** — it had not been run since `643db43` and now has been |
-| `dist/` | Rebuilt at `c057c26` and **installed**. `dist-rollback/` holds the Phase 4 binaries it replaced; that directory is the rollback and is gitignored by `*.exe` |
+| Last full verification, at `d8a580d` | `go test -p 1 -count=1 ./...` **14 packages ok** · pinned linter `0 issues.`, **exit 0** (exit code checked, not the summary line) · both `CGO_ENABLED=0` builds ok, the service with `-H=windowsgui` · **`./scripts/race.sh` exit 0, no data races** — it had not been run since `643db43` and now has been |
+| `dist/` | Rebuilt at `d8a580d` and **installed**. `dist-rollback/` holds the Phase 4 binaries it replaced; that directory is the rollback and is gitignored by `*.exe` |
 | The live service | Running the binaries this branch built, restarted 2026-08-30 00:52. It drained the 6 events the relay spooled during the stop, which is I-04 end to end |
 | Phases | 1, 2, 3, 4 done and gated. **5 is half done**, 6 waits on it |
 
@@ -60,7 +60,7 @@ three transport clauses had no server to run against and are this session's.
   is a slow stat rather than many stats.
 - **The masked egress.** `StatusReply.DatabasePath`, `SearchHit.EventName` and `Cell.EventName` are
   masked. There is one status shape and the CLI sees the masked path too.
-- **The read gate**: a 2 s query deadline, read concurrency of one, ingest priority. It is created
+- **The read gate**: a 4 s query deadline, read concurrency of one, ingest priority. It is created
   in `run` and passed to `handlers`, which is the production wiring a test can hold.
 - **`doctor`** reports the registration, the local state (both binary paths, the data directory, the
   spool depth, the last log line) and the service, marks the unreachable half, and exits 1. Its
