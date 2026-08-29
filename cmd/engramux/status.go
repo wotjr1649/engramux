@@ -30,13 +30,15 @@ func cli(args []string) int {
 		return cells()
 	case "doctor":
 		return doctor(args[1:])
+	case "search":
+		return search(args[1:])
 	case "register":
 		return register(args[1:])
 	case "unregister":
 		return unregister(args[1:])
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux status | cells | doctor | register | unregister")
+		warn("usage: engramux status | cells | doctor | search | register | unregister")
 		return 2
 	}
 }
@@ -124,39 +126,9 @@ func stamp(ms int64) string { return time.UnixMilli(ms).Format(time.DateTime) }
 func askStatus() (ipc.StatusReply, error) {
 	var zero ipc.StatusReply
 
-	name, err := ipc.CurrentPipeName()
+	raw, err := roundTrip(ipc.Status, nil)
 	if err != nil {
 		return zero, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), cliBudget)
-	defer cancel()
-	// The same dial the relay uses. winio.DialPipeContext fails immediately
-	// when the pipe does not exist rather than retrying, so "no service" is
-	// answered now instead of at the end of the budget.
-	conn, err := dial(ctx, name)
-	if err != nil {
-		return zero, fmt.Errorf("no service is listening on %s: %w", name, err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	if err := conn.SetDeadline(time.Now().Add(cliBudget)); err != nil {
-		return zero, fmt.Errorf("set the deadline: %w", err)
-	}
-
-	// json.Marshal rather than the relay's concatenation: that exists to
-	// keep a captured payload's bytes untouched, and this request carries no
-	// payload at all.
-	req, err := json.Marshal(ipc.Envelope{Version: ipc.Version, Type: ipc.Status})
-	if err != nil {
-		return zero, fmt.Errorf("encode the request: %w", err)
-	}
-	if err := ipc.WriteFrame(conn, req); err != nil {
-		return zero, fmt.Errorf("send the request: %w", err)
-	}
-	raw, err := ipc.ReadFrame(conn)
-	if err != nil {
-		return zero, fmt.Errorf("read the reply: %w", err)
 	}
 
 	var reply ipc.StatusReply
@@ -169,4 +141,52 @@ func askStatus() (ipc.StatusReply, error) {
 		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
 	}
 	return reply, nil
+}
+
+// roundTrip sends one request of type typ carrying payload and returns the
+// reply frame, whatever document it holds. Deciding what that document is - and
+// checking it with the right Verify - is the caller's, because the request type
+// is what decides it (see [ipc.StatusReply]).
+//
+// This is the whole of the CLI's transport, and it is one function rather than
+// one per command so that every read I-08 routes over the pipe gets the same
+// budget, the same deadline and the same "no service is listening" wording.
+//
+// The dial is the relay's. winio.DialPipeContext fails immediately when the
+// pipe does not exist rather than retrying, so "no service" is answered now
+// instead of at the end of the budget.
+//
+// The envelope is built with json.Marshal rather than the relay's
+// concatenation: that exists to keep a captured payload's bytes untouched, and
+// nothing a CLI command sends is a captured payload.
+func roundTrip(typ ipc.RequestType, payload json.RawMessage) ([]byte, error) {
+	name, err := ipc.CurrentPipeName()
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cliBudget)
+	defer cancel()
+	conn, err := dial(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("no service is listening on %s: %w", name, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := conn.SetDeadline(time.Now().Add(cliBudget)); err != nil {
+		return nil, fmt.Errorf("set the deadline: %w", err)
+	}
+
+	req, err := json.Marshal(ipc.Envelope{Version: ipc.Version, Type: typ, Payload: payload})
+	if err != nil {
+		return nil, fmt.Errorf("encode the request: %w", err)
+	}
+	if err := ipc.WriteFrame(conn, req); err != nil {
+		return nil, fmt.Errorf("send the request: %w", err)
+	}
+	raw, err := ipc.ReadFrame(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read the reply: %w", err)
+	}
+	return raw, nil
 }

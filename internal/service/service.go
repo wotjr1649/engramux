@@ -44,6 +44,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/pipe"
+	"github.com/wotjr1649/engramux/internal/search"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
 	"github.com/wotjr1649/engramux/internal/store"
@@ -255,6 +256,9 @@ func run(ctx context.Context, dir string) error {
 		Status: func(ctx context.Context) (ipc.StatusReply, error) {
 			return status(ctx, db, dbPath, spoolPath, started)
 		},
+		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
+			return searchEvents(ctx, db, req)
+		},
 	})
 
 	// Serve has returned, so no handler is using the pool any more. Stop the
@@ -364,6 +368,44 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 		UptimeMS:     time.Since(started).Milliseconds(),
 		DatabasePath: dbPath,
 	}, nil
+}
+
+// searchEvents answers a Search request (spec 5.2, I-08) and is the second
+// place I-10 has to hold.
+//
+// This process is the only one that can read the database (I-07), which is why
+// a search travels the pipe at all - and it is also why the masking belongs
+// here rather than in the CLI. What crosses this boundary is what left the
+// trust the service holds: internal/search cuts every excerpt from a payload
+// internal/secret has masked whole, and the stored row is never on the wire.
+//
+// The bound on the limit is applied before internal/search sees it, because a
+// negative one means "no limit" to SQLite and an unbounded result set does not
+// fit a frame (see [ipc.SearchRequest.EffectiveLimit]).
+//
+// The hits are copied field by field rather than shared. internal/search's Hit
+// is a reader's type and ipc.SearchHit is the wire's, and this function is the
+// seam between them - the same seam the pipe's Handler is for the database.
+func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.SearchReply, error) {
+	limit, err := req.EffectiveLimit()
+	if err != nil {
+		return ipc.SearchReply{}, err
+	}
+	hits, err := search.Search(ctx, db, req.Query, limit)
+	if err != nil {
+		return ipc.SearchReply{}, err
+	}
+	out := make([]ipc.SearchHit, len(hits))
+	for i, h := range hits {
+		out[i] = ipc.SearchHit{
+			ID:           h.ID,
+			Host:         h.Host,
+			EventName:    h.EventName,
+			ReceivedAtMS: h.ReceivedAtMS,
+			Excerpt:      h.Excerpt,
+		}
+	}
+	return ipc.SearchReply{Hits: out}, nil
 }
 
 // cells is the per-cell breakdown [ipc.Cell] documents: one row per distinct

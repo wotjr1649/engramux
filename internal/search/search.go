@@ -13,13 +13,17 @@
 // what makes a hyphenated identifier, a Windows path and a two-character Korean
 // query work at all (spec 5.7).
 //
-// # What this package is not yet
+// # This is the second egress
 //
-// There is no excerpt. [Hit] carries the event id and nothing else; T6 adds the
-// snippet and the pipe surface that returns it.
+// A hit carries an excerpt, and I-10 says the secret never leaves the machine.
+// The database keeps what it captured, secrets and all - that is what makes an
+// event re-readable - so the masking has to happen on the way out, here. See
+// [excerpt] for how, and for why FTS5's own snippet() and highlight() are not
+// available to do it.
 //
-// The gate that measures all of this is TestPhase4Gate, in this package's
-// external test package (spec 8, Phase 4).
+// The gates that measure all of this are TestPhase4Gate and
+// TestPhase4GateTheSearchEgressMasks, in this package's external test package
+// (spec 8, Phase 4).
 package search
 
 import (
@@ -30,9 +34,23 @@ import (
 
 // Hit is one matching event, in the order FTS5 ranked it: the caller's slice
 // index is the rank.
+//
+// It is this package's own type and not the wire's. internal/ipc owns what
+// travels the pipe; what is here is what a reader of the index gets, and the
+// service is the seam that turns one into the other.
 type Hit struct {
 	// ID is events.id - the relay-minted UUIDv7 the event was ingested under.
 	ID string
+	// Host is events.host and EventName is events.event_name: between them,
+	// the cell the event landed in.
+	Host      string
+	EventName string
+	// ReceivedAtMS is events.received_at, milliseconds since the Unix epoch.
+	ReceivedAtMS int64
+	// Excerpt is a window of the event's masked text around the match - see
+	// [excerpt] for why it is built here rather than by snippet(), and why
+	// it carries no offset into anything.
+	Excerpt string
 }
 
 // Search returns up to limit events whose indexed text matches text, best
@@ -46,8 +64,12 @@ type Hit struct {
 // [ErrEmptyQuery], [ErrTooManyTokens] or [ErrTokenTooLong] before the database
 // is touched - all three are errors and not empty results.
 //
+// Every hit carries an excerpt cut from the event's masked payload, which is
+// the only text about the event this function returns - see [excerpt].
+//
 // limit goes to LIMIT unmodified, and SQLite reads a negative LIMIT as "no
-// limit".
+// limit". [github.com/wotjr1649/engramux/internal/ipc.SearchRequest.EffectiveLimit]
+// is what the pipe surface bounds it with before it gets here.
 func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
@@ -55,7 +77,7 @@ func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, err
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT events.id
+		SELECT events.id, events.host, events.event_name, events.received_at, events.payload
 		FROM events_fts
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?
@@ -69,9 +91,14 @@ func Search(ctx context.Context, db *sql.DB, text string, limit int) ([]Hit, err
 	var hits []Hit
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ID); err != nil {
+		// The stored payload is read and never returned. It goes to
+		// [excerpt], which masks it whole before cutting anything out of
+		// it, and the window is all that leaves this function (I-10).
+		var payload []byte
+		if err := rows.Scan(&h.ID, &h.Host, &h.EventName, &h.ReceivedAtMS, &payload); err != nil {
 			return nil, fmt.Errorf("search: scan a hit: %w", err)
 		}
+		h.Excerpt = excerpt(payload, tokens)
 		hits = append(hits, h)
 	}
 	if err := rows.Err(); err != nil {

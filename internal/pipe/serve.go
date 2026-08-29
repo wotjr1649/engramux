@@ -60,6 +60,18 @@ type IngestFunc func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, erro
 // worse than a refusal.
 type StatusFunc func(ctx context.Context) (ipc.StatusReply, error)
 
+// SearchFunc answers a Search request. It is handed the decoded request
+// document, so the routing boundary owns "is this a document at all" and the
+// handler owns what the query and the limit mean.
+//
+// Version and Type are not its business either: [Serve] stamps both, for the
+// same reason it stamps a [StatusFunc]'s.
+//
+// An error answers ipc.Rejected. There is no partial search, and the reason is
+// sharper here than for status: an empty hit list is a real answer - nothing
+// matched - so a handler that failed must not be able to produce one.
+type SearchFunc func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error)
+
 // Handler is what [Serve] answers requests with - one function per request
 // type it implements.
 //
@@ -71,8 +83,11 @@ type Handler struct {
 	// Ingest stores one event. Required.
 	Ingest IngestFunc
 	// Status answers a Status request. A nil Status refuses one, exactly
-	// as the three types Phase 1 does not implement are refused.
+	// as the types this build does not implement are refused.
 	Status StatusFunc
+	// Search answers a Search request. A nil Search refuses one, the same
+	// way.
+	Search SearchFunc
 }
 
 // Serve accepts connections on l and answers each one, until l is closed or
@@ -174,10 +189,11 @@ func serveConn(ctx context.Context, conn net.Conn, h Handler) {
 // encoded bytes, or nil when encoding failed and there is nothing to send.
 //
 // The reply document is chosen by the request type, not by the outcome: an
-// IngestEvent is answered with an ipc.Ack and a served Status with an
-// ipc.StatusReply. A request this build will not serve is answered with a
-// rejected ipc.Ack whatever it asked for, which ipc.StatusReply.Verify
-// recognises as not being a status reply.
+// IngestEvent is answered with an ipc.Ack, a served Status with an
+// ipc.StatusReply and a served Search with an ipc.SearchReply. A request this
+// build will not serve is answered with a rejected ipc.Ack whatever it asked
+// for, which those documents' own Verify methods recognise as not being a
+// reply of their kind.
 func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	if err := validate(env); err != nil {
 		slog.WarnContext(ctx, "pipe: rejected a malformed request", "error", err)
@@ -220,16 +236,49 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		}
 		return b
 
+	case ipc.Search:
+		if h.Search == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no Search handler")
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		// The envelope check cannot see inside Payload - its shape is
+		// the request type's, not the envelope's - so this is the only
+		// place a Search document that is not one can be stopped. The
+		// handler is not called with a zero request: an empty query
+		// would be refused downstream, but a zero limit means the
+		// default, so a document that did not decode would silently
+		// become a valid search for nothing.
+		var req ipc.SearchRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			slog.WarnContext(ctx, "pipe: decode the search request", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply, err := h.Search(ctx, req)
+		if err != nil {
+			// The query is not logged. It is text a person typed
+			// and a log is an egress (I-10, spec 7.5); internal/search
+			// keeps its own errors free of it for the same reason.
+			slog.ErrorContext(ctx, "pipe: search failed", "error", err)
+			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		}
+		reply.Version, reply.Type = ipc.Version, ipc.Search
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode search reply", "error", err)
+			return nil
+		}
+		return b
+
 	default:
-		// Doctor, Search and Drain are the CLI reads I-08 routes over
-		// this pipe that Phase 1 does not implement. Rejected is the
+		// Doctor and Drain are the CLI reads I-08 routes over this
+		// pipe that this build does not implement. Rejected is the
 		// honest answer, and because ipc.Ack.Verify accepts only
 		// Committed it cannot be mistaken for success.
 		//
 		// It carries no reason, because ipc.Ack has no field for one.
 		// env.Type is safe to log verbatim here and only here: validate
 		// has already confirmed it is one of the five constants.
-		slog.WarnContext(ctx, "pipe: request type is not implemented in phase 1", "type", env.Type)
+		slog.WarnContext(ctx, "pipe: request type is not implemented in this build", "type", env.Type)
 		return encodeAck(ctx, ipc.Rejected, env.IngestID)
 	}
 }
