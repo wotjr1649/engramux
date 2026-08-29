@@ -226,3 +226,36 @@ func TestTheIngestHandlerMarksItselfPending(t *testing.T) {
 		t.Errorf("%d ingests still pending after the ingest returned - a read would never start", n)
 	}
 }
+
+// cliBudget is what one CLI request is allowed end to end, restated here because
+// internal/service does not import cmd/engramux. A change to that budget has to
+// reach this line by hand, which is why the number is written out.
+const cliBudget = 5 * time.Second
+
+// refusedStatusDeadline is the value of readDeadline that refused a real
+// `engramux status` on the installed service, against a 108 MB database, on the
+// first call after an idle period. It is here as a floor, not as a target.
+const refusedStatusDeadline = 2 * time.Second
+
+// TestTheReadDeadlineSitsBetweenAColdReadAndTheClientsPatience is the guard the
+// regression this file's readDeadline comment describes did not have.
+//
+// A deadline shorter than a legitimate read turns a working command into a
+// refusal, which is what 2 s did. A deadline longer than the client's own budget
+// bounds nothing a client will wait for, and leaves the reply no room. Neither
+// end is a matter of taste, and both are numbers, so this holds them.
+//
+// It cannot assert the cold cost itself - a cold page cache is not reproducible
+// on demand, which is exactly why the first value was a guess. What it can do is
+// stop the number moving back below the one that was measured failing.
+func TestTheReadDeadlineSitsBetweenAColdReadAndTheClientsPatience(t *testing.T) {
+	if readDeadline <= refusedStatusDeadline {
+		t.Errorf("readDeadline is %s, which is not more than the %s that refused a real status "+
+			"against a 108 MB database on a cold cache", readDeadline, refusedStatusDeadline)
+	}
+	if readDeadline >= cliBudget {
+		t.Errorf("readDeadline is %s, which leaves the reply nothing of the CLI's %s budget: "+
+			"a read that outlasts the client bounds nothing the client will wait for",
+			readDeadline, cliBudget)
+	}
+}

@@ -15,14 +15,38 @@ import (
 // 5.4 leaves no second connection to contend with. What actually waits is
 // database/sql pool acquisition, which busy_timeout does not touch.
 //
-// 2 s is internal/pipe's own connection deadline. Past it the client has already
-// stopped waiting for this answer, so a read that is still running can only
-// spend the one connection on work nobody will read. It is deliberately not a
-// bound on ingest: abandoning a write already in flight is worse than answering
-// late, and I-04 is why this product exists.
+// # The number, and the wrong reason it was 2 s first
+//
+// It was set to 2 s to match internal/pipe's connection deadline, reasoning that
+// past it the client had stopped waiting. **That reasoning was wrong, and it was
+// wrong because of the reply-deadline fix in the same change**: the reply now
+// takes a fresh deadline after the handler returns, so the connection's 2 s no
+// longer bounds how long a client will wait for an answer. What bounds that is
+// the CLI's own budget, which is 5 s.
+//
+// It was also wrong about the cost. **Measured live**, within half an hour of
+// the install: `engramux status` was refused with
+// `service: group events by cell: context deadline exceeded` on the first call
+// after an idle period, against a 108 MB database. The same command five times
+// immediately afterwards took 164-499 ms. The two scans a status runs are ~0.5 ms
+// and ~8 ms warm at 12,000 events, so what blows the deadline is the page-cache
+// I/O of reading the file, not the query - and that grows with the database.
+//
+// 4 s is what a legitimate cold read may take, with 1 s of the CLI's 5 s left for
+// the reply. It is deliberately not a bound on ingest: abandoning a write already
+// in flight is worse than answering late, and I-04 is why this product exists.
+//
+// # What it does not fix, stated rather than left to be found
+//
+// A cold read of a large database holds the one connection for its whole
+// statement, which can exceed the relay's entire 800 ms post-dial budget (spec
+// 5.3) on its own. The contention gate measures that warm, where it is 6.6 ms.
+// Cold, it is whatever the disk takes. Nothing here changes it: the deadline
+// bounds the wait, and what would bound the *work* is an index the events table
+// does not have, which is a migration and a decision of its own.
 //
 // A var so a test can shrink it; nothing else writes to it.
-var readDeadline = 2 * time.Second
+var readDeadline = 4 * time.Second
 
 // readGate orders reads against ingest on the one connection spec 5.4 allows.
 //

@@ -98,6 +98,11 @@ otherwise be measured again.
   looks once read concurrency is one, because `database/sql` already serves waiting acquisitions in
   arrival order; and the contention gate passes on read concurrency **alone**, so the ingest
   handler's own wiring needed a fourth test after a deliberate break left every other test green.
+- **A deadline is sized against the client, not against the transport.** `readDeadline` was set to
+  2 s to match the pipe's connection deadline, and that refused a real `engramux status` within half
+  an hour of the install — a cold read of a 108 MB database, where the same command warm takes
+  164–499 ms. It is 4 s now, with 1 s of the CLI's 5 s left for the reply. **The bug was found by
+  running the thing, not by a test**, and the test that exists now only holds the two ends apart.
 - **The relay binary must not link the SQLite driver.** `cmd/engramux` is the hook relay as well as
   the CLI. Importing `internal/service` for one function took it from 3,828,736 to 8,002,048 bytes.
   Watch the binary size when you add the SDK — it goes in `cmd/engramux-service` only.
