@@ -308,6 +308,65 @@ func TestInstallerRefusesAllCopiesWhenOneDestinationCannotBeWritten(t *testing.T
 	}
 }
 
+// TestInstallerDoesNotTellTheUserToWaitForAPermissionBit locks the RELAY
+// destination rather than the service, and asserts the advice it gets back is
+// keyed on the errno rather than on the destination alone.
+//
+// The two failures mean opposite things on that file. EBUSY on the relay is a
+// hook firing right now, which ends on its own, so "wait a moment" is exactly
+// right. Anything else is a permission bit - a read-only attribute, an ACL, an
+// antivirus quarantine - and no amount of waiting clears it. Printing the wait
+// advice directly under a line that says the errno is NOT a lock contradicts
+// itself and leaves the reader with nothing to do: told not to stop the
+// service, told to wait, and waiting cannot help.
+//
+// The read-only attribute is what this induces, so the errno reaching the
+// script here is EPERM. Every other test in this file locks the service
+// destination, which is why this case survived two rounds unnoticed.
+func TestInstallerDoesNotTellTheUserToWaitForAPermissionBit(t *testing.T) {
+	node, script, tmp := installerTree(t)
+	codexPath := filepath.Join(tmp, "hooks.json")
+	claudePath := filepath.Join(tmp, "settings.json")
+	seed(t, codexPath, map[string]any{"hooks": map[string]any{}})
+	seed(t, claudePath, map[string]any{"hooks": map[string]any{}})
+
+	// Only the relay exists, and it differs from dist/. It is also the first
+	// destination the script considers, so the service is never reached.
+	bin := installerBin(tmp)
+	if err := os.MkdirAll(bin, 0o750); err != nil {
+		t.Fatalf("%v", err)
+	}
+	relay := filepath.Join(bin, "engramux.exe")
+	if err := os.WriteFile(relay, []byte("an older build\n"), 0o600); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if err := os.Chmod(relay, 0o400); err != nil {
+		t.Fatalf("%v", err)
+	}
+	// Restored before t.TempDir's cleanup runs, which cannot delete a
+	// read-only file on Windows.
+	t.Cleanup(func() {
+		if err := os.Chmod(relay, 0o600); err != nil {
+			t.Errorf("restoring %s: %v", filepath.Base(relay), err)
+		}
+	})
+
+	out, err := runInstaller(t, node, script, tmp, codexPath, claudePath, "--apply")
+	if err == nil {
+		t.Fatalf("--apply exited 0 with a relay it cannot write:\n%s", out)
+	}
+	msg := string(out)
+	if strings.Contains(msg, "wait a moment") {
+		t.Errorf("a relay that failed for a reason other than a lock is told to wait, and no wait clears a permission bit:\n%s", msg)
+	}
+	// Something to actually do, and the one line that is true either way.
+	for _, want := range []string{"antivirus", "do not stop the service"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the relay refusal does not mention %q:\n%s", want, msg)
+		}
+	}
+}
+
 // TestAWriteHandleOnARunningImageIsRefused pins the premise the installer's
 // probe rests on, and which no other test here reaches: opening a resident
 // executable for writing FAILS. If it silently succeeded, the probe would wave
@@ -361,7 +420,7 @@ catch (e) { console.log(e.code) }`
 // word, and the test guarding the whole skip path would pass forever.
 func copyLines(out []byte) int {
 	n := 0
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "copied ") {
 			n++
 		}

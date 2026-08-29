@@ -220,8 +220,11 @@ function planCopies() {
         // running. The errno is the only measured fact - EBUSY is a mapped
         // image, EPERM is the read-only attribute or an ACL - and which of the
         // two files failed is what makes one cause likelier than the other.
-        // The relay branch matters: it is held by a hook that is firing right
-        // now, and telling that user to stop the service is wrong advice.
+        // The relay branch is keyed on the errno for the same reason the line
+        // above it is: EBUSY there is a hook firing right now and clears on
+        // its own, but anything else is a permission bit, and telling that
+        // reader to wait is advice that can never come true. Either way,
+        // stopping the service is wrong - it is not what holds the relay.
         console.error(`cannot write ${dest}: ${err.code ?? err.message}`)
         console.error(err.code === 'EBUSY'
           ? `EBUSY means a running process has that image mapped, and Windows locks it against writes.`
@@ -241,8 +244,13 @@ function planCopies() {
           console.error(`stopping it loses nothing: it is a hard kill, so the WAL keeps whatever was`)
           console.error(`committed but not checkpointed, and the next start recovers from it.`)
         } else {
-          console.error(`for this file the usual cause is a hook firing right now - the relay runs`)
-          console.error(`only for as long as one event takes. wait a moment and run this again.`)
+          if (err.code === 'EBUSY') {
+            console.error(`for this file that is a hook firing right now - the relay runs only for`)
+            console.error(`as long as one event takes. wait a moment and run this again.`)
+          } else {
+            console.error(`no wait clears this one: check that file's read-only attribute, its ACL,`)
+            console.error(`and whether antivirus has quarantined it.`)
+          }
           console.error(`do not stop the service for this one; the service is not what holds it.`)
         }
         console.error(`nothing was copied, and no hook configuration was written.`)
