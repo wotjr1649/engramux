@@ -19,8 +19,8 @@ the filesystem layout, §8's Phase 5 row, §10's closed questions 1 and 3.
 
 | | |
 |---|---|
-| Branch | `phase-5-prerequisites`, pushed. It has not been merged: §2 below says what merging it waits on |
-| `main` | `60008a2`, pushed. Untouched last session |
+| Branch | Session 04's `phase-5-prerequisites` was **merged into `main` fast-forward and pushed**, so there is nothing to rebase onto. Start a branch of your own |
+| `main` | `4d68209`, pushed. It is what the live service is running |
 | Last full verification, at `d8a580d` | `go test -p 1 -count=1 ./...` **14 packages ok** · pinned linter `0 issues.`, **exit 0** (exit code checked, not the summary line) · both `CGO_ENABLED=0` builds ok, the service with `-H=windowsgui` · **`./scripts/race.sh` exit 0, no data races** — it had not been run since `643db43` and now has been |
 | `dist/` | Rebuilt at `d8a580d` and **installed**. `dist-rollback/` holds the Phase 4 binaries it replaced; that directory is the rollback and is gitignored by `*.exe` |
 | The live service | Running the binaries this branch built, restarted 2026-08-30 00:52. It drained the 6 events the relay spooled during the stop, which is I-04 end to end |
@@ -43,7 +43,9 @@ three transport clauses had no server to run against and are this session's.
 | Cross-project isolation | **Green**, at both surfaces: `TestPhase5GateGetEventChecksTheProjectWithTheId` and `TestPhase5GateASearchScopedToOneProjectNeverReturnsAnother` |
 | A reader does not push ingest past 800 ms | **Green.** `TestPhase5GateAReaderDoesNotPushIngestPastItsBudget`, measured with and without the gate |
 
-**The branch merges when the three transport clauses are green**, not before.
+Session 04's four clauses were what its own branch merged on, and they are in `main`. **The three
+above are what Phase 5 closes on** — until they are green the phase is not done, whatever `main`
+holds.
 
 ---
 
