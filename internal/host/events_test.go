@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json/jsontext"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -176,6 +177,53 @@ func TestEveryEntryIsValidJSONAndSurvivesAMerge(t *testing.T) {
 			if n := strings.Count(string(twice), `"engramux capture"`); n != len(EventNames()) {
 				t.Errorf("%d hooks after two merges, want %d - one per event\ngot:\n%s",
 					n, len(EventNames()), twice)
+			}
+		})
+	}
+}
+
+// TestTheMergedDocumentCarriesEveryEventAtItsOwnTimeout is the assertion the
+// script's own test held and this package did not: not what an entry builder
+// returns, but what ends up in the file after a merge.
+//
+// The distinction is backlog 23's. That row was closed by widening the script's
+// test from SessionEnd alone to all eleven, because a change lowering the other
+// ten would otherwise pass - a relay given less than spec 5.3's budget on every
+// event but the one the test was named for. Deleting the script must not delete
+// that.
+func TestTheMergedDocumentCarriesEveryEventAtItsOwnTimeout(t *testing.T) {
+	const relay = `C:/x/engramux.exe`
+	for _, h := range []struct {
+		name  string
+		entry func(string, string) jsontext.Value
+		want  func(string) int
+	}{
+		{"claude-code", ClaudeEntry, func(string) int { return TimeoutSeconds }},
+		{"codex", CodexEntry, CodexTimeout},
+	} {
+		t.Run(h.name, func(t *testing.T) {
+			merged, err := MergeHooks([]byte(`{}`), EventNames(),
+				func(event string) jsontext.Value { return h.entry(event, relay) })
+			if err != nil {
+				t.Fatalf("MergeHooks: %v", err)
+			}
+			table, ok, err := getMember(jsontext.Value(merged), "hooks")
+			if err != nil || !ok {
+				t.Fatalf("no hooks table in the merged document: %v", err)
+			}
+			for _, event := range EventNames() {
+				entries, ok, err := getMember(table, event)
+				if err != nil || !ok {
+					t.Errorf("%s is not in the merged document: %v", event, err)
+					continue
+				}
+				// The merged document is indented, so the needle carries the space
+				// the encoder puts after the colon. Written compact first, which
+				// found nothing because it matched nothing.
+				want := `"timeout": ` + strconv.Itoa(h.want(event))
+				if !strings.Contains(string(entries), want) {
+					t.Errorf("%s carries the wrong timeout; want %s in:\n%s", event, want, entries)
+				}
 			}
 		})
 	}

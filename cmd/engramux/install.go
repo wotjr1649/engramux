@@ -22,12 +22,15 @@ import (
 // Nothing is written without --apply.
 func install(args []string) int {
 	apply := slices.Contains(args, "--apply")
+	remove := slices.Contains(args, "--remove")
 
 	opt, err := installOptions(apply, args)
 	if err != nil {
 		warn("install: %v", err)
 		return 1
 	}
+
+	opt.Remove = remove
 
 	report, err := host.Install(context.Background(), opt, realSystem())
 	for _, line := range report {
@@ -136,8 +139,9 @@ func withoutFlags(args []string) []string {
 // for host.Detect, and the service has no business linking Task Scheduler code.
 func realSystem() host.System {
 	return host.System{
-		RegisterTask: schedule.Register,
-		StartService: schedule.Run,
+		RegisterTask:   schedule.Register,
+		UnregisterTask: schedule.Unregister,
+		StartService:   schedule.Run,
 		RegisterClaude: func(ctx context.Context, ep *host.Endpoint) error {
 			bin, err := host.ClaudeCLI()
 			if err != nil {

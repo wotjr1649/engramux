@@ -399,9 +399,9 @@ func reportHostMCP(label, path, endpoint, marker string) {
 	case strings.Contains(text, endpoint):
 		field(label, "points at this endpoint")
 	case strings.Contains(text, marker):
-		field(label, "STALE - it names engramux at another URL; re-run scripts/install-hooks.mjs --apply")
+		field(label, "STALE - it names engramux at another URL; re-run `engramux install --apply`")
 	default:
-		field(label, "not registered - run scripts/install-hooks.mjs --apply")
+		field(label, "not registered - run `engramux install --apply`")
 	}
 }
 

@@ -220,16 +220,29 @@ func isEngramux(hook jsontext.Value) bool {
 }
 
 // MergeHooks rewrites the hook table of a host configuration document and
-// leaves every other byte of it alone.
+// leaves every other VALUE of it alone.
+//
+// Value and not byte, and the distinction is the whole of what this promises.
+// Member order, string escapes, number spellings and characters encoding/json
+// would escape for HTML all survive exactly. Whitespace does not: the result is
+// re-indented at two spaces from end to end, so a file that used four, or none,
+// comes back re-laid-out. An earlier version of this comment said "every other
+// byte" and a review caught it.
 //
 // events is the set of member names under the hook table to rewrite. A member
 // not in it is copied verbatim, so a host carrying hooks this product does not
 // capture keeps them.
 //
-// entryFor returns the hook object to install for one event. **A nil entryFor
-// is how removal is spelled** - every Engramux hook is dropped and nothing is
-// added - so the install and the remove path cannot drift apart, because they
-// are one path.
+// entryFor returns the hook entry to install for one event. **A nil entryFor is
+// how removal is spelled** - so install and remove cannot drift apart, because
+// they are one path.
+//
+// One limit on what removal reaches, found by review: an event whose value is
+// not an array is returned untouched (see [rewriteEntries]), so an Engramux
+// hook buried inside a shape this code does not recognise survives a removal.
+// That is the same trade as preserving it on an install - overwriting a shape
+// nobody understands loses whatever it held - and it is stated rather than
+// implied.
 //
 // The result is indented once at the end rather than as it is built. That is
 // measured, not assumed: [jsontext.Value.Indent] changes whitespace between

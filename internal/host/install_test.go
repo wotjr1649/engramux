@@ -85,7 +85,12 @@ func newTree(t *testing.T) *tree {
 // The installer this replaces had to be run twice: the first pass could not
 // register the MCP endpoint because mcp.json is written by the service, which
 // had not started yet, so the user had to start it and run the whole thing
-// again. Nothing said so. Here the service is started and the endpoint waited
+// again.
+//
+// It did say so - "start the service and run this again", and a closing line
+// naming the service and doctor. An earlier version of this comment claimed it
+// said nothing, which was wrong and a review caught it. The defect is the two
+// passes, not the silence: here the service is started and the endpoint waited
 // for, in one run.
 func TestInstallNeedsOnlyOnePass(t *testing.T) {
 	tr := newTree(t)
@@ -295,5 +300,92 @@ func TestInstallRefusesWhenABinaryIsLocked(t *testing.T) {
 	}
 	if got := read(t, tr.opt.ClaudePath); got != claudeBefore {
 		t.Error("the hook file was written even though a binary could not be")
+	}
+}
+
+// TestInstallRemovesWhatItInstalled is the path the port had lost entirely.
+//
+// Every layer below spells removal as "no entry to write", and the orchestration
+// had no way to say it: Options carried no Remove and Install always installed.
+// A review found it, and it was a blocker for deleting the script this replaces,
+// because that script could uninstall and this could not.
+func TestInstallRemovesWhatItInstalled(t *testing.T) {
+	tr := newTree(t)
+	tr.opt.Apply = true
+	var unregistered string
+	tr.sys.UnregisterTask = func(_ context.Context, name string) error {
+		unregistered = name
+		*tr.steps = append(*tr.steps, "unregister-task "+name)
+		return nil
+	}
+
+	if _, err := Install(t.Context(), tr.opt, tr.sys); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	installedClaude := read(t, tr.opt.ClaudePath)
+	if !strings.Contains(installedClaude, RelayName) {
+		t.Fatalf("nothing was installed to remove:\n%s", installedClaude)
+	}
+	*tr.steps = nil
+
+	tr.opt.Remove = true
+	report, err := Install(t.Context(), tr.opt, tr.sys)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	for _, path := range []string{tr.opt.ClaudePath, tr.opt.CodexHooks} {
+		if body := read(t, path); strings.Contains(body, "engramux capture") {
+			t.Errorf("a hook survived the removal in %s:\n%s", filepath.Base(path), body)
+		}
+	}
+	if body := read(t, tr.opt.CodexConfig); strings.Contains(body, "[mcp_servers."+MCPName+"]") {
+		t.Errorf("the Codex MCP table survived the removal:\n%s", body)
+	}
+	if unregistered != tr.opt.TaskName {
+		t.Errorf("the logon task was not removed: %q", unregistered)
+	}
+	if steps := strings.Join(*tr.steps, "\n"); !strings.Contains(steps, "claude-remove") {
+		t.Errorf("Claude Code's registration was not removed: %q", steps)
+	}
+	if strings.Contains(strings.Join(*tr.steps, "\n"), "start-service") {
+		t.Error("a removal started the service")
+	}
+	// The binaries stay. Removing the relay while a host still holds a stale
+	// hook entry is the one order that produces an error at every event.
+	if _, err := os.Stat(filepath.Join(tr.opt.BinDir, RelayName)); err != nil {
+		t.Errorf("the removal deleted the relay: %v", err)
+	}
+	if !strings.Contains(strings.Join(report, "\n"), "removed") {
+		t.Errorf("the report does not say what happened:\n%s", strings.Join(report, "\n"))
+	}
+}
+
+// TestInstallKeepsItsReportWhenItFails is the other half of a partial copy
+// being possible: a caller told only "it failed" cannot say which files moved.
+//
+// The failure here is at planning time, so what the report has to carry is what
+// was already established before it - the binaries found identical and not
+// copied. An earlier version of this test used a tree where nothing had been
+// established yet and asserted a non-empty report anyway, which was wrong: a
+// failure before anything happens has nothing to report, and saying so is
+// honest rather than a defect.
+func TestInstallKeepsItsReportWhenItFails(t *testing.T) {
+	tr := newTree(t)
+	tr.opt.Apply = true
+	// Both binaries already in place and identical, so PlanCopies has
+	// something to say before the host files are read.
+	for _, b := range []string{RelayName, ServiceName} {
+		seedRaw(t, filepath.Join(tr.opt.BinDir, b), read(t, filepath.Join(tr.opt.SourceDir, b)))
+	}
+	seedRaw(t, tr.opt.CodexHooks, "{ this is not JSON")
+
+	report, err := Install(t.Context(), tr.opt, tr.sys)
+	if err == nil {
+		t.Fatal("Install accepted a host configuration that is not JSON")
+	}
+	joined := strings.Join(report, "\n")
+	if !strings.Contains(joined, "unchanged") {
+		t.Errorf("the report was discarded with the error, so nothing says how far it got:\n%s", joined)
 	}
 }

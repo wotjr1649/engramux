@@ -48,6 +48,16 @@ type Options struct {
 	Binaries []Binary
 	// Apply is false for a dry run, which reports and writes nothing.
 	Apply bool
+	// Remove undoes an installation: the hooks come out of both hosts, the MCP
+	// registration out of both, and the logon task off the machine. The
+	// binaries are left where they are, because removing the relay while a
+	// host still holds a stale hook entry is the one order that produces an
+	// error at every event instead of none.
+	//
+	// It is a field on the same call rather than a second entry point, for the
+	// reason every layer below it already spells removal as "no entry to
+	// write": one path means install and remove cannot drift.
+	Remove bool
 	// EndpointWait overrides how long to wait for the service to publish
 	// mcp.json. Zero means [endpointWait]. It is a field so that the test for
 	// "nothing was ever published" does not have to sit out the whole bound -
@@ -63,6 +73,7 @@ type Options struct {
 // imports host.
 type System struct {
 	RegisterTask   func(ctx context.Context, name, exe string) error
+	UnregisterTask func(ctx context.Context, name string) error
 	StartService   func(ctx context.Context, name string) error
 	RegisterClaude func(ctx context.Context, ep *Endpoint) error
 }
@@ -83,12 +94,29 @@ type System struct {
 //
 // # What fails the run and what does not
 //
-// A binary that cannot be copied, or a host configuration that cannot be read,
-// fails before anything is written - there is no half-install to recover from.
+// A host configuration that cannot be READ fails before anything is written,
+// and a destination that already exists and cannot be written is refused before
+// the first copy. Neither of those is the same as "a copy cannot fail
+// half-way": copies happen one at a time, so a destination that passes the
+// probe and then fails - a scanner taking the file, a disk filling - leaves the
+// binaries before it replaced. That is why the report comes back with the error
+// and names where it stopped, rather than the caller being told nothing
+// happened. An earlier version of this comment claimed the stronger thing and
+// was wrong.
 // Everything after the hooks are in place is reported and survived: capture
 // works without MCP, so a service that does not publish, or a Claude Code that
 // is not installed, leaves a working capture and a report saying what is
 // missing.
+// entryFor answers the hook-entry builder for this run, or nil when the run is
+// a removal - which is how every layer below spells removal, so that one path
+// serves both.
+func entryFor(opt Options, relay string, build func(string, string) jsontext.Value) func(string) jsontext.Value {
+	if opt.Remove {
+		return nil
+	}
+	return func(event string) jsontext.Value { return build(event, relay) }
+}
+
 func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 	if len(opt.Binaries) == 0 {
 		opt.Binaries = []Binary{
@@ -101,26 +129,29 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 
 	// Everything that can be decided by reading is decided first, so that a
 	// failure to read one file cannot leave another already written.
-	copies, unchanged, err := PlanCopies(opt.SourceDir, opt.BinDir, opt.Binaries, opt.Apply)
+	copies, unchanged, err := PlanCopies(opt.SourceDir, opt.BinDir, opt.Binaries, opt.Apply && !opt.Remove)
 	if err != nil {
-		return nil, err
+		return report, err
+	}
+	for _, path := range unchanged {
+		// Reported here rather than after the host files are planned: what is
+		// known is said when it is known, so a later failure still comes back
+		// with everything already established.
+		say("unchanged %s - identical bytes, not copied", path)
 	}
 	relay := filepath.Join(opt.BinDir, RelayName)
 
 	claudePlan, err := PlanMerge(opt.ClaudePath, "claude-code", EventNames(),
-		func(event string) jsontext.Value { return ClaudeEntry(event, relay) })
+		entryFor(opt, relay, ClaudeEntry))
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	codexPlan, err := PlanMerge(opt.CodexHooks, "codex", EventNames(),
-		func(event string) jsontext.Value { return CodexEntry(event, relay) })
+		entryFor(opt, relay, CodexEntry))
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 
-	for _, path := range unchanged {
-		say("unchanged %s - identical bytes, not copied", path)
-	}
 	if !opt.Apply {
 		for _, c := range copies {
 			say("would copy %s", c.Dest)
@@ -130,7 +161,11 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 				say("%s: would install %d events in %s", p.Label, len(EventNames()), p.Path)
 			}
 		}
-		say("would register the logon task %s and start the service", opt.TaskName)
+		if opt.Remove {
+			say("would unregister the logon task %s and take the MCP registration out of both hosts", opt.TaskName)
+		} else {
+			say("would register the logon task %s and start the service", opt.TaskName)
+		}
 		say("")
 		say("nothing was written. re-run with --apply.")
 		return report, nil
@@ -138,16 +173,22 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 
 	for _, c := range copies {
 		if err := copyFile(c.Src, c.Dest); err != nil {
-			return nil, err
+			// The report goes back with the error, and this line is why.
+			// Copies happen one at a time, so a failure here can leave the
+			// first binary replaced and the second not - and the caller has
+			// to be able to say which. The probe in PlanCopies is what makes
+			// that rare; it is not what makes it impossible.
+			say("copy FAILED at %s - the ones above it were replaced and the ones below were not", c.Dest)
+			return report, err
 		}
-		say("copied %s", c.Dest)
+		say("copied %s -> %s", c.Src, c.Dest)
 	}
 	saved, err := Commit([]*Plan{claudePlan, codexPlan})
 	for _, path := range saved {
 		say("backup %s", path)
 	}
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	for _, p := range []*Plan{claudePlan, codexPlan} {
 		if p == nil {
@@ -158,6 +199,18 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 
 	// From here on nothing fails the run. The hooks are in place and capture
 	// works without any of it.
+	if opt.Remove {
+		if err := sys.UnregisterTask(ctx, opt.TaskName); err != nil {
+			say("logon task: could not remove %s (%v)", opt.TaskName, err)
+		} else {
+			say("logon task %s removed", opt.TaskName)
+		}
+		removeMCP(ctx, opt, sys, say)
+		say("")
+		say("removed. the binaries are still in %s; the service is still running until you stop it.", opt.BinDir)
+		return report, nil
+	}
+
 	service := filepath.Join(opt.BinDir, ServiceName)
 	if err := sys.RegisterTask(ctx, opt.TaskName, service); err != nil {
 		say("logon task: FAILED (%v) - capture will not survive a reboot until this is fixed", err)
@@ -222,6 +275,36 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 	say("")
 	say("done. check it with: %s doctor", relay)
 	return report, nil
+}
+
+// removeMCP takes the endpoint out of both hosts. It needs no endpoint to do
+// it, which is the point: a machine whose service never published still has a
+// stale registration to remove.
+func removeMCP(ctx context.Context, opt Options, sys System, say func(string, ...any)) {
+	if text, exists, err := readOrEmpty(opt.CodexConfig); !exists {
+		say("codex mcp: %s does not exist - skipped", opt.CodexConfig)
+	} else if err != nil {
+		say("codex mcp: cannot read %s (%v) - skipped", opt.CodexConfig, err)
+	} else if spliced, err := SpliceCodex(text, nil); err != nil {
+		say("codex mcp: %v - skipped", err)
+	} else if spliced == text {
+		say("codex mcp: nothing registered")
+	} else {
+		saved, err := Commit([]*Plan{{Path: opt.CodexConfig, Label: "codex mcp", Text: []byte(spliced)}})
+		for _, path := range saved {
+			say("backup %s", path)
+		}
+		if err != nil {
+			say("codex mcp: FAILED (%v)", err)
+		} else {
+			say("codex mcp: removed [mcp_servers.%s]", MCPName)
+		}
+	}
+	if err := sys.RegisterClaude(ctx, nil); err != nil {
+		say("claude-code mcp: %v", err)
+	} else {
+		say("claude-code mcp: removed %s", MCPName)
+	}
 }
 
 // waitForEndpoint polls until the service publishes mcp.json or the bound runs
