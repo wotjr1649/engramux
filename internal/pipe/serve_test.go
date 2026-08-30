@@ -6,13 +6,16 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"runtime/pprof"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -575,13 +578,7 @@ func TestCloseStopsServeAndLeavesNoGoroutine(t *testing.T) {
 		t.Fatalf("ack.Verify: %v", err)
 	}
 
-	err := stop()
-	if err == nil {
-		t.Fatal("Serve returned nil after Close; it always returns the error that ended the accept loop")
-	}
-	if !errors.Is(err, net.ErrClosed) {
-		t.Errorf("Serve returned %v, want an error satisfying errors.Is(err, net.ErrClosed)", err)
-	}
+	requireEndedByClose(t, stop())
 
 	assertNoPipeGoroutines(t)
 }
@@ -602,9 +599,7 @@ func TestCancellingTheContextStopsServe(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if !errors.Is(err, net.ErrClosed) {
-			t.Errorf("Serve returned %v, want an error satisfying errors.Is(err, net.ErrClosed)", err)
-		}
+		requireEndedByClose(t, err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Serve did not return within 10s of the context being cancelled")
 	}
@@ -635,9 +630,7 @@ func TestAStalledClientDoesNotHoldServeOpen(t *testing.T) {
 	t.Cleanup(func() { _ = stalled.Close() })
 	waitUntilAccepted(t)
 
-	if err := stop(); !errors.Is(err, net.ErrClosed) {
-		t.Errorf("Serve returned %v, want an error satisfying errors.Is(err, net.ErrClosed)", err)
-	}
+	requireEndedByClose(t, stop())
 
 	// Checked here and not left to assertNoPipeGoroutines below, because
 	// that one polls and this claim is about an instant: Serve promises it
@@ -794,5 +787,72 @@ func TestAFailingStatusHandlerIsRejected(t *testing.T) {
 	}
 	if ack.Status != ipc.Rejected {
 		t.Errorf("status = %q, want %q", ack.Status, ipc.Rejected)
+	}
+}
+
+// requireEndedByClose asserts that Serve stopped because its listener closed,
+// and it accepts the two spellings Windows has for that.
+//
+// [net.ErrClosed] is the one a reader expects: Serve's [context.AfterFunc]
+// closes the listener, the accept loop comes round, and the closed listener
+// refuses it. The other spelling appears when the close lands while an Accept
+// is ALREADY blocked in an overlapped read - the I/O is cancelled rather than
+// refused, and winio surfaces ERROR_OPERATION_ABORTED. Both mean the same
+// thing and which one happens is a race with no winner worth preferring.
+//
+// Measured before this existed: over 1,200 runs of
+// TestCancellingTheContextStopsServe, 7 failed - about 0.6% - and all 7 carried
+// the identical abort text. A suite whose greenness gates a phase cannot afford
+// a one-in-a-hundred-and-seventy spurious red.
+//
+// It stays narrow on purpose. Anything that is not one of these two still
+// fails: a timeout, an access denial, a handler's own error. Widening it to
+// "some error came back" would pass against a Serve that returned for the wrong
+// reason, which is what the assertion exists to rule out.
+func requireEndedByClose(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Serve returned nil; it always returns the error that ended the accept loop")
+	}
+	if endedByClose(err) {
+		return
+	}
+	t.Errorf("Serve returned %v, want net.ErrClosed or ERROR_OPERATION_ABORTED (%d) - "+
+		"the two ways a closed listener ends an accept, and nothing else should end it",
+		err, uintptr(syscall.ERROR_OPERATION_ABORTED))
+}
+
+// endedByClose is the decision above, split out so it can be tested. A helper
+// that only ever runs against a passing case is a helper nobody has shown to
+// reject anything.
+func endedByClose(err error) bool {
+	return errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ERROR_OPERATION_ABORTED)
+}
+
+// TestEndedByCloseRejectsEveryOtherError is [endedByClose]'s non-vacuity guard.
+// The two accepted sentinels are asserted wrapped as well as bare, because that
+// is how they arrive - Serve wraps its accept error - and a predicate written
+// with == instead of errors.Is would pass the bare cases and fail the wrapped
+// ones.
+func TestEndedByCloseRejectsEveryOtherError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"net.ErrClosed", net.ErrClosed, true},
+		{"net.ErrClosed wrapped, as Serve returns it", fmt.Errorf("pipe: accept: %w", net.ErrClosed), true},
+		{"ERROR_OPERATION_ABORTED", syscall.ERROR_OPERATION_ABORTED, true},
+		{"ERROR_OPERATION_ABORTED wrapped", fmt.Errorf("pipe: accept: %w", syscall.ERROR_OPERATION_ABORTED), true},
+		{"nil is not a close", nil, false},
+		{"a deadline is not a close", os.ErrDeadlineExceeded, false},
+		{"an access denial is not a close", syscall.ERROR_ACCESS_DENIED, false},
+		{"a bare error is not a close", errors.New("accept: something else"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := endedByClose(tc.err); got != tc.want {
+				t.Errorf("endedByClose(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

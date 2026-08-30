@@ -14,19 +14,27 @@ AGENTS.md applies to its own "What will bite you" table.
 
 | # | Where | What |
 |---|---|---|
-| 1 | `main_test.go:284-292`, `service_test.go:166-171` | `requirePipeFree` mutates the environment as a side effect of a predicate-named helper |
-| 2 | five sites | Five copies of the pipe-name override key format. Harmless, but five |
 | 6 | `engramux doctor` | Say when `ENGRAMUX_TEST_PIPE_SID` is set in doctor's own environment, so a leftover export is diagnosable. Raised by Codex during T1 |
 | 9 | `internal/service/service.go:90,98`, `internal/store/checkpoint.go:90` | "about 4.1 MiB" is 4.1 MB — 1,000 pages × 4 KiB is 4,096,000 B, which is 3.9 MiB. Corrected in `checkpoint_test.go` and spec §5.4/§7.1; **these three sites are shipped source, so they wait for the post-soak build** |
-| 10 | fts5vocab test | Pins the reference spelling's token COUNT and compares the other two spellings to it, rather than three literal token lists. Exact and proven to fail two ways; noted only |
-| 12 | `fts_test.go:170-178` | Duplicates `leaves_test.go:204-212`'s raw `INSERT INTO events` block; only the id prefix and `received_at` differ. A five-line helper removes it and the `internal/secret` import with it |
-| 13 | leaves walk | No test covers the ORDER in which the depth guard fires — shallow leaves already collected, then an over-deep subtree. `nestedJSON` always puts the leaf at the bottom. The code is correct; nothing would catch a partial-walk regression |
-| 14 | leaves walk | The guard closes only the DEPTH mode of `json_valid`'s refusal. Any other shape Go accepts and SQLite refuses still diverges silently, caught only if such a payload happens to be in `TestTheTwoWalksAgree`'s set |
-| 15 | `leaves_test.go` | `goJSONDepthLimit = 10000` pins an undocumented `encoding/json` implementation detail. Accepted and self-flagged: it is the measurement behind the constant's "ten times" claim, and an unmeasured number is what AGENTS.md forbids |
 | 16 | `maxEventNameRunes = 64` | Couples the wire to what one client prints. An MCP client wanting the whole name is what would move it. Recorded in the constant |
 | 17 | EventName truncation | Carries no marker, so a shortened name is indistinguishable from a real 64-rune one. A client that needs to know needs a flag on the hit, not a suffix |
-| 19 | `%q` rune precision | True and verified by throwaway, but nothing in the suite holds `fmt`'s rule — only `truncateRunes` does. Four lines would hold it. If Go changed `%q` precision to bytes the CLI would display fewer characters than the wire carries: cosmetic |
-| 21 | spec 7.1 / 7.3 | The Codex `SessionEnd` clamp row labels the observed half honestly but does not record the WARNING TEXT itself, which is that observation's only evidence. A home-path-stripped copy would let the next Codex version be compared against it |
+
+**Every row left needs a build.** The soak window closed all fifteen that did not, so what remains
+is exactly the Step 1 and Step 2 queue of `plans/2026-08-30-after-phase-6.md`. A row appearing here
+that does *not* need a build is now a sign that something was filed rather than done.
+
+**13, 14, 21, 10, 15, 1, 2, 12 and 19 closed in the second soak-window pass.** 13's mutation is the
+one worth carrying: the depth guard's `return ""` was changed to return what the walk had already
+collected, and **exactly one test in the suite went red** — the new one. Nothing else could see a
+partial walk, which is what the row said. 14 is closed by measurement rather than by a fix: 21 shapes
+where `encoding/json` and `json_valid` could plausibly disagree — lone surrogates, invalid UTF-8, a
+raw NUL, numbers past float64, a byte-order mark — and they agree on all 21, 15 valid and 6 invalid.
+`TestTheTwoWalksAgreeOnWhatIsValid` holds it and would go red on a driver that introduced one. 21 was
+closed by the product searching its own corpus: the Codex clamp warning's text was recovered from a
+2026-08-29 capture and is now in §7.1, path-stripped. **10 and 15 needed nothing** — both reasonings
+were already written at their narrowest scope, in `TestTheTokenizerReadsBothIllFormedShapesTheSameWay`
+and on `goJSONDepthLimit`, so the rows were duplicating the code rather than deferring anything. 1, 2,
+12 and 19 were done in the first pass and their rows outlived them by one commit.
 
 **3, 4, 7, 20, 22 and 23 closed during the Phase 6 soak**, none of them touching a shipped `.go`
 file. 3, the pipe-name assertion now names `ENGRAMUX_TEST_PIPE_SID` and reports whether it is set,

@@ -590,3 +590,43 @@ func insertAtVersionOne(t *testing.T, db *sql.DB, n int, payload []byte) string 
 	}
 	return id
 }
+
+// TestTheDepthGuardDiscardsLeavesItAlreadyCollected holds the ORDER in which
+// the guard fires, which every other depth test in this file is blind to.
+//
+// [nestedJSON] puts its only string leaf at the bottom of the nesting, so when
+// the guard trips there is nothing collected yet and returning the empty string
+// and returning the accumulator are the same answer. A partial walk is the one
+// shape that actually diverges from the backfill - `json_valid` refuses the
+// whole payload, so the migration stores "" for it, and a Go walk that returned
+// what it had reached so far would index text no upgrade path can reproduce.
+//
+// The payload here therefore puts a leaf in FRONT of the deep subtree and
+// another behind it. At the moment the guard fires, `alpha` is already in the
+// accumulator; the assertion is that it does not come back.
+//
+// The control is the same shape one level shallower, and it is not decoration:
+// without it "the guard returned empty" is indistinguishable from "this payload
+// has no leaves", and the test would pass against a walk that returned "" for
+// everything.
+func TestTheDepthGuardDiscardsLeavesItAlreadyCollected(t *testing.T) {
+	// The outer object is one open container, so the subtree needs the
+	// limit's worth of its own to put the deepest leaf past it.
+	wrap := func(inner []byte) []byte {
+		return []byte(`{"before":"alpha","deeper":` + string(inner) + `,"after":"omega"}`)
+	}
+
+	past := wrap(nestedJSON(sqliteJSONDepthLimit, "{"))
+	if got := Leaves(past); got != "" {
+		t.Errorf("Leaves over a payload whose deep subtree trips the guard = %q, want %q - "+
+			"the walk returned what it had collected before the guard fired, which is the "+
+			"partial walk the backfill cannot reproduce", got, "")
+	}
+
+	at := wrap(nestedJSON(sqliteJSONDepthLimit-1, "{"))
+	want := strings.Join([]string{"alpha", "deep", "omega"}, leafSeparator)
+	if got := Leaves(at); got != want {
+		t.Errorf("Leaves one level inside the guard = %q, want %q - the control that says "+
+			"the case above is the guard firing and not this payload having no leaves", got, want)
+	}
+}
