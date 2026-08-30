@@ -142,7 +142,11 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 		}
 		say("copied %s", c.Dest)
 	}
-	if err := Commit([]*Plan{claudePlan, codexPlan}); err != nil {
+	saved, err := Commit([]*Plan{claudePlan, codexPlan})
+	for _, path := range saved {
+		say("backup %s", path)
+	}
+	if err != nil {
 		return nil, err
 	}
 	for _, p := range []*Plan{claudePlan, codexPlan} {
@@ -178,8 +182,13 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 		return report, nil
 	}
 
-	codexText, err := readOrEmpty(opt.CodexConfig)
+	codexText, exists, err := readOrEmpty(opt.CodexConfig)
 	switch {
+	case !exists:
+		// A user with only Claude Code installed is an ordinary user, and the
+		// installer this replaces skipped this file by name. Writing one would
+		// leave a Codex configuration its owner never made.
+		say("codex mcp: %s does not exist - skipped", opt.CodexConfig)
 	case err != nil:
 		say("codex mcp: cannot read %s (%v) - skipped", opt.CodexConfig, err)
 	default:
@@ -190,7 +199,13 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 		case spliced == codexText:
 			say("codex mcp: already up to date")
 		default:
-			if err := Commit([]*Plan{{Path: opt.CodexConfig, Label: "codex mcp", Text: []byte(spliced)}}); err != nil {
+			saved, err := Commit([]*Plan{{Path: opt.CodexConfig, Label: "codex mcp", Text: []byte(spliced)}})
+			for _, path := range saved {
+				// Named because this one is a copy of a file that may already
+				// have held the token.
+				say("backup %s", path)
+			}
+			if err != nil {
 				say("codex mcp: FAILED (%v)", err)
 			} else {
 				say("codex mcp: installed [mcp_servers.%s]", MCPName)
@@ -232,18 +247,22 @@ func waitForEndpoint(ctx context.Context, path string, wait time.Duration) (*End
 	}
 }
 
-// readOrEmpty reads a file, answering an empty string for one that is not
-// there. A Codex configuration that does not exist yet is an ordinary state.
-func readOrEmpty(path string) (string, error) {
+// readOrEmpty reads a file and says whether it was there.
+//
+// The second result is the whole point and it was missing: without it a Codex
+// configuration that does not exist read as an empty one, the splice produced a
+// table, and the write failed at the backup with a FAILED line on every install
+// of a machine that has no Codex. Measured before this was fixed.
+func readOrEmpty(path string) (string, bool, error) {
 	//nolint:gosec // G304: a caller-computed path inside the trust boundary; see the note in write.go.
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return "", nil
+		return "", false, nil
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return string(b), nil
+	return string(b), true, nil
 }
 
 // copyFile writes src over dest through a temporary file and a rename, the same

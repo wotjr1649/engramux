@@ -70,7 +70,7 @@ func TestCommitWritesAndBacksUp(t *testing.T) {
 		t.Error("PlanMerge wrote to the file; planning reads and decides, it does not write")
 	}
 
-	if err := Commit([]*Plan{plan}); err != nil {
+	if _, err := Commit([]*Plan{plan}); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestPlanMergeReportsNothingToDo(t *testing.T) {
 	path := filepath.Join(dir, "settings.json")
 	seedRaw(t, path, "{}\n")
 
-	if err := Commit([]*Plan{planFor(t, path)}); err != nil {
+	if _, err := Commit([]*Plan{planFor(t, path)}); err != nil {
 		t.Fatalf("first Commit: %v", err)
 	}
 	installed := read(t, path)
@@ -222,7 +222,7 @@ func TestCommitWritesNothingWhenTheBackupFails(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	if err := Commit([]*Plan{plan}); err == nil {
+	if _, err := Commit([]*Plan{plan}); err == nil {
 		t.Fatal("Commit succeeded against a destination it could not back up")
 	}
 	if l := leftovers(t, dir); len(l) != 0 {
