@@ -16,12 +16,8 @@ AGENTS.md applies to its own "What will bite you" table.
 |---|---|---|
 | 1 | `main_test.go:284-292`, `service_test.go:166-171` | `requirePipeFree` mutates the environment as a side effect of a predicate-named helper |
 | 2 | five sites | Five copies of the pipe-name override key format. Harmless, but five |
-| 3 | `ipc/pipename_test.go:56-62` | The first assertion prints neither value nor names the variable, so a leftover `ENGRAMUX_TEST_PIPE_SID` in a shell trips it with no way to see why |
-| 4 | `AGENTS.md` | The `-p 1` row is five sentences. Shorten |
 | 6 | `engramux doctor` | Say when `ENGRAMUX_TEST_PIPE_SID` is set in doctor's own environment, so a leftover export is diagnosable. Raised by Codex during T1 |
-| 7 | `AGENTS.md:76-82` | The fenced "TDD, then break it" block sits outside the Commands exception to the no-code-blocks rule. Predates the session that found it |
-| 8 | particle rule | Trims only trailing ASCII punctuation, so a token ending in Hangul followed by non-ASCII punctuation (ellipsis, full-width period) stops being a candidate. Corpus Hangul particle candidates 158 to 136. Faithful to the ruling, recorded because the ruling did not consider it |
-| 9 | `checkpoint_test.go:291` | "4.1 MiB" is 3.95 MiB / 4.1 MB. Unit shorthand echoing the pre-existing comment at :244 |
+| 9 | `internal/service/service.go:90,98`, `internal/store/checkpoint.go:90` | "about 4.1 MiB" is 4.1 MB — 1,000 pages × 4 KiB is 4,096,000 B, which is 3.9 MiB. Corrected in `checkpoint_test.go` and spec §5.4/§7.1; **these three sites are shipped source, so they wait for the post-soak build** |
 | 10 | fts5vocab test | Pins the reference spelling's token COUNT and compares the other two spellings to it, rather than three literal token lists. Exact and proven to fail two ways; noted only |
 | 12 | `fts_test.go:170-178` | Duplicates `leaves_test.go:204-212`'s raw `INSERT INTO events` block; only the id prefix and `received_at` differ. A five-line helper removes it and the `internal/secret` import with it |
 | 13 | leaves walk | No test covers the ORDER in which the depth guard fires — shallow leaves already collected, then an over-deep subtree. `nestedJSON` always puts the leaf at the bottom. The code is correct; nothing would catch a partial-walk regression |
@@ -30,10 +26,22 @@ AGENTS.md applies to its own "What will bite you" table.
 | 16 | `maxEventNameRunes = 64` | Couples the wire to what one client prints. An MCP client wanting the whole name is what would move it. Recorded in the constant |
 | 17 | EventName truncation | Carries no marker, so a shortened name is indistinguishable from a real 64-rune one. A client that needs to know needs a flag on the hit, not a suffix |
 | 19 | `%q` rune precision | True and verified by throwaway, but nothing in the suite holds `fmt`'s rule — only `truncateRunes` does. Four lines would hold it. If Go changed `%q` precision to bytes the CLI would display fewer characters than the wire carries: cosmetic |
-| 20 | `scripts/install-hooks.mjs:137` | A half-migrated `EVENTS` row silently loses its matcher. Destructuring `matcher` from an old-style STRING value yields `undefined`, which is not `null`, so the entry is pushed with `matcher: undefined` and `JSON.stringify` deletes it; `codexTimeout` goes the same way. Measured. One line to close: throw when a table row is not an object |
 | 21 | spec 7.1 / 7.3 | The Codex `SessionEnd` clamp row labels the observed half honestly but does not record the WARNING TEXT itself, which is that observation's only evidence. A home-path-stripped copy would let the next Codex version be compared against it |
-| 22 | `scripts/install-hooks.mjs` header | Lists `SessionEnd` and the Subagent pair among the events using `*`, but the `EVENTS` table gives all three `matcher: null`. The table matches the live file; the comment is stale |
-| 23 | `internal/host/install_hooks_test.go` | Checks only `SessionEnd` on the Claude Code side, so a change lowering the other ten Claude timeouts would pass |
+
+**3, 4, 7, 20, 22 and 23 closed during the Phase 6 soak**, none of them touching a shipped `.go`
+file. 3, the pipe-name assertion now names `ENGRAMUX_TEST_PIPE_SID` and reports whether it is set,
+never either name — both are derived from a real SID. 20, the `EVENTS` table is validated once at
+module load rather than at each read, because `matcher` and `codexTimeout` had the same hole; a
+string row now throws instead of installing a hook with the matcher silently deleted. 23, the Claude
+Code side sweeps all eleven events, which a lowered `TIMEOUT_SECONDS` fails on all eleven. 4 and 7
+are `AGENTS.md`; 22 is a stale parenthetical.
+
+**8 is withdrawn, not fixed.** Its number was a misreading: 158 documents carry a Hangul-stem
+particle token somewhere and 136 carry one before any Latin-stem token, and the 22 between those is
+`deriveParticle` returning the first match rather than the trim dropping anything. Measured over the
+901 captures, the ASCII-only trim changes not one token and the class holds 162 candidates either
+way. The trim was widened anyway, for consistency with `atTokenStart` and not for a number;
+`deriveParticle` and `particleStemShapes` carry the measurement.
 
 ## Pre-existing defects confirmed by the 2026-08-29 adversarial review
 

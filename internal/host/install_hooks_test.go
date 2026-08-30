@@ -138,18 +138,32 @@ func TestCodexSessionEndTimeoutIsWithinTheDocumentedLimit(t *testing.T) {
 
 	// The cap is Codex's alone. Claude Code's SessionEnd budget is 1.5 s
 	// raised to the longest per-hook timeout (spec 7.1), so 5 stays there.
-	claude, found := readHooks(t, claudePath), 0
-	for _, h := range claude["SessionEnd"] {
-		if !ours(h) {
-			continue
-		}
-		found++
-		if got := h["timeout"]; got != float64(5) {
-			t.Errorf("claude-code SessionEnd timeout = %v, want 5: the 3 s cap is Codex's alone", got)
-		}
+	//
+	// All eleven, and not just the one the cap is about: an assertion over
+	// SessionEnd alone passes a change that lowers the other ten, which is a
+	// relay given less time than spec 5.3's budget on every event but the one
+	// this test is named for. Same sweep as the Codex side above, and the
+	// wanted value is deliberately the same literal 5 - it is what the script's
+	// TIMEOUT_SECONDS is, and reading it back out of the script would make the
+	// assertion agree with any value.
+	claude := readHooks(t, claudePath)
+	if len(claude) != 11 {
+		t.Errorf("claude-code: %d events written, want the 11 of the script's EVENTS table", len(claude))
 	}
-	if found != 1 {
-		t.Errorf("claude-code SessionEnd: %d engramux hooks, want exactly 1", found)
+	for event, hooks := range claude {
+		found := 0
+		for _, h := range hooks {
+			if !ours(h) {
+				continue
+			}
+			found++
+			if got := h["timeout"]; got != float64(5) {
+				t.Errorf("claude-code %s timeout = %v, want 5: the 3 s cap is Codex's alone", event, got)
+			}
+		}
+		if found != 1 {
+			t.Errorf("claude-code %s: %d engramux hooks, want exactly 1 - a re-run replaces, it does not append", event, found)
+		}
 	}
 }
 

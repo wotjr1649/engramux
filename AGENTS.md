@@ -70,16 +70,14 @@ imports `crypto/rand`, directly or transitively, makes it print `0 issues.` **an
 `go run` builds it with the local toolchain, so the linter and the standard library it is
 reading always agree. The first run downloads and builds; after that it is cached.
 
-Run `go test` with `-p 1`. Both reasons it was written for are gone: pipe names, because a test
-that listens on the derived name or launches a binary that dials it now moves the derivation with
-`ipc.TestPipeSIDEnv` first, keyed on the test name and the process id; and the single database
-file, because every database a test opens is under its own `t.TempDir`. Whether it can now be
-dropped is `[unverified]` — nothing re-measured it, and the timing-sensitive tests are what would
-decide it (the 30-concurrent-starts gate, the relay's dial and total budgets). Keep passing it
-until someone does. Nothing in the repository enforces it; what refuses a `go test` without `-p` on
-the maintainer's machine is a Claude Code `PreToolUse` hook in that machine's settings — which is
-why searching `.git/hooks`, `core.hooksPath`, shell profiles and `GOFLAGS` finds nothing, and why
-it is not a guarantee for anyone else.
+Run `go test` with `-p 1`. Both reasons it was written for are gone — pipe names move per test with
+`ipc.TestPipeSIDEnv`, and every database a test opens is under its own `t.TempDir` — but whether it
+can be dropped is `[unverified]`: the timing-sensitive tests would decide it (the
+30-concurrent-starts gate, the relay's dial and total budgets) and nothing re-measured them. Keep
+passing it until someone does. Nothing in the repository enforces it — a Claude Code `PreToolUse`
+hook in the maintainer's own settings is what refuses a bare `go test`, which is why `.git/hooks`,
+`core.hooksPath`, shell profiles and `GOFLAGS` are all empty of it, and why it guarantees nothing
+on anyone else's machine.
 
 ## How we work
 
@@ -100,13 +98,11 @@ easily than specs do.
 
 **TDD, then break it.** For every test that guards an invariant:
 
-```
 1. write the test, watch it fail
 2. implement, watch it pass
 3. deliberately break the implementation — that invariant only
-4. confirm the test now fails      <- if it still passes, the test is fake
+4. confirm the test now fails — **if it still passes, the test is fake**
 5. revert, confirm it passes again
-```
 
 Steps 3-5 do not get committed. This exists because an earlier suite survived most of a deliberate
 mutation pass: transaction control could be deleted wholesale and everything stayed green, because

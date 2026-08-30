@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"os"
 	"os/user"
 	"strings"
 	"testing"
@@ -58,7 +59,15 @@ func TestCurrentPipeName(t *testing.T) {
 		t.Fatalf("CurrentPipeName: %v", err)
 	}
 	if got != want {
-		t.Errorf("CurrentPipeName() did not match PipeName(user.Current().Uid)")
+		// Neither name is printed and neither ever will be: both are derived
+		// from this machine's SID, and one of them is what a real service
+		// listens on. What a reader needs instead is the one thing that moves
+		// the derivation. A leftover export in the calling shell fails this
+		// assertion and nothing else here would say so - and whether it is set
+		// says it without the value, which could be a real SID.
+		_, override := os.LookupEnv(TestPipeSIDEnv)
+		t.Errorf("CurrentPipeName() did not match PipeName(user.Current().Uid); %s set in this process: %v",
+			TestPipeSIDEnv, override)
 	}
 
 	// The seam itself. Every test in this repository that listens on the

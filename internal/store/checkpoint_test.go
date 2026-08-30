@@ -241,7 +241,7 @@ func TestTheTimerCheckpoints(t *testing.T) {
 //
 // That second number is not unbounded growth, and it is worth being exact about
 // what it is. SQLite's own wal_autocheckpoint is 1,000 pages by default, spec
-// 5.4's DSN does not turn it off, and 4 KiB pages make that about 4.1 MiB - so
+// 5.4's DSN does not turn it off, and 4 KiB pages make that about 4.1 MB - so
 // the WAL settles there whatever the run length, and 800 ingests reach the same
 // figure as 400. What that automatic checkpoint does is PASSIVE: it moves pages
 // into the main file and reuses the WAL in place, so the file keeps its
@@ -288,7 +288,7 @@ func TestTheWALStaysBoundedAcrossALongRun(t *testing.T) {
 	// next poll sees it. What it may not do is get far past it - this bound is
 	// a multiple of the checkpointer's own threshold on purpose, because what
 	// the test guards is that the loop keeps the WAL near where it was told
-	// to, not merely that it beats doing nothing. Doing nothing is 4.1 MiB.
+	// to, not merely that it beats doing nothing. Doing nothing is 4.1 MB.
 	//
 	// Five, and the multiplier is measured rather than chosen. Six runs each,
 	// every sample in its own process, because a second run in one process is

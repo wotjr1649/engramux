@@ -300,10 +300,26 @@ func TestDeriveKoreanTwoChar(t *testing.T) {
 // deriveParticle takes the first whitespace-delimited token that ends in a
 // particle over a stem of at least two characters, and returns the stem.
 //
-// Trailing ASCII punctuation is trimmed first, because real text writes
-// Codex는, and 서비스가. and the particle is then not the last character. Only
-// trailing punctuation: anything inside the token is part of it, and unicode61
-// would split there anyway.
+// Trailing punctuation is trimmed first, because real text writes Codex는, and
+// 서비스가. and the particle is then not the last character. Only trailing
+// punctuation: anything inside the token is part of it, and unicode61 would
+// split there anyway.
+//
+// The trim is [tokenChar]'s rule and not an ASCII one, so it is the same rule
+// [atTokenStart] reads. An earlier version also required the rune to be below
+// utf8.RuneSelf, which would drop a token ending in Hangul followed by a
+// full-width period, an ellipsis or a corner bracket. Measured over the 901
+// captures, that costs **nothing**: not one whitespace token in the corpus
+// differs between the two trims, and the class holds 162 candidate documents
+// under either. It was changed anyway because two rules for what ends a token,
+// in one file, is what a reader trips on - not because a number moved.
+//
+// The same measurement withdrew a backlog row claiming the ASCII trim cost 22
+// Hangul candidates. It cost none: 158 documents carry a Hangul-stem particle
+// token *somewhere* and 136 carry one *first*, and the 22 between those is this
+// function returning the first match in a document that also holds a Latin one.
+// That is the design and not a loss - the document is a candidate either way,
+// and 26 Latin + 136 Hangul is the whole 162.
 //
 // The stem must begin at a token start, and a token whose stem does not is
 // passed over rather than ending the search - 2단계를 yields the stem 단계,
@@ -315,7 +331,7 @@ func deriveParticle(d doc) string {
 	for _, leaf := range d.leaves {
 		for _, tok := range strings.Fields(leaf) {
 			tok = strings.TrimRightFunc(tok, func(r rune) bool {
-				return r < utf8.RuneSelf && !tokenChar(r)
+				return !tokenChar(r)
 			})
 			if m := particleStem.FindStringSubmatchIndex(tok); m != nil && atTokenStart(tok, m[2]) {
 				return tok[m[2]:m[3]]
@@ -329,6 +345,13 @@ func deriveParticle(d doc) string {
 // shape. Both shapes are spec 5.7's, and the Latin one is the measured case
 // that makes per-token expansion load-bearing, so a run where it contributes
 // nothing is a run where that case went ungated.
+//
+// The two counts sum to the class's candidate count, which is what makes them
+// readable and is also how they mislead: this is the shape of the ONE stem
+// [deriveParticle] returns, not how many documents contain a shape. Measured,
+// 158 of the corpus's 901 hold a Hangul-stem particle token and 136 hold one
+// before any Latin-stem token, so reading the Hangul figure as "documents with
+// Hangul particles" understates it by 22.
 func particleStemShapes(docs []doc) (latin, hangul int) {
 	for _, d := range docs {
 		stem := deriveParticle(d)

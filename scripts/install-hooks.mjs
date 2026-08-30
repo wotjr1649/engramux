@@ -58,12 +58,14 @@ import { fileURLToPath } from 'node:url'
 // Checked against Claude Code's hook reference rather than inferred: `"*"`,
 // `""` and an omitted key are documented as EQUIVALENT - all three match every
 // occurrence - so nothing here is load-bearing and no event needs a matcher to
-// fire at all. `"*"` is written on the events whose matcher would otherwise
+// fire at all. `"*"` is written on the six events whose matcher would otherwise
 // filter something (tool name on PreToolUse/PostToolUse/PermissionRequest,
-// start reason on SessionStart, end reason on SessionEnd, agent type on the
-// Subagent pair, manual/auto on the Compact pair) purely so a reader can see
-// that capturing everything is the intent and not an oversight. `Stop` accepts
-// the field but has no matcher support whatsoever, so it is omitted there.
+// start reason on SessionStart, manual/auto on the Compact pair) purely so a
+// reader can see that capturing everything is the intent and not an oversight.
+// The other five omit the key, which that same reference makes equivalent:
+// `Stop` because it accepts the field with no matcher support whatsoever, and
+// SessionEnd, UserPromptSubmit and the Subagent pair by choice rather than by
+// any rule. Read the table, not this paragraph - the table is what runs.
 //
 // All eleven names below appear verbatim in the documented lifecycle table.
 const EVENTS = {
@@ -90,6 +92,19 @@ const EVENTS = {
   PermissionRequest: { matcher: '*' },
 }
 const EVENT_NAMES = Object.keys(EVENTS)
+
+// A row that is not an object is a half-migrated table, and it fails silently
+// rather than loudly: destructuring `matcher` out of a bare string yields
+// `undefined`, which is not `null`, so the entry is pushed with an undefined
+// matcher and `JSON.stringify` then deletes the key. The hook installs, the
+// matcher is gone, and nothing says so. `codexTimeout` goes the same way at the
+// Codex writer. Measured. Checked once here rather than at each read, because
+// both readers have the same hole and a third would inherit it.
+for (const [event, settings] of Object.entries(EVENTS)) {
+  if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error(`install-hooks: EVENTS.${event} must be an object, got ${JSON.stringify(settings)}`)
+  }
+}
 
 // Generous against the relay's own 1 s ceiling (spec 5.3), which it enforces
 // itself: past that it spools and exits 0. This is the host's backstop, not the
