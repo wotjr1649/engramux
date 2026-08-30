@@ -413,3 +413,34 @@ func checkName(name string) error {
 	}
 	return nil
 }
+
+// Run starts the task now, without waiting for its trigger.
+//
+// It is what an installation uses to bring the service up: starting it through
+// the task means the running process is the one the machine will have after a
+// logon, rather than a bare child of the installer that no logon reproduces.
+//
+// # Two things it does not do, and one of them is a trap
+//
+// It does not wait. `schtasks /run` returns as soon as the request is accepted,
+// so a caller that needs the service to be *up* has to observe that separately -
+// [Query]'s last result is not it either, since a task that has only just been
+// asked to run has not produced one yet. The installer waits for the endpoint
+// file instead, which is the thing it actually needs.
+//
+// It does not stop anything first, and must not. A `/end` followed by a `/run`
+// leaves nothing running: `/end` returns before the process is gone, the new
+// instance loses the pipe race to the old one and exits with an access denial
+// on the name (which is I-09 working), and then the old one finishes dying.
+// AGENTS.md carries that row. Running while one is already up is harmless for
+// the same reason - the second instance loses the same race and exits - so this
+// is safe to call on a machine that is already running one.
+func Run(ctx context.Context, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if out, err := run(ctx, "/run", "/tn", name); err != nil {
+		return fmt.Errorf("schedule: run %s: %w: %.400s", name, err, out)
+	}
+	return nil
+}
