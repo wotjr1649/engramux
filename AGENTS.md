@@ -112,6 +112,14 @@ bytes, error identity via `errors.Is`, observable state change.
 **Evidence.** Never write that a check passed unless you ran it and saw it pass. Self-review is not
 evidence.
 
+**Where work lands.** `main` takes documentation, measurements, spec and backlog changes, and
+test-only work — anything self-contained that does not change what the binary does. Anything that
+changes product behaviour or removes a component gets **a branch per plan step**, named for the
+step, merged with `--no-ff`. The merge commit is the point: this repository has none, which is
+exactly why "what did that step change" is not a question its history can answer. Deciding once at
+the start of a session is not enough — the same session that opens with a backlog row can turn into
+a feature port, and that is when the branch is owed.
+
 ## What will bite you
 
 Most of these are observations against pinned dependency and toolchain versions, not laws. On a
