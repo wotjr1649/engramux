@@ -285,7 +285,7 @@ func TestAnEventSpooledWhileDownIsDrainedAtStartup(t *testing.T) {
 	raw, want := sessionEndFixture(t)
 
 	// Nothing is listening, so the relay spools.
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 	relay(t, local, raw)
 	spooled := spooledID(t, spoolDirOf(local))
 
@@ -706,7 +706,7 @@ func TestRegisterAndUnregisterFromTheCommandLine(t *testing.T) {
 func TestThirtyConcurrentStartsLeaveOneService(t *testing.T) {
 	const n = 30
 	local := t.TempDir()
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 
 	type instance struct {
 		cmd *exec.Cmd

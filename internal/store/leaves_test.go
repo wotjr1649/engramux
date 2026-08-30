@@ -200,15 +200,7 @@ func TestTheTokenizerReadsBothIllFormedShapesTheSameWay(t *testing.T) {
 
 	rowids := make([]int64, len(spellings))
 	for i, sp := range spellings {
-		id := fmt.Sprintf("tok-%d", i)
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (id, project_id, session_id, host, source, event_name,
-			                    payload, leaves, privacy_class, redaction_version, received_at)
-			VALUES (?, ?, ?, 'codex', 'pipe', 'PostToolUse', '{}', ?, '', ?, ?)`,
-			id, seedProject, seedSession, sp.leaves, int64(secret.Version), int64(3000+i)); err != nil {
-			t.Fatalf("INSERT %s: %v", sp.name, err)
-		}
-		rowids[i] = rowidOf(t, db, id)
+		rowids[i] = insertSeededLeaves(t, db, fmt.Sprintf("tok-%d", i), sp.leaves, int64(3000+i))
 	}
 
 	// fts5vocab reads the index, so this reports the tokens FTS5 actually
@@ -559,6 +551,28 @@ func TestTheTwoWalksAgree(t *testing.T) {
 	if compared != len(want)+1 { // +1 for seed's own events row
 		t.Fatalf("compared %d rows, want %d", compared, len(want)+1)
 	}
+}
+
+// insertSeededLeaves writes one events row whose leaves column is exactly what
+// the caller hands it, and returns the rowid the index will have used. The
+// payload is `{}` on purpose: a test about what FTS5 tokenized has no business
+// depending on what the leaves walk would have extracted.
+//
+// It exists because two tests wrote the same eleven-column INSERT and differed
+// only in the id prefix and the received_at - and received_at is a parameter
+// rather than derived from the id, because both callers need their rows
+// distinctly ordered and a tie is settled by rowid rather than by anything the
+// test says.
+func insertSeededLeaves(t *testing.T, db *sql.DB, id, leaves string, receivedAt int64) int64 {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `
+		INSERT INTO events (id, project_id, session_id, host, source, event_name,
+		                    payload, leaves, privacy_class, redaction_version, received_at)
+		VALUES (?, ?, ?, 'codex', 'pipe', 'PostToolUse', '{}', ?, '', ?, ?)`,
+		id, seedProject, seedSession, leaves, int64(secret.Version), receivedAt); err != nil {
+		t.Fatalf("INSERT %s: %v", id, err)
+	}
+	return rowidOf(t, db, id)
 }
 
 // insertAtVersionOne writes one events row directly, because at version 1 there

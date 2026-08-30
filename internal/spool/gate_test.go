@@ -12,13 +12,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 	"github.com/wotjr1649/engramux/internal/pipe"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/secret/secrettest"
@@ -245,7 +245,7 @@ func gateBothDeliveryPathsStoreTheSameBytes(t *testing.T, db *sql.DB) {
 // development service holds the real name.
 func useTestPipeName(t *testing.T) {
 	t.Helper()
-	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+	ipctest.Use(t)
 }
 
 // buildRelay compiles the relay to a path this test owns. It is the shipped

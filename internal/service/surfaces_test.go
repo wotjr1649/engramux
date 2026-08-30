@@ -43,7 +43,7 @@ import (
 // run published - the production wiring end to end, and the only place in the
 // suite where both surfaces of one service are driven at once.
 func TestBothSurfacesShareOneReadGate(t *testing.T) {
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 	dir := t.TempDir()
 
 	// Set before Run starts, and that ordering is the point rather than
@@ -65,7 +65,7 @@ func TestBothSurfacesShareOneReadGate(t *testing.T) {
 	// The shutdown is a cleanup rather than a line at the end, because every
 	// assertion below can end the test before that line: a Fatalf would
 	// otherwise leave this service listening on the pipe for the rest of the
-	// package, and the next test's requirePipeFree would fail with a message
+	// package, and the next test's claimAFreePipeName would fail with a message
 	// about a leaked listener rather than about the failure that caused it.
 	stop := running(t, dir)
 	t.Cleanup(func() {

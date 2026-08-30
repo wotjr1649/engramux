@@ -3,6 +3,7 @@ package search_test
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -318,4 +319,84 @@ func porterIndex(t testing.TB, db *sql.DB) string {
 	}
 	rebuild(t, db, porterTable)
 	return porterTable
+}
+
+// gluedHangul matches a Hangul run with a digit or Latin letter immediately in
+// front of it, which is the shape [atTokenStart] passes over: unicode61 opens
+// no token at the Hangul, so no prefix query reaches it however the index is
+// built.
+var gluedHangul = regexp.MustCompile(`[0-9A-Za-z][\x{AC00}-\x{D7A3}]{2,}`)
+
+// hangulRunAnywhere matches a Hangul run wherever it stands.
+var hangulRunAnywhere = regexp.MustCompile(`[\x{AC00}-\x{D7A3}]{2,}`)
+
+// TestHowMuchKoreanIsOutOfReach reports, over the real corpus, how much Hangul
+// no prefix query can reach - and it reports rather than gates, deliberately.
+//
+// # Why this is not a sixth class
+//
+// [TestEveryCandidateDocumentIsReachable] answers 2,262 of 2,262: every
+// candidate document of every class is already found. So nothing that widens
+// the index can improve those five classes, and a proposal to segment the
+// indexed text at script boundaries - `Codex는` indexed also as `Codex 는`,
+// `2단계를` also as `2 단계를` - cannot be justified by them. It is a NEW
+// capability, not a repair, and this test is what sizes it.
+//
+// A sixth gate class would be the wrong shape twice over. Its want would have
+// to be 1.0 like the others, and it would fail on every run until the index
+// changed, which is a red suite rather than a measurement; and [atTokenStart]'s
+// own comment already rules the shape out - "a class that cannot pass however
+// the index is built gates nothing". Reporting is the honest form, and it is
+// the form the rank figures beside it already take.
+//
+// # What the numbers mean
+//
+// Two are reported and only the second bounds anything. `documents carrying a
+// glued run` is how many documents hold at least one such run anywhere. `no
+// free Hangul at all` is how many of those hold no unglued Hangul run either,
+// and that is the bound: a document in the first group but not the second is
+// still reachable through its other Korean text, so segmenting would change
+// which query finds it and not whether it can be found.
+//
+// Measured 2026-08-30 over the 901-document corpus: 84 documents carry a glued
+// run, and 0 of them are without free Hangul. Spec 7.1 carries the reading.
+//
+//	go test -p 1 -count=1 -run TestHowMuchKoreanIsOutOfReach -v ./internal/search/
+func TestHowMuchKoreanIsOutOfReach(t *testing.T) {
+	docs := corpusDocs(t) // skips when .capture/ is absent
+
+	var glued, gluedAndNoFree int
+	for _, d := range docs {
+		var hasGlued, hasFree bool
+		for _, leaf := range d.leaves {
+			if gluedHangul.MatchString(leaf) {
+				hasGlued = true
+			}
+			for _, tok := range strings.Fields(leaf) {
+				tok = strings.TrimRightFunc(tok, func(r rune) bool { return !tokenChar(r) })
+				if m := hangulRunAnywhere.FindStringIndex(tok); m != nil && atTokenStart(tok, m[0]) {
+					hasFree = true
+				}
+			}
+		}
+		if hasGlued {
+			glued++
+			if !hasFree {
+				gluedAndNoFree++
+			}
+		}
+	}
+
+	t.Logf("of %d documents: %d carry a Hangul run no prefix query reaches; %d of those carry no reachable Hangul at all",
+		len(docs), glued, gluedAndNoFree)
+
+	// The premise, not the result: a corpus with no glued run at all would
+	// make this test report zero and mean nothing, and that is exactly how
+	// spec 5.7's Population B table lost its evidence once already.
+	if glued == 0 {
+		t.Fatal("no document carries a glued Hangul run, so this measures nothing on this corpus")
+	}
+	if gluedAndNoFree > glued {
+		t.Fatalf("%d of %d is not a subset", gluedAndNoFree, glued)
+	}
 }

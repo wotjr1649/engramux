@@ -5,10 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -16,6 +14,7 @@ import (
 	"github.com/Microsoft/go-winio"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 	"github.com/wotjr1649/engramux/internal/spool"
 	"github.com/wotjr1649/engramux/internal/store"
 )
@@ -40,7 +39,7 @@ import (
 // that has been deleted.
 func running(t *testing.T, dir string) (stop func() error) {
 	t.Helper()
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 
 	previous := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(previous) })
@@ -150,21 +149,21 @@ func pipeName(t *testing.T) string {
 // the real one is no longer in the way. It sets nothing else: the DACL is
 // still the real user's.
 //
-// It is called from requirePipeFree, which is the single gate every test here
+// It is called from claimAFreePipeName, which is the single gate every test here
 // that touches the pipe already goes through, and not from pipeName: pipeName
 // is called again after the listener exists, and re-deriving there would put a
 // second rule in the same place as the first.
 func useTestPipeName(t *testing.T) {
 	t.Helper()
-	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+	ipctest.Use(t)
 }
 
-// requirePipeFree claims the test's own pipe name and checks nothing answers
+// claimAFreePipeName claims the test's own pipe name and checks nothing answers
 // on it yet. After the override it is no longer about the development
 // service: what it catches is a listener an earlier test in this binary
 // leaked, or two copies of this binary sharing a process id, neither of which
 // any other assertion here would name.
-func requirePipeFree(t *testing.T) {
+func claimAFreePipeName(t *testing.T) {
 	t.Helper()
 	useTestPipeName(t)
 	if dialOK(t) {
@@ -225,7 +224,7 @@ func TestAFailedMigrationStopsStartup(t *testing.T) {
 		t.Fatalf("close the seed: %v", err)
 	}
 
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 	previous := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(previous) })
 

@@ -9,13 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/Microsoft/go-winio"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/secret/secrettest"
 	"github.com/wotjr1649/engramux/internal/store"
@@ -93,7 +93,7 @@ type running struct {
 // steer the spool with.
 func start(t *testing.T, local string) *running {
 	t.Helper()
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 
 	// One buffer for both streams, read only after the process has exited:
 	// os/exec copies into it on its own goroutine, so reading it while the
@@ -266,21 +266,21 @@ func pipeName(t *testing.T) string {
 // relay and the CLI all meet on the same name.
 //
 // It is called from every helper that launches a process - start through
-// requirePipeFree, plus relay and cli - and never from pipeName: pipeName is
+// claimAFreePipeName, plus relay and cli - and never from pipeName: pipeName is
 // also called inside subtests, whose t.Name() is not the parent's, and a
 // subtest that re-derived the name would dial a pipe the service its parent
 // started never listened on.
 func useTestPipeName(t *testing.T) {
 	t.Helper()
-	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+	ipctest.Use(t)
 }
 
-// requirePipeFree claims this test's pipe name and fails with the one
+// claimAFreePipeName claims this test's pipe name and fails with the one
 // diagnosis that matters when nothing answers there yet is wrong: something
 // else owns the name and nothing here can. Since the name is the test's own,
 // that something is a listener an earlier test leaked or a second copy of this
 // binary sharing a process id - not the development service.
-func requirePipeFree(t *testing.T) {
+func claimAFreePipeName(t *testing.T) {
 	t.Helper()
 	useTestPipeName(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)

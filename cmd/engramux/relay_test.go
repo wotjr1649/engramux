@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 	"github.com/wotjr1649/engramux/internal/pipe"
 )
 
@@ -255,7 +255,7 @@ func currentSID(t testing.TB) string {
 // leave the spool assertions failing for a reason that is not about the relay.
 func useTestPipeName(t testing.TB) {
 	t.Helper()
-	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+	ipctest.Use(t)
 }
 
 // relayPipeName is the name the relay dials. It is derived, not configurable -
@@ -476,7 +476,7 @@ func uuidV7(id string) error {
 // immediately - winio.DialPipeContext only retries ERROR_PIPE_BUSY, and a
 // missing pipe is not that, which is the behaviour the relay wants.
 func TestNoServiceListening(t *testing.T) {
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 	in := payload(t)
 
 	res := run(t, relayBin, in)
@@ -491,11 +491,11 @@ func TestNoServiceListening(t *testing.T) {
 	}
 }
 
-// requirePipeFree claims this test's pipe name and checks nothing answers on
+// claimAFreePipeName claims this test's pipe name and checks nothing answers on
 // it. It is no longer about the development service - the name is this test's
 // own - so what it catches is a listener an earlier test leaked, which is the
 // one thing that would make "the relay spooled" mean nothing.
-func requirePipeFree(t *testing.T) {
+func claimAFreePipeName(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
@@ -664,7 +664,7 @@ func TestPanicExitsZeroAndSpools(t *testing.T) {
 // undelivered-event path: nothing is listening, settle decides to spool, and
 // the write is what panics.
 func TestPanicWhileSettlingExitsZero(t *testing.T) {
-	requirePipeFree(t)
+	claimAFreePipeName(t)
 	in := payload(t)
 
 	res := run(t, settlePanicBin, in)

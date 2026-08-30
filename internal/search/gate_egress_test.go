@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/secret/secrettest"
 	"github.com/wotjr1649/engramux/internal/service"
@@ -271,7 +270,7 @@ func runService(t *testing.T, dir string) (stop func() error) {
 // not in the way. It is process-wide, so this test cannot be parallel.
 func useTestPipeName(t *testing.T) {
 	t.Helper()
-	t.Setenv(ipc.TestPipeSIDEnv, "engramux-test-"+strconv.Itoa(os.Getpid())+"-"+t.Name())
+	ipctest.Use(t)
 }
 
 func pipeName(t *testing.T) string {

@@ -3,7 +3,6 @@ package pipe
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/user"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/ipc/ipctest"
 )
 
 // currentSID is the SID every test builds its DACL from. A fabricated SID is
@@ -35,7 +35,7 @@ func currentSID(t *testing.T) string {
 // running copy of this binary derives the same name.
 func testSID(t *testing.T) string {
 	t.Helper()
-	return "engramux-test-" + strconv.Itoa(os.Getpid()) + "-" + t.Name()
+	return ipctest.SID(t)
 }
 
 // uniquePipeName derives a pipe name no other test in this binary uses, and
@@ -129,7 +129,7 @@ func TestSecondListenerOnTheSameNameIsRefused(t *testing.T) {
 func TestDifferentNamesBothSucceed(t *testing.T) {
 	sid := currentSID(t)
 	for i := range 2 {
-		name := ipc.PipeName(fmt.Sprintf("engramux-test-%d-%s-%d", os.Getpid(), t.Name(), i))
+		name := ipc.PipeName(ipctest.SID(t) + "-" + strconv.Itoa(i))
 		l, err := Listen(name, sid)
 		if err != nil {
 			t.Fatalf("Listen(%s): %v", name, err)

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
-	"github.com/wotjr1649/engramux/internal/secret"
 )
 
 // sqliteCorruptVTab is SQLITE_CORRUPT_VTAB, `SQLITE_CORRUPT | (1<<8)`. It is
@@ -168,7 +167,6 @@ func TestTheIntegrityCheckPassesOnAFreshlyIndexedDatabase(t *testing.T) {
 // the join. The third row is the control that says the phrase query is doing
 // anything at all.
 func TestANewlineIsNotAPhraseBoundary(t *testing.T) {
-	ctx := t.Context()
 	db := migrated(t)
 	seed(t, db)
 
@@ -181,15 +179,7 @@ func TestANewlineIsNotAPhraseBoundary(t *testing.T) {
 	}
 	rowids := make([]int64, len(rows))
 	for i, r := range rows {
-		id := fmt.Sprintf("phrase-%d", i)
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (id, project_id, session_id, host, source, event_name,
-			                    payload, leaves, privacy_class, redaction_version, received_at)
-			VALUES (?, ?, ?, 'codex', 'pipe', 'PostToolUse', '{}', ?, '', ?, ?)`,
-			id, seedProject, seedSession, r.leaves, int64(secret.Version), int64(4000+i)); err != nil {
-			t.Fatalf("INSERT %s: %v", r.name, err)
-		}
-		rowids[i] = rowidOf(t, db, id)
+		rowids[i] = insertSeededLeaves(t, db, fmt.Sprintf("phrase-%d", i), r.leaves, int64(4000+i))
 	}
 	separated := []int64{rowids[1], rowids[2], rowids[3]}
 	spanned := []int64{rowids[1], rowids[2]}

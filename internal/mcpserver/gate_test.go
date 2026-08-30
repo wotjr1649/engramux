@@ -410,3 +410,79 @@ func stubHandler() pipe.Handler {
 // stubEventID is the one id [stubHandler]'s get_event knows, so a test can tell
 // "found" from "no such event" without a database.
 const stubEventID = "0198f2a0-0000-7000-8000-00000000beef"
+
+// discoverBody is one `server/discover` request, which is what an MCP
+// 2026-07-28 client sends. `initialize` is the LEGACY handshake in that
+// revision - SEP-2575 removed it - and the SDK caps the legacy path at
+// 2025-11-25 whatever the server supports, so an initialize reply cannot
+// answer the question this test asks.
+//
+// The three `_meta` fields and the two headers are all required: omit
+// clientCapabilities and the SDK answers -32602, omit Mcp-Method and it
+// answers -32020, omit both headers and it answers -32601 method-not-found,
+// which reads like the server does not implement server/discover at all. It
+// does. Measured, in that order.
+const discoverBody = `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":` +
+	`{"io.modelcontextprotocol/protocolVersion":"2026-07-28",` +
+	`"io.modelcontextprotocol/clientInfo":{"name":"engramux-gate","version":"1"},` +
+	`"io.modelcontextprotocol/clientCapabilities":{}}}}`
+
+// TestTheServerOffersTheRevisionsItActuallyOffers pins what `server/discover`
+// advertises, because spec 5.9 reasons from a revision nobody had measured.
+//
+// §5.9 says "stdio and Streamable HTTP are the only transports MCP revision
+// 2026-07-28 binds" and [requireBearer]'s comment decides the challenge-header
+// question from that same revision's authorization rules. Both read as though
+// this server speaks it. **It does not**, and the exact list below is why:
+// 2026-07-28 is absent, and the highest revision offered is 2025-11-25.
+//
+// The cause is one field. [mcp.NewStreamableHTTPHandler] is given nil options
+// in [guard], so [mcp.StreamableHTTPOptions.Stateless] is false, and measured
+// against a bare SDK server with that single field flipped the list gains
+// "2026-07-28" at its head and changes in no other way. Setting it is a change
+// to shipped source and therefore a rebuild, so it is a backlog row rather
+// than a patch here.
+//
+// This test asserts the list as it is rather than as §5.9 imagines it. That is
+// deliberate: a gap nothing asserts is a gap that drifts, and when the field is
+// set this test fails and says exactly what changed.
+func TestTheServerOffersTheRevisionsItActuallyOffers(t *testing.T) {
+	endpoint, token := serveForTest(t, stubHandler())
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(discoverBody))
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Mcp-Protocol-Version", "2026-07-28")
+	req.Header.Set("Mcp-Method", "server/discover")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send the request: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if err != nil {
+		t.Fatalf("read the response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("server/discover: status %d, want 200\n%s", resp.StatusCode, body)
+	}
+
+	// The body is an SSE frame, so the JSON is the `data: ` line. Compared as
+	// a substring rather than parsed: what is under test is the exact list in
+	// the exact order, and unmarshalling into a slice would let a reordering
+	// pass that a client's "highest mutually supported" walk would not.
+	const want = `"supportedVersions":["2025-11-25","2025-06-18","2025-03-26","2024-11-05"]`
+	if !strings.Contains(string(body), want) {
+		t.Errorf("server/discover did not advertise the measured revision list.\nwant substring: %s\ngot body: %s",
+			want, body)
+	}
+	if strings.Contains(string(body), `"2026-07-28"`) {
+		t.Errorf("server/discover now offers 2026-07-28 - StreamableHTTPOptions.Stateless was set, " +
+			"which is the backlog row. Update spec 5.9 and this test together.")
+	}
+}
