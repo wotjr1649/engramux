@@ -191,6 +191,30 @@ func TestDoctorTellsAFreshMachineToInstall(t *testing.T) {
 			t.Errorf("the fresh-machine answer still prints %q:\n%s", section, text)
 		}
 	}
+
+	// And it is masked, through runDoctor rather than through a report a test
+	// built. Nothing else in this package reaches the flag parsing, so
+	// without this a runDoctor that ignored the flag and always printed the
+	// real values would pass every test here - measured, in a break-it pass
+	// that only the gate one process out caught.
+	if !strings.Contains(dir, `\Users\`) {
+		t.Skipf("the temporary directory %q is not under a user profile, so masking it proves nothing", dir)
+	}
+	if strings.Contains(text, dir) {
+		t.Errorf("the default printed an unmasked user path:\n%s", text)
+	}
+	if !strings.Contains(text, "[redacted-user-path]") {
+		t.Errorf("nothing in the default output was masked:\n%s", text)
+	}
+
+	// --full is the only thing that prints it whole.
+	var fullOut bytes.Buffer
+	if code := runDoctor(&fullOut, []string{`\Engramux-Doctor-Test-` + filepath.Base(dir), "--full"}); code != 1 {
+		t.Errorf("--full changed the exit code to %d, want 1", code)
+	}
+	if !strings.Contains(fullOut.String(), dir) {
+		t.Error("--full did not print the real paths")
+	}
 }
 
 // TestDoctorMasksTheDatabasePathAndTheSIDUnlessFullIsGiven.
