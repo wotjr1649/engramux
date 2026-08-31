@@ -81,32 +81,62 @@ func installOptions(apply bool, args []string) (host.Options, error) {
 // alternative is a guard about the running binary's own location that nothing
 // can ever exercise.
 func resolveOptions(self, local, home string, apply bool, args []string) (host.Options, error) {
-	if local == "" {
-		return host.Options{}, errors.New("LOCALAPPDATA is not set, so the data directory cannot be located")
+	opt, err := resolvePaths(local, home, args)
+	if err != nil {
+		return host.Options{}, err
 	}
-	data := filepath.Join(local, "engramux")
-	bin := filepath.Join(data, "bin")
-	source := filepath.Dir(self)
+	opt.SourceDir = filepath.Dir(self)
+	opt.Apply = apply
 
 	// Running the installed copy would ask it to overwrite itself, which
 	// Windows refuses for a mapped image anyway - but it refuses it as a
 	// sharing violation on a destination, several steps in, which reads like
 	// the service is running. Saying it here is the difference between a
 	// diagnosis and a puzzle.
-	if filepath.Clean(source) == filepath.Clean(bin) {
-		return host.Options{}, fmt.Errorf("this is the installed copy in %s; run the one you unpacked or built", bin)
+	//
+	// It is here and not in [resolvePaths] because it is a rule about
+	// copying, and `doctor` does not copy: run from the installed directory
+	// is where `doctor` is most usefully run, not where it is refused.
+	if filepath.Clean(opt.SourceDir) == filepath.Clean(opt.BinDir) {
+		return host.Options{}, fmt.Errorf("this is the installed copy in %s; run the one you unpacked or built", opt.BinDir)
 	}
+	return opt, nil
+}
+
+// resolvePaths is every path an installation touches except the directory it
+// copies FROM, which is the only one that depends on where the running binary
+// happens to be.
+//
+// It is separate so that `doctor` reads the same answers from the same code.
+// M-6 asks `doctor` to check the eleven hook entries against the installed
+// relay, and a `doctor` that derived that path on its own would be checking
+// them against a file `install` might not have written - two spellings of one
+// definition, drifting the first time either moves.
+func resolvePaths(local, home string, args []string) (host.Options, error) {
+	if local == "" {
+		return host.Options{}, errors.New("LOCALAPPDATA is not set, so the data directory cannot be located")
+	}
+	data := filepath.Join(local, "engramux")
 
 	return host.Options{
-		SourceDir:   source,
-		BinDir:      bin,
+		BinDir:      filepath.Join(data, "bin"),
 		ClaudePath:  envOr("ENGRAMUX_CLAUDE_SETTINGS", filepath.Join(home, ".claude", "settings.json")),
 		CodexHooks:  envOr("ENGRAMUX_CODEX_HOOKS", filepath.Join(home, ".codex", "hooks.json")),
 		CodexConfig: envOr("ENGRAMUX_CODEX_CONFIG", filepath.Join(home, ".codex", "config.toml")),
 		MCPJSON:     filepath.Join(data, "mcp.json"),
 		TaskName:    taskName(withoutFlags(args)),
-		Apply:       apply,
 	}, nil
+}
+
+// currentPaths is [resolvePaths] reading this process's own environment. It is
+// what `doctor` calls; `install` goes through [installOptions], which needs the
+// running binary's directory as well.
+func currentPaths(args []string) (host.Options, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return host.Options{}, fmt.Errorf("locate the home directory: %w", err)
+	}
+	return resolvePaths(os.Getenv("LOCALAPPDATA"), home, args)
 }
 
 // envOr is the override seam the tests use. The three host files are the only

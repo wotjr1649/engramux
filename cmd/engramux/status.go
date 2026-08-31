@@ -44,7 +44,7 @@ func cli(args []string) int {
 		return unregister(args[1:])
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux install [--apply] [--remove] | status | cells | doctor | search | event | sessions | register | unregister")
+		warn("usage: engramux install [--apply] [--remove] | status | cells | doctor [--full] | search | event | sessions | register | unregister")
 		return 2
 	}
 }
