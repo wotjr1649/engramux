@@ -20,8 +20,9 @@ AGENTS.md applies to its own "What will bite you" table.
 | 17 | EventName truncation | Carries no marker, so a shortened name is indistinguishable from a real 64-rune one. A client that needs to know needs a flag on the hit, not a suffix |
 
 **Every row left needs a build.** The soak window closed all fifteen that did not, so what remains
-is exactly the Step 1 and Step 2 queue of `plans/2026-08-30-after-phase-6.md`. A row appearing here
-that does *not* need a build is now a sign that something was filed rather than done.
+was exactly the Step 1 and Step 2 queue of `plans/2026-08-30-after-phase-6.md` until the soak filed
+**34**, which needs a build and belongs to no step — and that gap is the whole of the row. A row
+appearing here that does *not* need a build is now a sign that something was filed rather than done.
 
 **13, 14, 21, 10, 15, 1, 2, 12 and 19 closed in the second soak-window pass.** 13's mutation is the
 one worth carrying: the depth guard's `return ""` was changed to return what the walk had already
@@ -78,4 +79,13 @@ this file's own rule the list is gone. Spec 8's Phase 5 row names the tests that
 | 32 | `internal/ipc/envelope.go:17`, `internal/pipe/serve.go:395` | **`ipc.Drain` is a declared request type with no handler**, and `pipe.Handler` has no field for one — `serve.go`'s `default:` branch names it as the read this build does not implement. §5.5's upgrade procedure is "drain, stop, replace, start" and **step 1 has no wire path**; the only drain is the service's own 30-second timer. **Decided 2026-08-30: withdraw the drain step from §5.5 and remove the `ipc.Drain` constant with it.** The spool is durable and `service.go:242` drains at every start - the log's `replayed spooled events` line on each start is the evidence - so a stop without a drain loses nothing and the promise was never needed. Needs a build |
 | 33 | `internal/ipc/search.go:101` | **A search reply carries hits and no total, so the product cannot count its own corpus.** Found while trying to measure how often a model calls the engramux MCP tools unprompted: `.capture/` holds 714 tool calls and 0 MCP calls of any server, but that corpus predates the MCP server and therefore measures nothing about the question; the live database is the right population and there is no way to ask it "how many". `search` returns at most 100 hits with no match count, and `status`/`cells` count by `(host, event_name)` rather than by tool. One `count(*)` beside the existing MATCH closes it, and it closes a second thing with it: `no results` today means an empty corpus, a wrong project, an intersection that emptied, and a genuinely absent term, all in the same two words. Needs a build |
 | 28 | `mcp.json` **and both host configuration files** | **The bearer token sits in three files whose DACLs are all inherited.** Measured (spec 7.1) on `mcp.json`: every ACE is `(I)`, Go's `f.Chmod(0o600)` writes nothing to it, and on the machine measured a machine-local group holds `(RX)`. The installer then copies the same token into `~/.codex/config.toml` and Claude Code's user configuration, whose permissions this product does not set at all - and the token is sticky, so all three copies are long-lived rather than per-start. Spec 5.9 accepts the exposure, because the token is the whole of the control at that transport either way. Narrowing `mcp.json` is a change of its own: a security descriptor built with `golang.org/x/sys/windows` and passed to `CreateFile`, which is a different atomic-write path from `os.CreateTemp` plus rename. `internal/pipe`'s listener already builds a DACL, so there is a pattern to reuse. Narrowing the other two is not this product's to do |
+
+## Raised by the Phase 6 soak
+
+The soak is the only instrument that runs the shipped binary for days against a database that keeps
+growing, so what it raises is what no test's fixture is large enough to reach.
+
+| # | Where | What |
+|---|---|---|
+| 34 | `internal/store/migrations/00001_schema.sql:78`, `internal/service/service.go:598` | **`events` carries no index but the primary key's, so a status reply's `GROUP BY host, event_name` is a full scan of a table whose `payload` and `leaves` share its b-tree.** `CREATE INDEX` appears nowhere in the migrations and `events` declares no `UNIQUE`, so the grouping has nothing to use and the cost is the size of the file rather than the ~30 rows it returns. `internal/service/gate.go` already carries the reasoning and already states the missing index as unfixed; what this row adds is that **nothing schedules it**. Step 1 of `plans/2026-08-30-after-phase-6.md` is scoped to touch no schema, Steps 3 and 4 carry migrations for other reasons, and a code comment schedules nothing. The soak produced both of its surfaces at once — six refused `status` reads and one reply write to a closed pipe — and the soak row holds what they were. Whether to add the index is §7.1's decision and which step it lands in is the plan's; neither is this file's |
 
