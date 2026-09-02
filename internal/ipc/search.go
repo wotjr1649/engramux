@@ -133,6 +133,13 @@ type SearchHit struct {
 	// bounded, in that order (I-10, spec 5.9) - the bound is about what fits
 	// a frame, and masking is about what may leave the machine.
 	EventName string `json:"event_name"`
+	// EventNameTruncated is true when EventName is the leading part of a
+	// longer name the bound cut (backlog 17). Absent otherwise, so a hit
+	// whose name was whole is the document it always was. It is the only
+	// way a reader can tell a cut name from a real one of exactly the
+	// bound's length; there is no marker inside the string, because a
+	// marker would be a character the name might legitimately end with.
+	EventNameTruncated bool `json:"event_name_truncated,omitempty"`
 	// ReceivedAtMS is events.received_at - milliseconds since the Unix
 	// epoch, the same clock [Cell] reports.
 	ReceivedAtMS int64 `json:"received_at_ms"`

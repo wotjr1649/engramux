@@ -122,6 +122,9 @@ type EventDocument struct {
 	// EventName is events.event_name, masked and bounded exactly as
 	// [SearchHit.EventName] is, and for the same reasons.
 	EventName string `json:"event_name"`
+	// EventNameTruncated says the bound cut EventName, exactly as
+	// [SearchHit.EventNameTruncated] does.
+	EventNameTruncated bool `json:"event_name_truncated,omitempty"`
 	// SessionID is events.session_id: spec 6's host-joined-to-host-session
 	// identity, which is what [Session.ID] carries.
 	SessionID string `json:"session_id"`

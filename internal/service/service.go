@@ -530,16 +530,18 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	}
 	out := make([]ipc.SearchHit, len(hits))
 	for i, h := range hits {
+		name, cut := truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes)
 		out[i] = ipc.SearchHit{
 			// The same untrusted column [getEvent] masks, reaching the
 			// same wire by a different reply (backlog 29). A real id is
 			// unchanged by it, so the id a model hands back to get_event
 			// is still the one that was stored.
-			ID:           secret.MaskString(h.ID),
-			Host:         h.Host,
-			EventName:    truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes),
-			ReceivedAtMS: h.ReceivedAtMS,
-			Excerpt:      h.Excerpt,
+			ID:                 secret.MaskString(h.ID),
+			Host:               h.Host,
+			EventName:          name,
+			EventNameTruncated: cut,
+			ReceivedAtMS:       h.ReceivedAtMS,
+			Excerpt:            h.Excerpt,
 		}
 	}
 	return ipc.SearchReply{Hits: out, Total: total}, nil
@@ -553,21 +555,28 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 // fail at ipc.WriteFrame - which the CLI can only report as a failed read - and
 // would put the same megabytes in an MCP response, which has no frame to refuse
 // it (see [cells]). A shortened name is a worse answer than the real one and a
-// much better one than no answer at all.
+// much better one than no answer at all, and since backlog 17 the reply says
+// which it is.
 //
-// 64 is what the CLI prints: `engramux search` formats the name with %.64q,
-// which truncates its input to 64 runes, so nothing past this ever reached a
-// person anyway. A client that wants the whole name is what would move this.
-const maxEventNameRunes = 64
+// 256 is a bound on the reply and not on what one client prints, which is what
+// backlog 16 asked for: the old value was the CLI's display width. Measured
+// over the 902 captures, the longest name either host has ever emitted is 17
+// runes (`PermissionRequest`), and both hosts draw their names from a fixed
+// list - so at fifteen times that, a real name is never cut and this exists
+// only for a payload that lies. At 4 bytes a rune worst case, 256 runes is 1
+// KiB per hit and 100 KiB across ipc.MaxSearchLimit hits, a fortieth of the 4
+// MiB frame and small beside the excerpts. `engramux search` and `event` cut
+// again for the terminal, to 64, with their own mark.
+const maxEventNameRunes = 256
 
-// truncateRunes cuts s to at most n runes. Runes and not bytes, so the cut
-// cannot land inside one and produce U+FFFD.
-func truncateRunes(s string, n int) string {
+// truncateRunes cuts s to at most n runes and says whether it did. Runes and
+// not bytes, so the cut cannot land inside one and produce U+FFFD.
+func truncateRunes(s string, n int) (string, bool) {
 	r := []rune(s)
 	if len(r) <= n {
-		return s
+		return s, false
 	}
-	return string(r[:n])
+	return string(r[:n]), true
 }
 
 // cells is the per-cell breakdown [ipc.Cell] documents: one row per distinct

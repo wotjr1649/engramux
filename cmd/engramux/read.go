@@ -62,8 +62,9 @@ func showEvent(args []string) int {
 // branch is the one that cannot be argued away rather than one that fires.
 func printEvent(e ipc.EventDocument) {
 	_, _ = fmt.Fprintf(os.Stdout,
-		"id        %q\nhost      %-11s\nevent     %.64q\nsession   %q\nreceived  %s\nprivacy   %q\npayload   %d bytes\n",
-		e.ID, e.Host, e.EventName, e.SessionID, stamp(e.ReceivedAtMS), e.PrivacyClass, e.PayloadBytes)
+		"id        %q\nhost      %-11s\nevent     %s\nsession   %q\nreceived  %s\nprivacy   %q\npayload   %d bytes\n",
+		e.ID, e.Host, cutName(e.EventName, e.EventNameTruncated), e.SessionID, stamp(e.ReceivedAtMS),
+		e.PrivacyClass, e.PayloadBytes)
 
 	if e.Payload == nil {
 		_, _ = fmt.Fprintf(os.Stdout,
