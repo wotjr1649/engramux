@@ -23,6 +23,10 @@ const (
 	GetEvent RequestType = "GetEvent"
 	// ListSessions lists one project's sessions.
 	ListSessions RequestType = "ListSessions"
+	// GetMemory reads one whole native memory item back, by id (memory spec
+	// rev.2, M-2 decision 9). It is the fifth tool and the first request
+	// type added since Step 1 withdrew Drain.
+	GetMemory RequestType = "GetMemory"
 )
 
 // Envelope is the JSON document a frame's payload holds. Payload is kept as

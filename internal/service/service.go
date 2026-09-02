@@ -360,6 +360,11 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 				return listSessions(ctx, db, req)
 			})
 		},
+		GetMemory: func(ctx context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.GetMemoryReply, error) {
+				return getMemory(ctx, db, req)
+			})
+		},
 	}
 }
 
@@ -592,12 +597,18 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	// project.FromArgument - which refuses "" as not absolute, and is right
 	// to for the two request types where a project is required.
 	var projectID string
+	var projectKeys []string
 	if req.Project != "" {
 		p, err := project.FromArgument(req.Project)
 		if err != nil {
 			return ipc.SearchReply{}, err
 		}
 		projectID = p.ID
+		// The memory index is scoped by the path the host wrote and not by
+		// the derived id, because the two hosts write different things and
+		// neither converts to the other without the filesystem (memory spec
+		// rev.2, M-2 decision 8).
+		projectKeys = memory.ProjectKeys(p.Root)
 	}
 	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit)
 	if err != nil {
@@ -619,7 +630,39 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 			Excerpt:            h.Excerpt,
 		}
 	}
-	return ipc.SearchReply{Hits: out, Total: total}, nil
+	// The second list, on the same query and the same limit. It is a second
+	// statement rather than a second call a caller has to make, which is what
+	// P4 means by one query - see ipc.MemoryHit for why it is a second list
+	// and not more of the first.
+	//
+	// A failure here fails the whole reply rather than answering half of it,
+	// on the rule [status] is under: a caller cannot tell an empty list that
+	// was read from one that was never filled in.
+	mem, memTotal, err := search.SearchMemory(ctx, db, req.Query, projectKeys, limit)
+	if err != nil {
+		return ipc.SearchReply{}, err
+	}
+	memOut := make([]ipc.MemoryHit, len(mem))
+	for i, h := range mem {
+		// Already masked by internal/search, which owns the whole memory
+		// read path - see search.SearchMemory for why the split the event
+		// path makes is not made here.
+		memOut[i] = ipc.MemoryHit{
+			ID:             h.ID,
+			Host:           h.Host,
+			Kind:           h.Kind,
+			SourcePath:     h.SourcePath,
+			Title:          h.Title,
+			HostModifiedMS: h.HostModifiedMS,
+			Excerpt:        h.Excerpt,
+		}
+	}
+	if len(memOut) == 0 {
+		// nil rather than an empty slice, so the omitempty tag holds and a
+		// machine with no native memory gets the document it always got.
+		memOut = nil
+	}
+	return ipc.SearchReply{Hits: out, Total: total, MemoryHits: memOut, MemoryTotal: memTotal}, nil
 }
 
 // maxEventNameRunes bounds events.event_name on the way onto the wire.

@@ -81,6 +81,7 @@ type SearchFunc func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchRepl
 type (
 	GetEventFunc     func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error)
 	ListSessionsFunc func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
+	GetMemoryFunc    func(ctx context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error)
 )
 
 // DoctorFunc answers a Doctor request. It takes no request document - the
@@ -113,6 +114,9 @@ type Handler struct {
 	// one. A nil field refuses that type, the same way.
 	GetEvent     GetEventFunc
 	ListSessions ListSessionsFunc
+	// GetMemory answers a GetMemory request, the fifth tool (memory spec
+	// rev.2, M-2 decision 9). A nil GetMemory refuses one, the same way.
+	GetMemory GetMemoryFunc
 	// Doctor answers a Doctor request. A nil Doctor refuses one, the same
 	// way.
 	Doctor DoctorFunc
@@ -369,6 +373,32 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		}
 		return b
 
+	case ipc.GetMemory:
+		if h.GetMemory == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no GetMemory handler")
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
+		}
+		var req ipc.GetMemoryRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			slog.WarnContext(ctx, "pipe: decode the get-memory request", "error", err)
+			return refuse(ctx, env.IngestID, err)
+		}
+		reply, err := h.GetMemory(ctx, req)
+		if err != nil {
+			// Neither the id nor the project is logged, on the
+			// GetEvent case's reasoning: both came off the wire and
+			// a log is an egress (I-10).
+			slog.ErrorContext(ctx, "pipe: get memory failed", "error", err)
+			return refuse(ctx, env.IngestID, err)
+		}
+		reply.Version, reply.Type = ipc.Version, ipc.GetMemory
+		b, err := json.Marshal(reply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode get-memory reply", "error", err)
+			return nil
+		}
+		return b
+
 	case ipc.ListSessions:
 		if h.ListSessions == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no ListSessions handler")
@@ -473,7 +503,7 @@ func validate(env ipc.Envelope) error {
 		if env.IngestID == "" {
 			return errIngestID
 		}
-	case ipc.Status, ipc.Doctor, ipc.Search, ipc.GetEvent, ipc.ListSessions:
+	case ipc.Status, ipc.Doctor, ipc.Search, ipc.GetEvent, ipc.ListSessions, ipc.GetMemory:
 	default:
 		// Bounded with a precision: the type is arbitrary bytes off the
 		// wire, capped only by ipc.MaxFrameLen, and this string reaches a

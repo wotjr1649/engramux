@@ -59,7 +59,7 @@ func search(args []string) int {
 	// Reached only after Verify, which is what makes "no hits" mean nothing
 	// matched. A rejected ACK decodes into a reply with no hits too, and
 	// printing this for one would report an empty index as an empty result.
-	if len(reply.Hits) == 0 {
+	if len(reply.Hits) == 0 && len(reply.MemoryHits) == 0 {
 		// Stdout, because this is the CLI path and a person asked for
 		// it. The relay's silence on stdout (spec 4.5) is a rule about
 		// hook events.
@@ -91,7 +91,36 @@ func search(args []string) int {
 		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %s\n%.64q\n%q\n\n",
 			stamp(h.ReceivedAtMS), h.Host, cutName(h.EventName, h.EventNameTruncated), h.ID, h.Excerpt)
 	}
+
+	// The second list, printed under its own heading and never interleaved
+	// with the first (memory spec rev.2, M-2 decision 6). The two are ranked
+	// by separate indexes and their scores are not comparable, so a merged
+	// list would be putting them in an order that means nothing.
+	if len(reply.MemoryHits) == 0 {
+		return 0
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "%d of %d native memory matches\n\n",
+		len(reply.MemoryHits), reply.MemoryTotal)
+	for _, h := range reply.MemoryHits {
+		// Quoted on the same rule the event hits are: every one of these
+		// but the host came out of a file this program did not write, so
+		// a title carrying a terminal escape is a shape that can reach
+		// here. The timestamp is the host's own and may be absent, which
+		// is what "-" says.
+		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %s\n%.64q\n%q\n%q\n\n",
+			memoryStamp(h.HostModifiedMS), h.Host, h.Kind, h.ID, h.Title, h.Excerpt)
+	}
 	return 0
+}
+
+// memoryStamp is [stamp] for a host timestamp that may not exist. Zero means the
+// host wrote none - 1 of the 18 Claude Code notes read on 2026-09-02 carries no
+// modified key - and printing the epoch for it would be a date nobody wrote.
+func memoryStamp(ms int64) string {
+	if ms == 0 {
+		return strings.Repeat(" ", len(stamp(0)))
+	}
+	return stamp(ms)
 }
 
 // displayNameRunes is how much of an event name one line of this program's

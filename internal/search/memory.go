@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -97,6 +98,75 @@ func SearchMemory(ctx context.Context, db *sql.DB, text string, projectKeys []st
 		hits[i].Excerpt = excerptText(secret.MaskString(r.body), tokens)
 	}
 	return hits, total, nil
+}
+
+// / MemoryItem is one whole native memory item, already masked.
+//
+// It is the read behind get_memory, and it lives here rather than in
+// internal/store because this package owns the memory read path end to end -
+// the search half masks everything it returns, and splitting the read so that
+// half of it masked somewhere else is two conventions for one feature.
+type MemoryItem struct {
+	ID             string
+	Host           string
+	Kind           string
+	SourcePath     string
+	EntryKey       string
+	ProjectPath    string
+	Title          string
+	Body           string
+	PrivacyClass   string
+	HostModifiedMS int64
+}
+
+// GetMemoryItem reads one item by id, within projectKeys, or nil when the pair
+// matches no row.
+//
+// nil and an error are different answers: nil is "no such item in that scope",
+// which is the same answer as "no such item" and is deliberately not
+// distinguished from it - the same rule store.GetEvent follows, so that a caller
+// cannot use this to learn what exists in a project it did not ask about.
+//
+// An empty projectKeys is every project (memory spec rev.2, M-2 decision 9): a
+// memory item may belong to no project this database has a row for.
+func GetMemoryItem(ctx context.Context, db *sql.DB, id string, projectKeys []string) (*MemoryItem, error) {
+	query := `
+		SELECT id, host, kind, source_path, entry_key, project_path, title, body,
+		       privacy_class, host_modified_at
+		FROM memory_items
+		WHERE id = ?`
+	args := []any{id}
+	if len(projectKeys) > 0 {
+		query += `
+		  AND project_path IN (` + strings.TrimSuffix(strings.Repeat("?, ", len(projectKeys)), ", ") + `)`
+		for _, k := range projectKeys {
+			args = append(args, k)
+		}
+	}
+
+	var it MemoryItem
+	var mod sql.NullInt64
+	err := db.QueryRowContext(ctx, query, args...).Scan(&it.ID, &it.Host, &it.Kind,
+		&it.SourcePath, &it.EntryKey, &it.ProjectPath, &it.Title, &it.Body,
+		&it.PrivacyClass, &mod)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search: read a memory item: %w", err)
+	}
+	it.HostModifiedMS = mod.Int64
+
+	// Everything that came out of a file is masked, and the id is not: it is
+	// this build own derivation, 32 hex characters, and masking a value the
+	// caller has to hand back would break the round trip get_memory exists
+	// for.
+	it.SourcePath = secret.MaskString(it.SourcePath)
+	it.EntryKey = secret.MaskString(it.EntryKey)
+	it.ProjectPath = secret.MaskString(it.ProjectPath)
+	it.Title = secret.MaskString(it.Title)
+	it.Body = secret.MaskString(it.Body)
+	return &it, nil
 }
 
 // memoryMatchQuery builds the statement and its arguments.

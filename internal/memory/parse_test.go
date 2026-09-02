@@ -297,6 +297,47 @@ func TestACodexPathIsNormalisedPastTheExtendedLengthPrefix(t *testing.T) {
 	}
 }
 
+// / TestOnlyAKnownLabelIsStripped is a regression test for two defects the Phase 6
+// audit found, and both were the same failure: a credential surviving in the
+// indexed text because the parser had removed the context its rule matches on.
+//
+// A line reading `secret: <value>` is not a Codex field. Stripping the word
+// leaves the value bare, and the credential rule matches on exactly that word -
+// so the mask has nothing to find and the body goes into the index and out to a
+// caller. `postgres://user:pw@host` had the same shape one layer down: it parsed
+// as a label and a value, which removed the connection-string rule own prefix.
+func TestOnlyAKnownLabelIsStripped(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "raw_memories.md", `## a section
+cwd: D:\work\engramux
+secret: abcdefghijklmnop
+api_key: qrstuvwxyz012345
+postgres://someone:hunter2@db.internal/app
+task: keep this one
+`, Source{Host: HostCodex, Kind: KindCodexRaw})
+
+	items, _, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	body := items[len(items)-1].Body
+	for _, keep := range []string{"secret: abcdefghijklmnop", "api_key: qrstuvwxyz012345",
+		"postgres://someone:hunter2@db.internal/app"} {
+		if !strings.Contains(body, keep) {
+			t.Errorf("the body no longer carries %q whole; stripping that label is what removed\n"+
+				"the shape the mask matches on, and the value then reaches a reader bare", keep)
+		}
+	}
+	// The other half: a label that *is* a Codex field is still stripped, or
+	// this test would pass on a parser that stopped stripping anything.
+	if strings.Contains(body, "task:") || strings.Contains(body, "cwd:") {
+		t.Errorf("a known field label survived, so spec 5.7 rule about keys is not being applied")
+	}
+	if !strings.Contains(body, "keep this one") {
+		t.Errorf("a known field value was dropped with its label")
+	}
+}
+
 // TestProjectKeysAsksAboutBothFormsAProjectCanBeFiledUnder. The two hosts
 // identify a project differently and neither can be converted into the other
 // without the filesystem, so a scoped query asks about both. Encoding the

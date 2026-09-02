@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +62,58 @@ func TestAServiceIndexesTheMemoryItIsPointedAt(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("the index matched %d documents, want 1 - the collector did not run, or ran and indexed nothing", n)
+	}
+}
+
+// memoryIDLine finds the id the CLI printed for a memory hit: a quoted 32-hex
+// run, which is what memory.ItemID mints.
+var memoryIDLine = regexp.MustCompile(`"([0-9a-f]{32})"`)
+
+// TestTheCLIShowsNativeMemoryAndReadsOneBack is the whole of M-2 decision 9 end
+// to end, through the two binaries a person actually runs: one search reaches
+// both lists, and a memory hit's id round-trips to `engramux memory`.
+//
+// It is here rather than in cmd/engramux because only this package has a running
+// service to answer, and the id has to survive the pipe for the round trip to
+// mean anything.
+func TestTheCLIShowsNativeMemoryAndReadsOneBack(t *testing.T) {
+	local := t.TempDir()
+	codex := filepath.Join(local, "no-codex-home")
+	if err := os.MkdirAll(filepath.Join(codex, "memories"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for name, body := range map[string]string{
+		"MEMORY.md":       "# index\n",
+		"raw_memories.md": "## a section\nthe covering index came out of the soak\n",
+	} {
+		if err := os.WriteFile(filepath.Join(codex, "memories", name), []byte(body), 0o600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	start(t, local)
+
+	found := cliIn(t, local, "search", "covering")
+	if found.exit != 0 {
+		t.Fatalf("search exited %d: %s", found.exit, found.stderr)
+	}
+	if !strings.Contains(found.stdout, "native memory matches") {
+		t.Fatalf("the search printed no native memory list:\n%s", found.stdout)
+	}
+	m := memoryIDLine.FindStringSubmatch(found.stdout)
+	if m == nil {
+		t.Fatalf("the search printed no memory id:\n%s", found.stdout)
+	}
+
+	read := cliIn(t, local, "memory", m[1])
+	if read.exit != 0 {
+		t.Fatalf("memory exited %d: %s\n%s", read.exit, read.stderr, read.stdout)
+	}
+	if !strings.Contains(read.stdout, "the covering index came out of the soak") {
+		t.Fatalf("`engramux memory` did not print the body:\n%s", read.stdout)
+	}
+	// The id the search printed has to be the one the read answers to, or the
+	// round trip this test is about is passing on a coincidence.
+	if !strings.Contains(read.stdout, m[1]) {
+		t.Fatalf("the item read back carries a different id than the hit:\n%s", read.stdout)
 	}
 }

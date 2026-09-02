@@ -372,7 +372,7 @@ func listenOnce(t *testing.T, dir string) (endpoint, token string) {
 //
 // The transport clauses are about what reaches a handler, not about what a
 // handler answers, so a stub is the right thing here: a database would make
-// three tests about HTTP depend on a schema. The four tools are exercised
+// three tests about HTTP depend on a schema. The five tools are exercised
 // against real replies in tools_test.go, and against a real database in
 // internal/service.
 func stubHandler() pipe.Handler {
@@ -404,8 +404,22 @@ func stubHandler() pipe.Handler {
 				ID: "codex:1", Host: "codex", HostSessionID: "1", Status: "active", CreatedAtMS: 1,
 			}}}, nil
 		},
+		GetMemory: func(_ context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error) {
+			if req.ID != stubMemoryID {
+				return ipc.GetMemoryReply{}, nil
+			}
+			return ipc.GetMemoryReply{Item: &ipc.MemoryDocument{
+				ID: stubMemoryID, Host: "codex", Kind: "codex-raw",
+				SourcePath: "raw_memories.md", EntryKey: "a section",
+				Title: "one connection", Body: "one connection, held exclusively",
+				BodyBytes: 31, HostModifiedMS: 1,
+			}}, nil
+		},
 	}
 }
+
+// stubMemoryID is get_memory's equivalent of [stubEventID].
+const stubMemoryID = "0198f0c10198f0c10198f0c10198f0c1"
 
 // stubEventID is the one id [stubHandler]'s get_event knows, so a test can tell
 // "found" from "no such event" without a database.

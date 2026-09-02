@@ -34,6 +34,8 @@ func cli(args []string) int {
 		return search(args[1:])
 	case "event":
 		return showEvent(args[1:])
+	case "memory":
+		return showMemory(args[1:])
 	case "sessions":
 		return sessions(args[1:])
 	case "install":
@@ -44,7 +46,7 @@ func cli(args []string) int {
 		return unregister(args[1:])
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux install [--apply] [--remove] | status | cells | doctor [--full] | search | event | sessions | register | unregister")
+		warn("usage: engramux install [--apply] [--remove] | status | cells | doctor [--full] | search | event | memory | sessions | register | unregister")
 		return 2
 	}
 }

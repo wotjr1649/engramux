@@ -165,16 +165,41 @@ func parseClaudeNote(s Source, text string) ([]Item, []Warning, error) {
 }
 
 // codexFieldLine is a lowercase snake_case label at the start of a line, which is
-// how Codex writes every field it has: cwd, thread_id, updated_at, rollout_path,
-// git_branch, task, task_group, task_outcome, description, keywords,
-// rollout_summary_file. The label is dropped and the value kept, on spec 5.7's
-// rule about keys.
-//
-// The bound is deliberate and is where the measurement stops. Codex also writes
-// two capitalised prose labels on 55 of 55 rollout summaries, and those are left
-// alone: dropping a capitalised label risks eating a sentence, and 55 documents
-// out of about 200 is nothing like the 900 of 901 that made the rule.
+// the shape of every field Codex writes. The label is dropped and the value
+// kept, on spec 5.7's rule about keys.
 var codexFieldLine = regexp.MustCompile(`^([a-z][a-z0-9_]*):\s*(.*)$`)
+
+// codexKnownFields is the closed set of labels that are dropped, and being
+// closed is what makes it correct rather than tidy. These are the field names
+// read off the machine's own memory on 2026-09-02: 55 of 55 rollout summaries
+// carry the first four, 52 carry git_branch, and the raw-memories file adds the
+// rest.
+//
+// Two things went wrong when this was any lowercase snake_case word, and the
+// Phase 6 audit is what found them - both were the credential surviving in the
+// indexed text, which is I-10 and not a matter of precision.
+//
+//   - A line reading `secret: <value>` had its label stripped, and the
+//     credential rule matches on exactly that word. The mask then had nothing
+//     to match and the body went into the index bare. Same for password,
+//     passwd, token and api_key.
+//   - `postgres://user:pw@host` parsed as the label `postgres` and the value
+//     `//user:pw@host`, which is the connection-string rule's own prefix
+//     removed. Any URL on a line of its own had the same defect.
+//
+// Anything outside this set is kept verbatim, which is M2's rule applied here:
+// what the reader does not recognise is preserved rather than rewritten.
+//
+// The bound stops at lowercase. Codex also writes two capitalised prose labels
+// on 55 of 55 rollout summaries, and those are left alone: dropping a
+// capitalised label risks eating a sentence, and 55 documents out of a few
+// hundred is nothing like the 900 of 901 that made the rule.
+var codexKnownFields = map[string]bool{
+	"cwd": true, "thread_id": true, "updated_at": true, "rollout_path": true,
+	"git_branch": true, "task": true, "task_group": true, "task_outcome": true,
+	"description": true, "keywords": true, "rollout_summary_file": true,
+	"scope": true, "applies_to": true,
+}
 
 // parseCodex splits a Codex artefact at its second-level headings, which is the
 // delimiter every one of its files uses: 55 thread sections in the raw-memories
@@ -226,7 +251,7 @@ func codexBlock(s Source, lines []string) (body string, modMS int64, cwd string,
 	var kept []string
 	for _, line := range lines {
 		m := codexFieldLine.FindStringSubmatch(line)
-		if m == nil {
+		if m == nil || !codexKnownFields[m[1]] {
 			kept = append(kept, line)
 			continue
 		}

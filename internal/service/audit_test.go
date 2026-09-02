@@ -3,11 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/mcpserver"
+	"github.com/wotjr1649/engramux/internal/memory"
 	"github.com/wotjr1649/engramux/internal/pipe"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/secret/secrettest"
@@ -105,6 +109,13 @@ func TestPhase6RedactionAudit(t *testing.T) {
 		t.Fatalf("ingest the audit event: status %q, err %v", ack, err)
 	}
 
+	// The fifth surface (memory spec rev.2, M-2 decision 9). It is loaded
+	// through the collector rather than by an INSERT, so what is swept is
+	// what the service would have written: a Codex memory file whose every
+	// field carries the same generated shapes the event payload does, plus a
+	// user path in the two fields that are not body text.
+	auditMemory(t, db, dir, samples)
+
 	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate(), newHealth())
 
 	t.Run("reply documents", func(t *testing.T) {
@@ -153,6 +164,22 @@ func TestPhase6RedactionAudit(t *testing.T) {
 			t.Fatal("list_sessions answered an empty project root, so the sweep does not reach one")
 		}
 		auditClean(t, "the list_sessions reply", samples, ls)
+
+		// The search reply carries two lists since M-2 decision 9, and a
+		// sweep of an empty second list is a sweep of nothing.
+		if len(sr.MemoryHits) == 0 || sr.MemoryHits[0].Excerpt == "" {
+			t.Fatal("the search reply carries no memory hit with an excerpt, so the sweep above " +
+				"does not reach the memory half of it")
+		}
+
+		gm, err := h.GetMemory(t.Context(), ipc.GetMemoryRequest{ID: sr.MemoryHits[0].ID, Project: auditProject})
+		if err != nil {
+			t.Fatalf("get_memory: %v", err)
+		}
+		if gm.Item == nil || gm.Item.Body == "" {
+			t.Fatal("get_memory answered no body, so the sweep has no masked body to read")
+		}
+		auditClean(t, "the get_memory reply", samples, gm)
 	})
 
 	// The MCP result is not the reply document: the SDK marshals the reply
@@ -170,6 +197,7 @@ func TestPhase6RedactionAudit(t *testing.T) {
 			{"search", map[string]any{"query": auditTerm, "project": auditProject}},
 			{"get_event", map[string]any{"id": auditEventID, "project": auditProject}},
 			{"list_sessions", map[string]any{"project": auditProject}},
+			{"get_memory", map[string]any{"id": auditMemoryID(t, h), "project": auditProject}},
 		} {
 			t.Run(tc.tool, func(t *testing.T) {
 				res := auditCall(t, cs, tc.tool, tc.args)
@@ -203,6 +231,7 @@ func TestPhase6RedactionAudit(t *testing.T) {
 			{"search", map[string]any{"query": auditTerm, "project": auditUNCProject}},
 			{"get_event", map[string]any{"id": auditEventID, "project": auditUNCProject}},
 			{"list_sessions", map[string]any{"project": auditUNCProject}},
+			{"get_memory", map[string]any{"id": auditEventID, "project": auditUNCProject}},
 		} {
 			t.Run(tc.tool, func(t *testing.T) {
 				res := auditCall(t, cs, tc.tool, tc.args)
@@ -487,4 +516,80 @@ func auditClean(t *testing.T, what string, samples []secrettest.Sample, doc any)
 			t.Errorf("%s still carries the %s bytes of a %s sample", what, s.Shape, s.Class)
 		}
 	}
+}
+
+// auditMemory writes one Codex memory file under dir and indexes it, so that the
+// two memory surfaces have something to leak.
+//
+// The file's own path and the cwd it names are user paths, which is the class
+// that fires on 900 of 902 captures; the body is the audit payload's own text,
+// so every generated shape reaches the memory index as well as the event one. A
+// memory item is the one document whose title comes out of the file it was read
+// from, which is why the title here is a path rather than a word.
+func auditMemory(t *testing.T, db *sql.DB, dir string, samples []secrettest.Sample) {
+	t.Helper()
+	// The body is built from the samples as text rather than from the event
+	// payload's bytes, and that is a correction the audit itself found. A
+	// memory body is markdown and not JSON, so it goes through
+	// secret.MaskString with no decode - and the payload's newlines are
+	// *escaped*, which makes the dotenv rule's (?m)^ anchor never fire. The
+	// first version of this helper wrote the payload text here and the
+	// literal half of the sweep caught the seed sitting in the reply,
+	// unmasked and untagged. Real notes carry real newlines; the fixture now
+	// does too.
+	var text strings.Builder
+	// The same term the event payload carries, so that one query reaches both
+	// lists and the search sweep is over a reply with two halves in it.
+	text.WriteString(auditTerm + "\n\n")
+	text.WriteString(auditProject + "\n\n")
+	for _, s := range samples {
+		text.WriteString(s.Value + "\n\n")
+	}
+	body := text.String()
+	if got, want := secret.Detect([]byte(body)), secret.Classes(); !slices.Equal(got, want) {
+		t.Fatalf("the audit memory body is tagged %v, want every class this ruleset reports, %v", got, want)
+	}
+	for _, s := range samples {
+		if !strings.Contains(body, s.Needle()) {
+			t.Fatalf("the %s sample bytes are not in the audit memory body, so the literal "+
+				"half of the memory sweeps is inert for it", s.Shape)
+		}
+	}
+	home := filepath.Join(dir, "codex-home")
+	if err := os.MkdirAll(filepath.Join(home, "memories"), 0o755); err != nil {
+		t.Fatalf("make the audit memory directory: %v", err)
+	}
+	for name, body := range map[string]string{
+		"MEMORY.md": "# index\n",
+		"raw_memories.md": "## " + auditProject + "\n" +
+			"cwd: " + auditProject + "\n" + body,
+	} {
+		if err := os.WriteFile(filepath.Join(home, "memories", name), []byte(body), 0o600); err != nil {
+			t.Fatalf("write the audit memory file: %v", err)
+		}
+	}
+	c := &memory.Collector{CodexHome: home}
+	rep, err := c.Collect(t.Context(), db, time.Now())
+	if err != nil {
+		t.Fatalf("index the audit memory: %v", err)
+	}
+	if rep.Written == 0 {
+		t.Fatal("the audit memory was not indexed, so two of the five surfaces sweep nothing")
+	}
+}
+
+// auditMemoryID is the id of the memory item the audit loaded, read back through
+// the same search a caller would make. Taken from the reply rather than derived
+// here, so a change to how the id is minted cannot make this tool call quietly
+// answer "no such item" and sweep a nil.
+func auditMemoryID(t *testing.T, h pipe.Handler) string {
+	t.Helper()
+	sr, err := h.Search(t.Context(), ipc.SearchRequest{Query: auditTerm, Project: auditProject})
+	if err != nil {
+		t.Fatalf("search for the audit memory: %v", err)
+	}
+	if len(sr.MemoryHits) == 0 {
+		t.Fatal("the audit memory is not in the index")
+	}
+	return sr.MemoryHits[0].ID
 }

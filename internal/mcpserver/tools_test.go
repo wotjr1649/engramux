@@ -15,11 +15,11 @@ import (
 	"github.com/wotjr1649/engramux/internal/pipe"
 )
 
-// TestTheToolSurfaceIsTheFourSpec59Names. The set is a decision, not an
+// TestTheToolSurfaceIsTheFiveSpecNames. The set is a decision, not an
 // accident of what was easy to expose: `doctor` is deliberately not here,
 // because its reply carries the real database path where every other reply
 // masks it (spec 5.9), and ingest is not here because I-08 gives it the pipe.
-func TestTheToolSurfaceIsTheFourSpec59Names(t *testing.T) {
+func TestTheToolSurfaceIsTheFiveSpecNames(t *testing.T) {
 	endpoint, token := serveForTest(t, stubHandler())
 	cs := connect(t, endpoint, token)
 
@@ -32,7 +32,7 @@ func TestTheToolSurfaceIsTheFourSpec59Names(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	slices.Sort(got)
-	want := []string{"get_event", "list_sessions", "search", "status"}
+	want := []string{"get_event", "get_memory", "list_sessions", "search", "status"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("the tools are %v, want %v", got, want)
 	}
@@ -279,12 +279,12 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// TestNewRefusesAHandlerThatCannotAnswerAllFour. A nil field on a
+// TestNewRefusesAHandlerThatCannotAnswerAllFive. A nil field on a
 // [pipe.Handler] means "refuse that request type" to internal/pipe, and it
 // cannot mean that here: [mcp.AddTool] registers a tool unconditionally, so a
 // nil field would be a tool a model can see and a nil dereference when it calls
 // one.
-func TestNewRefusesAHandlerThatCannotAnswerAllFour(t *testing.T) {
+func TestNewRefusesAHandlerThatCannotAnswerAllFive(t *testing.T) {
 	full := stubHandler()
 	for _, tc := range []struct {
 		name string
@@ -294,6 +294,7 @@ func TestNewRefusesAHandlerThatCannotAnswerAllFour(t *testing.T) {
 		{"no GetEvent", func(h *pipe.Handler) { h.GetEvent = nil }},
 		{"no ListSessions", func(h *pipe.Handler) { h.ListSessions = nil }},
 		{"no Status", func(h *pipe.Handler) { h.Status = nil }},
+		{"no GetMemory", func(h *pipe.Handler) { h.GetMemory = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := full

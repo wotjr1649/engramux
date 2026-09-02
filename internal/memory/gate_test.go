@@ -144,7 +144,7 @@ func lineValue(s Source, line string) string {
 		// its body, which is the split itself.
 		return ""
 	}
-	if m := codexFieldLine.FindStringSubmatch(line); m != nil {
+	if m := codexFieldLine.FindStringSubmatch(line); m != nil && codexKnownFields[m[1]] {
 		if m[1] == "updated_at" {
 			return "" // as above, and on both hosts for the same reason
 		}
