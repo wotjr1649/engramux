@@ -179,7 +179,7 @@ func askSearch(req ipc.SearchRequest) (ipc.SearchReply, error) {
 		// off the wire and capped only by ipc.MaxFrameLen. It is also
 		// the one case where those bytes are not payload text - a
 		// refusal is an ACK - so 200 of them are safe to show.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

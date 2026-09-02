@@ -32,11 +32,21 @@ const (
 	Rejected AckStatus = "rejected"
 )
 
-// Ack is the service's reply to an IngestEvent request (spec 5.3).
+// Ack is the service's reply to an IngestEvent request (spec 5.3), and the
+// document every request the service will not serve is answered with, whatever
+// it asked for.
 type Ack struct {
 	Version  string    `json:"version"`
 	Status   AckStatus `json:"status"`
 	IngestID string    `json:"ingest_id"`
+	// Reason says why Status is Rejected, in words a person or a model can
+	// act on (backlog 27): the handler's own error, masked and bounded by
+	// the service before it was put here. It is empty on a committed Ack,
+	// and absent from one on the wire, so the happy path a relay reads is
+	// the document it always was. It is informational - Verify decides
+	// on Status alone, and a reason never turns a refusal into anything
+	// else.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Sentinel errors Verify returns, distinguishable with errors.Is.
@@ -58,6 +68,9 @@ func (a Ack) Verify(wantIngestID string) error {
 		return fmt.Errorf("%w: got %q, want %q", ErrAckVersion, a.Version, Version)
 	}
 	if a.Status != Committed {
+		if a.Reason != "" {
+			return fmt.Errorf("%w: status %q: %s", ErrAckRejected, a.Status, a.Reason)
+		}
 		return fmt.Errorf("%w: status %q", ErrAckRejected, a.Status)
 	}
 	if a.IngestID != wantIngestID {

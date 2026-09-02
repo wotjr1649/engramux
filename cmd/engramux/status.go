@@ -144,7 +144,7 @@ func askStatus() (ipc.StatusReply, error) {
 	if err := reply.Verify(); err != nil {
 		// The reply is bounded on its way into the message: it is bytes
 		// off the wire and capped only by ipc.MaxFrameLen.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

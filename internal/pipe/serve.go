@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/secret"
 )
 
 var (
@@ -197,7 +198,7 @@ func serveConn(ctx context.Context, conn net.Conn, h Handler) {
 		// that did not parse is reflecting unvalidated input.
 		env = ipc.Envelope{}
 		slog.WarnContext(ctx, "pipe: decode request envelope", "error", err)
-		reply = encodeAck(ctx, ipc.Rejected, "")
+		reply = refuse(ctx, "", err)
 	} else {
 		reply = route(ctx, env, h)
 	}
@@ -243,7 +244,7 @@ func serveConn(ctx context.Context, conn net.Conn, h Handler) {
 func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	if err := validate(env); err != nil {
 		slog.WarnContext(ctx, "pipe: rejected a malformed request", "error", err)
-		return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		return refuse(ctx, env.IngestID, err)
 	}
 
 	switch env.Type {
@@ -257,19 +258,19 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 			// it, the drain replays it, and I-05 makes the replay of
 			// an event that did commit a no-op.
 			slog.ErrorContext(ctx, "pipe: ingest failed", "error", err)
-			status = ipc.Rejected
+			return refuse(ctx, env.IngestID, err)
 		}
 		return encodeAck(ctx, status, env.IngestID)
 
 	case ipc.Status:
 		if h.Status == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no Status handler")
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
 		}
 		reply, err := h.Status(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "pipe: status failed", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		// Stamped here rather than trusted from the handler: the wire
 		// protocol is this package's, and a handler that left them
@@ -285,7 +286,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	case ipc.Search:
 		if h.Search == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no Search handler")
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
 		}
 		// The envelope check cannot see inside Payload - its shape is
 		// the request type's, not the envelope's - so this is the only
@@ -297,7 +298,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		var req ipc.SearchRequest
 		if err := json.Unmarshal(env.Payload, &req); err != nil {
 			slog.WarnContext(ctx, "pipe: decode the search request", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply, err := h.Search(ctx, req)
 		if err != nil {
@@ -305,7 +306,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 			// and a log is an egress (I-10, spec 7.5); internal/search
 			// keeps its own errors free of it for the same reason.
 			slog.ErrorContext(ctx, "pipe: search failed", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply.Version, reply.Type = ipc.Version, ipc.Search
 		b, err := json.Marshal(reply)
@@ -318,12 +319,12 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	case ipc.Doctor:
 		if h.Doctor == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no Doctor handler")
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
 		}
 		reply, err := h.Doctor(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "pipe: doctor failed", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		// Stamped here rather than trusted from the handler, for the
 		// reason the status reply is.
@@ -338,7 +339,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	case ipc.GetEvent:
 		if h.GetEvent == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no GetEvent handler")
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
 		}
 		// Decoded here for the reason the Search case is: the envelope
 		// check cannot see inside Payload, and a document that did not
@@ -349,7 +350,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		var req ipc.GetEventRequest
 		if err := json.Unmarshal(env.Payload, &req); err != nil {
 			slog.WarnContext(ctx, "pipe: decode the get-event request", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply, err := h.GetEvent(ctx, req)
 		if err != nil {
@@ -358,7 +359,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 			// the errors internal/project and internal/ipc return
 			// carry their own bounded copy when it is safe to.
 			slog.ErrorContext(ctx, "pipe: get event failed", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply.Version, reply.Type = ipc.Version, ipc.GetEvent
 		b, err := json.Marshal(reply)
@@ -371,17 +372,17 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 	case ipc.ListSessions:
 		if h.ListSessions == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no ListSessions handler")
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
 		}
 		var req ipc.ListSessionsRequest
 		if err := json.Unmarshal(env.Payload, &req); err != nil {
 			slog.WarnContext(ctx, "pipe: decode the list-sessions request", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply, err := h.ListSessions(ctx, req)
 		if err != nil {
 			slog.ErrorContext(ctx, "pipe: list sessions failed", "error", err)
-			return encodeAck(ctx, ipc.Rejected, env.IngestID)
+			return refuse(ctx, env.IngestID, err)
 		}
 		reply.Version, reply.Type = ipc.Version, ipc.ListSessions
 		b, err := json.Marshal(reply)
@@ -399,7 +400,7 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		// here: validate has already confirmed it is one of spec 5.2's
 		// constants.
 		slog.WarnContext(ctx, "pipe: request type is not implemented in this build", "type", env.Type)
-		return encodeAck(ctx, ipc.Rejected, env.IngestID)
+		return refuse(ctx, env.IngestID, fmt.Errorf("pipe: request type %s is not implemented in this build", env.Type))
 	}
 }
 
@@ -413,6 +414,34 @@ func encodeAck(ctx context.Context, status ipc.AckStatus, ingestID string) []byt
 	}
 	return b
 }
+
+// refuse encodes the rejected Ack every request this build will not serve is
+// answered with, and says why (backlog 27). The reason is the error's own
+// text, through the same mask every other egress goes through (I-10) - a
+// handler's error can name the database path, and the path names the user -
+// and bounded, because an error can wrap bytes off the wire and a reason that
+// repeated a frame would be a frame.
+func refuse(ctx context.Context, ingestID string, err error) []byte {
+	reason := secret.MaskString(err.Error())
+	if r := []rune(reason); len(r) > maxReasonRunes {
+		reason = string(r[:maxReasonRunes])
+	}
+	b, err := json.Marshal(ipc.Ack{Version: ipc.Version, Status: ipc.Rejected, IngestID: ingestID, Reason: reason})
+	if err != nil {
+		slog.ErrorContext(ctx, "pipe: encode ack", "error", err)
+		return nil
+	}
+	return b
+}
+
+// maxReasonRunes bounds a refusal's reason. validate's errors already carry a
+// wire value at a precision of 64, and no handler error is longer than a line;
+// 256 is room for both with the wrapping that names the request, not a budget.
+const maxReasonRunes = 256
+
+// errNoHandler is the refusal for a request type this Handler does not wire,
+// which is a build's shape rather than a caller's mistake.
+var errNoHandler = errors.New("pipe: this build serves no handler for the request type")
 
 // validate is the routing boundary's envelope check, and it is the only one
 // there is. internal/store deliberately does not repeat it: store.Ingest

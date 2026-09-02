@@ -384,8 +384,14 @@ func (r *report) reportLocal() {
 	// exports it makes this command diagnose a pipe nobody is serving - which
 	// reads exactly like a service that is down (backlog 6). The name is
 	// printed and the value is not: the value is a SID.
+	//
+	// A note and not a fail: the suite runs this command under the override
+	// on purpose, against a service it started on that pipe, and a report
+	// that failed for being asked about the right pipe would fail the gate
+	// that asks. What the line changes is how the sections below are read,
+	// and the sections below still decide the exit code.
 	if os.Getenv(ipc.TestPipeSIDEnv) != "" {
-		r.fail("pipe name", "%s is set in this environment, so the service and mcp sections "+
+		r.note("pipe name", "%s is set in this environment, so the service and mcp sections "+
 			"below read a test pipe and not the installed service's - unset it", ipc.TestPipeSIDEnv)
 	}
 
@@ -813,7 +819,7 @@ func askDoctor() (ipc.DoctorReply, error) {
 	if err := reply.Verify(); err != nil {
 		// Bounded on its way into the message: it is bytes off the wire
 		// and capped only by ipc.MaxFrameLen.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

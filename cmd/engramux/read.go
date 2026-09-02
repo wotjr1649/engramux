@@ -164,7 +164,7 @@ func askGetEvent(req ipc.GetEventRequest) (ipc.GetEventReply, error) {
 		// and capped only by ipc.MaxFrameLen. A refusal is an ACK, so
 		// 200 of them are three short fields; anything else is payload
 		// text, which is why the bound is here at all.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }
@@ -189,7 +189,7 @@ func askListSessions(req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
 		return zero, fmt.Errorf("decode the reply: %w", err)
 	}
 	if err := reply.Verify(); err != nil {
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }
