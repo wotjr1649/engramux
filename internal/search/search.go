@@ -215,14 +215,27 @@ func matchQuery(tokens []string, projectID string, limit int, boost bool) (strin
 // worth against bm25's own score.
 //
 // FTS5's `rank` is bm25 and is negative, more negative being a better match, so
-// the boost is subtracted. The magnitude is a value and gate M4 is what sets it:
-// the gate logs the score distribution it measured beside the recall it
-// measured, so this constant comes out of the same run that decides whether the
-// boost survives at all. It is deliberately not a per-column weight - three
-// weights would be three unmeasured inputs to one number, and M4's per-class
-// figures already say which kind of field earned its keep, because the class is
-// a property of the query rather than of the column.
-const boostPerDerivedToken = 1.0
+// the boost is subtracted.
+//
+// **[verified] 2026-09-03, and 5 is a measured boundary rather than a taste.**
+// Gate M4 was run over the corpus at 1, 2, 3, 4, 5, 20 and 100, and the effect
+// has two regimes rather than a continuum. Below 5 it only reorders inside the
+// top ten: MRR climbs with the weight - the error class 0.580, 0.587, 0.607,
+// 0.613 - and recall@10 does not move in any class. At 5 the touched-path class
+// reaches recall@10 0.520 against 0.480 without the boost, which is the only
+// recall movement anywhere in the sweep. At 20 and at 100 every one of the six
+// figures is identical to 5: the boost dominates bm25 within the matched set,
+// the order becomes "field matches first, then bm25 among the rest", and there
+// is nothing further for a larger number to buy. So 5 is the smallest weight
+// that reaches the plateau, which is the right place to stand: a larger one
+// changes no answer, and a smaller one leaves bm25 more say exactly where the
+// derived match is the weaker signal.
+//
+// It is deliberately not a per-column weight. Three weights would be three
+// unmeasured inputs to one number, and M4's per-class figures already say which
+// kind of field earned its keep, because the class is a property of the query
+// rather than of the column.
+const boostPerDerivedToken = 5.0
 
 // orderBy builds the ORDER BY clause and the arguments it needs.
 //

@@ -28,6 +28,7 @@ go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
 go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
 go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
+go test -p 1 -count=1 -run TestPhase4GateM4 -v ./internal/search/   # memory spec §5's M4, and its own delete condition
 go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # spec §8's Phase 6 gate,
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
@@ -46,6 +47,14 @@ directory is absent. Before pasting its `-v` output anywhere, read the table row
 The second command is not covered by the first — `TestEveryCandidateDocumentIsReachable` sweeps
 every candidate document of every class rather than the gate's 25-per-class sample, under two
 tokenizer arms, and it is what priced the stemmer out of `00002`.
+
+`TestPhase4GateM4` is a different gate that happens to sit in the same package, and it is the one
+that can delete code. It measures the derived-field boost over the corpus with the boost on and off,
+three classes, recall@10 and MRR — and by its own terms, no improvement in any class means migration
+`00005`, `store.Derive` and the ORDER BY term come out rather than the threshold coming down. It
+skips when `.capture/` is absent, like `TestPhase4Gate`'s corpus mode. Unlike that mode its output
+is safe to paste: it logs counts and figures and never a derived query, which matters more here than
+there, because every query it derives is a command line or a touched path.
 
 The Phase 6 gate is two commands because it is two modes and neither alone is the audit: the
 `internal/service` half loads one event with a generated sample of every shape and sweeps every
