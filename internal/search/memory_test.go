@@ -2,6 +2,7 @@ package search_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/memory"
 	"github.com/wotjr1649/engramux/internal/search"
+	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/store"
 )
 
@@ -89,6 +91,13 @@ func TestAMemorySearchFindsTheBlockAndNotItsNeighbour(t *testing.T) {
 // catch it after the field had shipped. Both the path and the title go through
 // the mask: a Claude Code note's title is its own name, and a Codex section's is
 // its first line, either of which can be a path.
+//
+// The sweep is [secret.Detect] over the marshalled hit rather than a literal
+// search, which is spec 8's Phase 5 clause and not a stylistic choice. A literal
+// version of this test passed a deliberate break that removed the source path's
+// mask: the path a test writes to is under the machine's own temporary
+// directory, so it carries the *real* user name and never the invented one the
+// body carries. Naming fields would have the same hole in a different place.
 func TestAMemoryHitCarriesNoUserPath(t *testing.T) {
 	db := memoryDB(t, "## a section\nthe error came from C:\\Users\\someone\\project\\main.go\n")
 	hits, _, err := search.SearchMemory(t.Context(), db, "error", nil, 10)
@@ -98,13 +107,23 @@ func TestAMemoryHitCarriesNoUserPath(t *testing.T) {
 	if len(hits) != 1 {
 		t.Fatalf("hits = %d, want 1", len(hits))
 	}
-	for _, field := range []string{hits[0].Excerpt, hits[0].SourcePath, hits[0].Title} {
-		if strings.Contains(field, "someone") {
-			t.Fatalf("a reply field carries a user name: %q", field)
-		}
+	marshalled, err := json.Marshal(hits[0])
+	if err != nil {
+		t.Fatalf("marshal the hit: %v", err)
+	}
+	if classes := secret.Detect(marshalled); len(classes) != 0 {
+		// The classes and not the document: printing it would put the
+		// thing this test is about into the log.
+		t.Fatalf("the hit carries %s", classes.String())
 	}
 	if !strings.Contains(hits[0].Excerpt, "the error came from") {
 		t.Fatalf("masking took the whole excerpt: %q", hits[0].Excerpt)
+	}
+	// The vacuity guard the sweep needs: a document that plainly is a user
+	// path has to come back dirty, or a detector that found nothing would look
+	// identical to a detector that was not looking.
+	if classes := secret.Detect([]byte(`{"p":"C:\\Users\\someone\\project\\main.go"}`)); len(classes) == 0 {
+		t.Fatal("the detector finds nothing in a document that is plainly a user path, so this sweep proves nothing")
 	}
 }
 
