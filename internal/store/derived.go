@@ -60,11 +60,31 @@ func Derive(payload []byte) Derived {
 	if !sqliteWillParse(payload) {
 		return Derived{}
 	}
+	// UseNumber, and it is the same reason [Leaves] gives one layer down: a
+	// plain json.Unmarshal into map[string]any converts every number to
+	// float64 on the way past, so a payload carrying `1e400` anywhere at all
+	// fails to decode - and this walk never reads a number. Without it, a
+	// payload with a perfectly ordinary `tool_input.command` beside a large
+	// number derives nothing here and derives correctly in the backfill,
+	// because SQLite's json_extract walks past a number it is not asked for.
+	//
+	// [agreementPayloads] has carried that number since 00002 and did not
+	// catch this: its payload has no tool_input, so both sides answered the
+	// zero value for different reasons and the comparison passed on a
+	// coincidence. Raised by a review on 2026-09-03; the two payloads that
+	// make the difference visible are in [derivedPayloads].
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
 	var fields map[string]any
-	if err := json.Unmarshal(payload, &fields); err != nil {
+	if err := dec.Decode(&fields); err != nil {
 		// A valid JSON value that is not an object - a bare string, a
 		// number, an array. json_extract of a member path over one
 		// returns NULL, so the backfill answers empty too.
+		//
+		// Decode does not object to trailing data, which is why this is
+		// not the guard against two concatenated values: json.Valid
+		// inside sqliteWillParse above is, and it is what json_valid
+		// answers 0 for.
 		return Derived{}
 	}
 

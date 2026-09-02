@@ -52,6 +52,17 @@ var derivedPayloads = []namedPayload{
 	{"an escaped NUL inside the command", escapedNUL("tool_input", "command")},
 	{"an escaped NUL in the output column, the one that carries whole tool outputs",
 		escapedNUL("tool_response", "stdout")},
+
+	// [agreementPayloads] already carries a number too large for float64
+	// between two leaves, and it did not catch this: that payload has no
+	// tool_input, so both sides answered the zero value for different reasons
+	// and the comparison passed on a coincidence. The number has to sit beside
+	// something derivable for the difference to be visible, which is what this
+	// payload is. Raised by a review, 2026-09-03.
+	{"a number too large for float64 beside a derivable command",
+		[]byte(`{"tool_input":{"command":"go test"},"n":1e400}`)},
+	{"a number too large for float64 beside a derivable path and output",
+		[]byte(`{"tool_input":{"file_path":"C:/x/a.go"},"tool_response":{"stdout":"ok"},"n":-1e400}`)},
 }
 
 // escapedNUL builds a payload whose one value carries a NUL, and lets
