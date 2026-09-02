@@ -7,6 +7,21 @@ import (
 	"fmt"
 )
 
+// CellsQuery is the statement behind a status reply's per-cell breakdown: one
+// row per distinct (host, event_name) with the count and the span of
+// received_at, in an order that makes two runs over an unchanged database
+// diff cleanly (SQLite's BINARY collation puts `unknown` last by construction).
+//
+// It lives here rather than beside its caller in internal/service because
+// migration 00003's index exists for this statement and nothing else, and the
+// test that holds the plan to that index has to explain the statement the
+// service actually runs - one literal, not a copy that drifts.
+const CellsQuery = `
+		SELECT host, event_name, count(*), min(received_at), max(received_at)
+		FROM events
+		GROUP BY host, event_name
+		ORDER BY host, event_name`
+
 // Event is one events row as it is stored: unmasked, payload included.
 //
 // It is this package's type and not the wire's, the same way internal/search's

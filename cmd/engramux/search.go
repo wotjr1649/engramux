@@ -67,6 +67,12 @@ func search(args []string) int {
 		return 0
 	}
 
+	// How many were shown against how many matched (backlog 33), so a list
+	// that is everything reads differently from the first twenty of a
+	// thousand. Always printed rather than only when they differ: a line
+	// that appears sometimes is a line a reader has to know to look for.
+	_, _ = fmt.Fprintf(os.Stdout, "%d of %d matches\n\n", len(reply.Hits), reply.Total)
+
 	for _, h := range reply.Hits {
 		// Three of the four are quoted, and the rule is the schema
 		// rather than the field's name. events.host has a CHECK
@@ -82,10 +88,33 @@ func search(args []string) int {
 		//
 		// Quoting is also what keeps one hit to one block of three
 		// lines, whatever bytes those three fields hold.
-		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %.64q\n%.64q\n%q\n\n",
-			stamp(h.ReceivedAtMS), h.Host, h.EventName, h.ID, h.Excerpt)
+		_, _ = fmt.Fprintf(os.Stdout, "%s  %-11s  %s\n%.64q\n%q\n\n",
+			stamp(h.ReceivedAtMS), h.Host, cutName(h.EventName, h.EventNameTruncated), h.ID, h.Excerpt)
 	}
 	return 0
+}
+
+// displayNameRunes is how much of an event name one line of this program's
+// output shows. It is a width and not the wire's bound: the service bounds a
+// name at internal/service's maxEventNameRunes and says so on the hit, and
+// this program cuts again for the terminal, so a name has two places it can
+// have been shortened and [cutName] marks both the same way.
+const displayNameRunes = 64
+
+// cutName quotes name for one line, cut to at most [displayNameRunes] runes,
+// and puts a mark after the closing quote when either this program or the
+// service (cutByService, the hit's own flag) shortened it (backlog 17). The
+// mark sits outside the quotes so that it cannot be read as the name's last
+// character, which is what a marker inside the string would be.
+func cutName(name string, cutByService bool) string {
+	shown, cut := name, cutByService
+	if r := []rune(name); len(r) > displayNameRunes {
+		shown, cut = string(r[:displayNameRunes]), true
+	}
+	if cut {
+		return fmt.Sprintf("%q…", shown)
+	}
+	return fmt.Sprintf("%q", shown)
 }
 
 // projectFlag is the one argument [search] interprets.
@@ -150,7 +179,7 @@ func askSearch(req ipc.SearchRequest) (ipc.SearchReply, error) {
 		// off the wire and capped only by ipc.MaxFrameLen. It is also
 		// the one case where those bytes are not payload text - a
 		// refusal is an ACK - so 200 of them are safe to show.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

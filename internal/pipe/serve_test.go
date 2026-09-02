@@ -250,12 +250,13 @@ func TestFixturePayloadsRoundTripByteIdentically(t *testing.T) {
 	}
 }
 
-// TestUnimplementedRequestTypesAreRejected covers the four request types
-// I-08 reserves for CLI reads. Phase 1 implements none of them, and the
-// requirement is that the answer must not look like success: ipc.Ack.Verify
-// only accepts Committed, so a Rejected ACK cannot be mistaken for one.
+// TestUnimplementedRequestTypesAreRejected covers the CLI read types I-08
+// routes over the pipe when the Handler wires none of them, which is Phase 1's
+// shape. The requirement is that the answer must not look like success:
+// ipc.Ack.Verify only accepts Committed, so a Rejected ACK cannot be mistaken
+// for one.
 func TestUnimplementedRequestTypesAreRejected(t *testing.T) {
-	for _, typ := range []ipc.RequestType{ipc.Status, ipc.Doctor, ipc.Search, ipc.Drain} {
+	for _, typ := range []ipc.RequestType{ipc.Status, ipc.Doctor, ipc.Search} {
 		t.Run(string(typ), func(t *testing.T) {
 			rec := &recorder{status: ipc.Committed}
 			name, _ := startServer(t, rec.ingest)

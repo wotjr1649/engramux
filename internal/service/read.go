@@ -46,6 +46,7 @@ func getEvent(ctx context.Context, db *sql.DB, req ipc.GetEventRequest) (ipc.Get
 	}
 
 	masked := secret.Mask(e.Payload)
+	name, cut := truncateRunes(secret.MaskString(e.EventName), maxEventNameRunes)
 	doc := ipc.EventDocument{
 		// Masked and not bounded, for the reason [listSessions] gives
 		// about a session id: a shortened id is not an id. events.id
@@ -59,11 +60,12 @@ func getEvent(ctx context.Context, db *sql.DB, req ipc.GetEventRequest) (ipc.Get
 		Host: e.Host,
 		// The same untrusted column a hit carries, masked and then
 		// bounded for the same reasons - see [searchEvents].
-		EventName:    truncateRunes(secret.MaskString(e.EventName), maxEventNameRunes),
-		SessionID:    secret.MaskString(e.SessionID),
-		ReceivedAtMS: e.ReceivedAtMS,
-		PrivacyClass: e.PrivacyClass,
-		PayloadBytes: len(masked),
+		EventName:          name,
+		EventNameTruncated: cut,
+		SessionID:          secret.MaskString(e.SessionID),
+		ReceivedAtMS:       e.ReceivedAtMS,
+		PrivacyClass:       e.PrivacyClass,
+		PayloadBytes:       len(masked),
 	}
 	// Over the bound the payload is left out rather than cut. PayloadBytes
 	// is set either way, so "too large" is distinguishable from "no such
@@ -166,15 +168,17 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 // the request. A database with no search index is a real state - one that
 // predates the migration - and it is the state a person runs `doctor` to find
 // out about.
-func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time) (ipc.DoctorReply, error) {
-	st, err := status(ctx, db, dbPath, spoolPath, started)
+func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time, h *health) (ipc.DoctorReply, error) {
+	st, err := status(ctx, db, dbPath, spoolPath, started, h)
 	if err != nil {
 		return ipc.DoctorReply{}, err
 	}
 	reply := ipc.DoctorReply{
-		UptimeMS:   st.UptimeMS,
-		Events:     st.Events,
-		SpoolDepth: st.SpoolDepth,
+		UptimeMS:       st.UptimeMS,
+		Events:         st.Events,
+		SpoolDepth:     st.SpoolDepth,
+		Errors:         st.Errors,
+		LastCheckpoint: st.LastCheckpoint,
 		// Not st.DatabasePath: that one is masked.
 		DatabasePath: dbPath,
 	}

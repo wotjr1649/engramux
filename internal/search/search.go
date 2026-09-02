@@ -92,16 +92,22 @@ type Hit struct {
 // limit goes to LIMIT unmodified, and SQLite reads a negative LIMIT as "no
 // limit". [github.com/wotjr1649/engramux/internal/ipc.SearchRequest.EffectiveLimit]
 // is what the pipe surface bounds it with before it gets here.
-func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) ([]Hit, error) {
+//
+// total is how many rows the MATCH and the filter admitted before the limit
+// (backlog 33). It is a window count in the same statement rather than a
+// second query, so it counts exactly the rows the hits were ranked from, and
+// it costs nothing the ORDER BY was not already paying: ranking needs every
+// matching row in hand before the first one can be returned.
+func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) (hits []Hit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	query, args := matchQuery(tokens, projectID, limit)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search: match: %w", err)
+		return nil, 0, fmt.Errorf("search: match: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -117,30 +123,33 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) 
 	var scanned []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.hit.ID, &r.hit.Host, &r.hit.EventName, &r.hit.ReceivedAtMS, &r.payload); err != nil {
-			return nil, fmt.Errorf("search: scan a hit: %w", err)
+		// The window count is the same value on every row; scanning it
+		// each time is what keeps the column list and the scan list one
+		// to one.
+		if err := rows.Scan(&r.hit.ID, &r.hit.Host, &r.hit.EventName, &r.hit.ReceivedAtMS, &r.payload, &total); err != nil {
+			return nil, 0, fmt.Errorf("search: scan a hit: %w", err)
 		}
 		scanned = append(scanned, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("search: read the hits: %w", err)
+		return nil, 0, fmt.Errorf("search: read the hits: %w", err)
 	}
 	// Closed here rather than only by the defer, because the cursor must be
 	// gone before the masking starts - see this function's doc comment for
 	// what holding it costs. Close is idempotent, so the defer above stays
 	// as the path every error return takes.
 	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("search: close the hits: %w", err)
+		return nil, 0, fmt.Errorf("search: close the hits: %w", err)
 	}
 
 	// Phase two: the connection is free, so this can take as long as it
 	// takes.
-	hits := make([]Hit, len(scanned))
+	hits = make([]Hit, len(scanned))
 	for i, r := range scanned {
 		hits[i] = r.hit
 		hits[i].Excerpt = excerpt(r.payload, tokens)
 	}
-	return hits, nil
+	return hits, total, nil
 }
 
 // matchQuery builds the statement and its arguments: the MATCH, an optional
@@ -167,7 +176,8 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) 
 func matchQuery(tokens []string, projectID string, limit int) (string, []any) {
 	const (
 		head = `
-		SELECT events.id, events.host, events.event_name, events.received_at, events.payload
+		SELECT events.id, events.host, events.event_name, events.received_at, events.payload,
+		       count(*) OVER ()
 		FROM events_fts
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?`

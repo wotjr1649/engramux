@@ -87,7 +87,8 @@ func walSize(path string) (int64, error) {
 //
 // Not "the WAL would otherwise grow without bound". Spec 5.4's DSN leaves
 // wal_autocheckpoint at SQLite's default of 1,000 pages, so SQLite
-// PASSIVE-checkpoints on its own and the WAL settles at about 4.1 MiB whatever
+// PASSIVE-checkpoints on its own and the WAL settles at about 4.1 MB (1,000
+// pages of 4 KiB, 4,096,000 B, which is 3.9 MiB) whatever
 // the run length - measured over 800 ingests, and the size the live
 // installation's WAL had reached. What a PASSIVE checkpoint does not do is give
 // the file back: it moves pages into the database and reuses the WAL in place,
@@ -126,6 +127,12 @@ type Checkpointer struct {
 	// good deal shorter than Interval or the threshold trigger never fires
 	// first.
 	Poll time.Duration
+	// Report, when set, is called after every attempt with the instant it
+	// finished and its error or nil (backlog 31). It is how the status reply
+	// learns what the loop did; nothing here reads it back. An attempt the
+	// context cancelled mid-way is not reported, because a cancellation is
+	// not a checkpoint result.
+	Report func(at time.Time, err error)
 }
 
 // Run checkpoints until ctx is cancelled.
@@ -170,8 +177,15 @@ func (c *Checkpointer) Run(ctx context.Context) {
 				slog.Info("engramux-service: the WAL reached the checkpoint threshold",
 					"wal_bytes", size, "threshold_bytes", c.Threshold)
 			}
-			if err := Checkpoint(ctx, c.DB); err != nil && ctx.Err() == nil {
+			err = Checkpoint(ctx, c.DB)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
 				slog.Error("engramux-service: checkpoint the WAL", "error", err, "wal_bytes", size)
+			}
+			if c.Report != nil {
+				c.Report(time.Now(), err)
 			}
 		}
 	}

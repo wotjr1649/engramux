@@ -63,11 +63,30 @@ func status() int {
 	}
 	// Stdout, because this is the CLI path and a person asked for it. The
 	// relay's silence on stdout (spec 4.5) is a rule about hook events.
-	_, _ = fmt.Fprintf(os.Stdout,
-		"uptime    %s\nevents    %d\nspool     %d\ndatabase  %s\n",
-		(time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond),
-		reply.Events, reply.SpoolDepth, reply.DatabasePath)
+	_, _ = fmt.Fprint(os.Stdout, formatStatus(reply))
 	return 0
+}
+
+// formatStatus is the status report as printed: one label and one value per
+// line, whitespace-separated so a sampler can split it. errors and checkpoint
+// are backlog 31's two lines, the numbers spec 5.6 once assigned to a file.
+func formatStatus(r ipc.StatusReply) string {
+	return fmt.Sprintf("uptime      %s\nevents      %d\nspool       %d\nerrors      %d\ncheckpoint  %s\ndatabase    %s\n",
+		(time.Duration(r.UptimeMS) * time.Millisecond).Round(time.Millisecond),
+		r.Events, r.SpoolDepth, r.Errors, checkpointLine(r.LastCheckpoint), r.DatabasePath)
+}
+
+// checkpointLine is one checkpoint result in words: when and whether, or that
+// there has not been one yet.
+func checkpointLine(c *ipc.CheckpointResult) string {
+	switch {
+	case c == nil:
+		return "none yet"
+	case c.Error != "":
+		return stamp(c.AtMS) + " failed: " + c.Error
+	default:
+		return stamp(c.AtMS) + " ok"
+	}
 }
 
 // cells prints the per-cell capture breakdown - host x event name, with a count
@@ -144,7 +163,7 @@ func askStatus() (ipc.StatusReply, error) {
 	if err := reply.Verify(); err != nil {
 		// The reply is bounded on its way into the message: it is bytes
 		// off the wire and capped only by ipc.MaxFrameLen.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

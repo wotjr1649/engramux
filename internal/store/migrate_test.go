@@ -419,9 +419,10 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
 	// The literal is bumped by hand with every migration added, so a
-	// migration that arrives without anyone noticing fails here.
-	if v != 2 {
-		t.Fatalf("db version = %d, want 2", v)
+	// migration that arrives without anyone noticing fails here. 3 is
+	// 00003, the cell index (backlog 34).
+	if v != 3 {
+		t.Fatalf("db version = %d, want 3", v)
 	}
 }
 

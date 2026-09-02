@@ -7,14 +7,18 @@ import "encoding/json"
 // uses.
 type RequestType string
 
-// The request types spec 5.2 names: the five Phase 1 ones, then the two Phase 5
+// The request types spec 5.2 names: the four Phase 1 ones, then the two Phase 5
 // adds for the tool surface (spec 5.9).
+//
+// There is no Drain. Spec 5.2 declared one for an upgrade step that never had a
+// wire path, and it was withdrawn on 2026-08-30 (backlog 32): the spool is
+// durable and the service drains it at every start, so stopping a service
+// without draining it loses nothing and an upgrade is stop, replace, start.
 const (
 	IngestEvent RequestType = "IngestEvent"
 	Status      RequestType = "Status"
 	Doctor      RequestType = "Doctor"
 	Search      RequestType = "Search"
-	Drain       RequestType = "Drain"
 	// GetEvent reads one whole event back, by id and project together.
 	GetEvent RequestType = "GetEvent"
 	// ListSessions lists one project's sessions.
@@ -30,7 +34,7 @@ const (
 // Version constant Ack does. The relay already detects a mismatched service
 // via Ack.Verify (spec 5.3); this field lets the service detect the other
 // direction — a stale relay. That matters because spec 5.5's upgrade path
-// (drain, stop, replace, start) can leave an old relay binary, still
+// (stop, replace, start) can leave an old relay binary, still
 // installed as a hook, talking to a new service, and the service is the
 // side holding the database.
 //

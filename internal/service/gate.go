@@ -42,8 +42,10 @@ import (
 // statement, which can exceed the relay's entire 800 ms post-dial budget (spec
 // 5.3) on its own. The contention gate measures that warm, where it is 6.6 ms.
 // Cold, it is whatever the disk takes. Nothing here changes it: the deadline
-// bounds the wait, and what would bound the *work* is an index the events table
-// does not have, which is a migration and a decision of its own.
+// bounds the wait. What bounds the *work* of the one read that was measured
+// failing - the status reply's per-cell breakdown, nine refusals in 147 soak
+// samples (spec 7.1) - is migration 00003's covering index, since backlog 34;
+// a cold search still walks whatever the MATCH touches.
 //
 // A var so a test can shrink it; nothing else writes to it.
 var readDeadline = 4 * time.Second

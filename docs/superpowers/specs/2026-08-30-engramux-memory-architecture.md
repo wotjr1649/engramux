@@ -244,7 +244,9 @@ and the eleven hook entries went through in one pass, and the four events that a
 service was down came back through the spool. The one thing that did not go through was Claude
 Code's `mcp add` against a registration the previous installer had already made — it exited 1 with
 the existing registration intact and pointing at the live endpoint, which `doctor` confirmed.
-Backlog 35: a re-install must not report a failure it did not cause.
+Backlog 35: a re-install must not report a failure it did not cause. Closed in Step 1's build the same
+day: the installer reads the host's own file first, with the check `doctor` already made, and a host
+that points at the endpoint is said to and left alone.
 
 ### `doctor` by stage (M-6)
 

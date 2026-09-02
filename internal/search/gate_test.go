@@ -658,7 +658,7 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 	var skipped, sharp int
 	var leadingCatchers, trailingCatchers int
 	for _, cd := range cands {
-		hits, err := search.Search(t.Context(), db, cd.query, "", len(docs))
+		hits, _, err := search.Search(t.Context(), db, cd.query, "", len(docs))
 		if err != nil {
 			t.Fatalf("%s / %s: %d of %d candidate documents sampled; Search(%q), derived from %s: %v",
 				mode, c.name, len(cands), total, cd.query, cd.name, err)
@@ -813,7 +813,7 @@ func escapesTheIntersection(
 			skipped++
 			continue
 		}
-		alone, err := search.Search(t.Context(), db, term, "", limit)
+		alone, _, err := search.Search(t.Context(), db, term, "", limit)
 		if err != nil {
 			t.Fatalf("Search(%q), one term of %q derived from %s: %v", term, cd.query, cd.name, err)
 		}
@@ -907,7 +907,7 @@ func gatePrecision(t *testing.T, db *sql.DB, mode string, docs []doc) {
 			"the check cannot fail", mode, precisionKey, inLeaves, len(docs))
 	}
 
-	hits, err := search.Search(t.Context(), db, precisionKey, "", len(docs))
+	hits, _, err := search.Search(t.Context(), db, precisionKey, "", len(docs))
 	if err != nil {
 		t.Fatalf("%s / precision: Search(%q): %v", mode, precisionKey, err)
 	}

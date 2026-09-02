@@ -180,7 +180,7 @@ func TestTheIngestHandlerMarksItselfPending(t *testing.T) {
 	dir := t.TempDir()
 	db := openMigrated(t, filepath.Join(dir, dbName))
 	gate := newReadGate()
-	h := handlers(db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), gate)
+	h := handlers(db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), gate, newHealth())
 
 	if n := gate.pending(); n != 0 {
 		t.Fatalf("%d ingests pending before anything ran", n)

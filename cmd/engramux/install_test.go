@@ -53,6 +53,7 @@ func TestResolveOptionsDerivesEveryPath(t *testing.T) {
 		{"ClaudePath", opt.ClaudePath, filepath.Join(home, ".claude", "settings.json")},
 		{"CodexHooks", opt.CodexHooks, filepath.Join(home, ".codex", "hooks.json")},
 		{"CodexConfig", opt.CodexConfig, filepath.Join(home, ".codex", "config.toml")},
+		{"ClaudeMCP", opt.ClaudeMCP, filepath.Join(home, ".claude.json")},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
@@ -74,6 +75,7 @@ func TestResolveOptionsHonoursTheHostOverrides(t *testing.T) {
 	t.Setenv("ENGRAMUX_CLAUDE_SETTINGS", `C:\elsewhere\settings.json`)
 	t.Setenv("ENGRAMUX_CODEX_HOOKS", `C:\elsewhere\hooks.json`)
 	t.Setenv("ENGRAMUX_CODEX_CONFIG", `C:\elsewhere\config.toml`)
+	t.Setenv("ENGRAMUX_CLAUDE_MCP", `C:\elsewhere\.claude.json`)
 
 	opt, err := resolveOptions(filepath.Join(t.TempDir(), "engramux.exe"), t.TempDir(), t.TempDir(), false, nil)
 	if err != nil {
@@ -81,7 +83,8 @@ func TestResolveOptionsHonoursTheHostOverrides(t *testing.T) {
 	}
 	if opt.ClaudePath != `C:\elsewhere\settings.json` ||
 		opt.CodexHooks != `C:\elsewhere\hooks.json` ||
-		opt.CodexConfig != `C:\elsewhere\config.toml` {
+		opt.CodexConfig != `C:\elsewhere\config.toml` ||
+		opt.ClaudeMCP != `C:\elsewhere\.claude.json` {
 		t.Errorf("an override was ignored: %+v", opt)
 	}
 	// The data directory is not overridable, because the service owns it and

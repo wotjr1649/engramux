@@ -411,8 +411,12 @@ func TestStatusReportsWhatIsActuallyThere(t *testing.T) {
 		t.Fatalf("engramux status exited %d, want 0", res.exit)
 	}
 	for _, want := range []string{
-		fmt.Sprintf("events    %d", wantEvents),
-		fmt.Sprintf("spool     %d", wantSpool),
+		fmt.Sprintf("events      %d", wantEvents),
+		fmt.Sprintf("spool       %d", wantSpool),
+		// Backlog 31's two lines, as a freshly started service prints
+		// them: nothing logged at ERROR, and no checkpoint yet.
+		"errors      0",
+		"checkpoint  none yet",
 		maskedDatabasePath(local),
 	} {
 		if !strings.Contains(res.stdout, want) {
@@ -976,18 +980,17 @@ func TestAnUnknownCommandIsRefused(t *testing.T) {
 // The other three request types
 // ---------------------------------------------------------------------------
 
-// TestTheUnimplementedRequestTypesAreRejected pins what this build does not do.
-// Drain is the one spec 5.2 type left with no implementation, and the answer has
-// to be a rejection rather than anything a caller could mistake for an empty
-// result.
+// TestTheUnimplementedRequestTypesAreRejected pins what this build does not do:
+// a request type it does not serve is answered with a rejection rather than
+// anything a caller could mistake for an empty result.
 //
-// The list used to hold Doctor and Search as well. Search was implemented in
-// Phase 4 and Doctor in Phase 5, and this list is where that is recorded: a type
-// leaves it in the commit that implements it, and the type's own routing test is
-// what holds it from then on.
+// The list used to hold Doctor, Search and Drain. Search was implemented in
+// Phase 4 and Doctor in Phase 5, and Drain was withdrawn from spec 5.2 on
+// 2026-08-30 (backlog 32) - so it is sent here as the string an old relay might
+// still spell, which this build no longer knows as a type at all.
 func TestTheUnimplementedRequestTypesAreRejected(t *testing.T) {
 	start(t, t.TempDir())
-	for _, typ := range []ipc.RequestType{ipc.Drain} {
+	for _, typ := range []ipc.RequestType{"Drain"} {
 		t.Run(string(typ), func(t *testing.T) {
 			raw := send(t, request(t, ipc.Version, typ, "", nil))
 			var ack ipc.Ack

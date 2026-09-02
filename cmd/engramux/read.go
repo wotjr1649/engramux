@@ -62,8 +62,9 @@ func showEvent(args []string) int {
 // branch is the one that cannot be argued away rather than one that fires.
 func printEvent(e ipc.EventDocument) {
 	_, _ = fmt.Fprintf(os.Stdout,
-		"id        %q\nhost      %-11s\nevent     %.64q\nsession   %q\nreceived  %s\nprivacy   %q\npayload   %d bytes\n",
-		e.ID, e.Host, e.EventName, e.SessionID, stamp(e.ReceivedAtMS), e.PrivacyClass, e.PayloadBytes)
+		"id        %q\nhost      %-11s\nevent     %s\nsession   %q\nreceived  %s\nprivacy   %q\npayload   %d bytes\n",
+		e.ID, e.Host, cutName(e.EventName, e.EventNameTruncated), e.SessionID, stamp(e.ReceivedAtMS),
+		e.PrivacyClass, e.PayloadBytes)
 
 	if e.Payload == nil {
 		_, _ = fmt.Fprintf(os.Stdout,
@@ -163,7 +164,7 @@ func askGetEvent(req ipc.GetEventRequest) (ipc.GetEventReply, error) {
 		// and capped only by ipc.MaxFrameLen. A refusal is an ACK, so
 		// 200 of them are three short fields; anything else is payload
 		// text, which is why the bound is here at all.
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }
@@ -188,7 +189,7 @@ func askListSessions(req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
 		return zero, fmt.Errorf("decode the reply: %w", err)
 	}
 	if err := reply.Verify(); err != nil {
-		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
+		return zero, replied(err, raw)
 	}
 	return reply, nil
 }

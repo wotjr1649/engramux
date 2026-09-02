@@ -87,7 +87,8 @@ var drainInterval = 30 * time.Second
 // One thing has to be said about that growth rate before the numbers below make
 // sense: §7.2 measured it with wal_autocheckpoint(0), and this DSN does not
 // turn wal_autocheckpoint off. Left at SQLite's default of 1,000 pages, it
-// PASSIVE-checkpoints on its own at about 4.1 MiB and the WAL settles there
+// PASSIVE-checkpoints on its own at about 4.1 MB - 1,000 pages of 4 KiB is
+// 4,096,000 B, which is 3.9 MiB - and the WAL settles there
 // rather than growing - measured, and it is what the live installation's WAL
 // was doing. So the threshold below is not what stops the WAL running away;
 // SQLite already does. What these two numbers buy is the file being *given
@@ -95,7 +96,7 @@ var drainInterval = 30 * time.Second
 // recover.
 //
 //   - Five minutes is 7.5 MiB of writes at that busiest rate, so a checkpoint
-//     costs about 4 ms (§7.4's 0.54 ms/MiB) and reclaims roughly the 4.1 MiB
+//     costs about 4 ms (§7.4's 0.54 ms/MiB) and reclaims roughly the 4.1 MB
 //     the automatic checkpoint would otherwise leave allocated. 288 a day.
 //   - Five seconds is how far past the threshold the WAL can get before
 //     anything notices: 124 KiB at that same rate, 0.2% of the threshold. One
@@ -135,13 +136,14 @@ func Dir() (string, error) {
 // database is closed - which is what releases the exclusive lock (I-07) so that
 // the next start can take it.
 func Run(ctx context.Context, dir string) error {
-	closeLog, err := installLogger(dir)
+	h := newHealth()
+	closeLog, err := installLogger(dir, h)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 
-	err = run(ctx, dir)
+	err = run(ctx, dir, h)
 	if err != nil {
 		// Logged here rather than left to the caller: under Task
 		// Scheduler the caller's stderr goes nowhere, and a service that
@@ -168,7 +170,7 @@ func Run(ctx context.Context, dir string) error {
 // file without bound. The upgrade path is a size check at startup and a rename,
 // which needs a retention number nobody has picked; nothing in Phase 1 depends
 // on it.
-func installLogger(dir string) (func(), error) {
+func installLogger(dir string, h *health) (func(), error) {
 	path := filepath.Join(dir, logsDir, logName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("service: create %s: %w", filepath.Dir(path), err)
@@ -179,13 +181,13 @@ func installLogger(dir string) (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("service: open %s: %w", path, err)
 	}
-	slog.SetDefault(slog.New(secret.NewLogHandler(slog.NewJSONHandler(f, nil))))
+	slog.SetDefault(slog.New(secret.NewLogHandler(h.counting(slog.NewJSONHandler(f, nil)))))
 	return func() { _ = f.Close() }, nil
 }
 
 // run is [Run] with the logger already installed, so that everything below can
 // report through it - including its own failures.
-func run(ctx context.Context, dir string) error {
+func run(ctx context.Context, dir string, h *health) error {
 	l, err := pipe.ListenCurrent()
 	if err != nil {
 		// The error names the pipe: winio wraps ERROR_ACCESS_DENIED in
@@ -233,6 +235,7 @@ func run(ctx context.Context, dir string) error {
 			Threshold: walThreshold,
 			Interval:  checkpointInterval,
 			Poll:      checkpointPoll,
+			Report:    h.recordCheckpoint,
 		}
 		c.Run(bgCtx)
 	}()
@@ -252,10 +255,10 @@ func run(ctx context.Context, dir string) error {
 	// directly rather than dialing the pipe, so a tool call takes the same
 	// read gate a CLI read takes - see internal/mcpserver for why that is
 	// the point and not a shortcut.
-	h := handlers(db, dbPath, spoolPath, started, newReadGate())
-	serveMCP(bgCtx, &wg, dir, h)
+	hs := handlers(db, dbPath, spoolPath, started, newReadGate(), h)
+	serveMCP(bgCtx, &wg, dir, hs)
 
-	serveErr := pipe.Serve(ctx, l, h)
+	serveErr := pipe.Serve(ctx, l, hs)
 
 	// Serve has returned, so no handler is using the pool any more. Stop the
 	// drain and the checkpointer and wait for them before the deferred Close
@@ -296,7 +299,7 @@ func run(ctx context.Context, dir string) error {
 // The seam internal/pipe exists for is the same as it was: ipc cannot import
 // store, so the database reaches the accept loop as a closure and nothing else
 // (spec 5.4's one connection is what these close over).
-func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *readGate) pipe.Handler {
+func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *readGate, h *health) pipe.Handler {
 	return pipe.Handler{
 		Ingest: func(ctx context.Context, env ipc.Envelope) (ipc.AckStatus, error) {
 			gate.enterIngest()
@@ -305,12 +308,12 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 		},
 		Status: func(ctx context.Context) (ipc.StatusReply, error) {
 			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.StatusReply, error) {
-				return status(ctx, db, dbPath, spoolPath, started)
+				return status(ctx, db, dbPath, spoolPath, started, h)
 			})
 		},
 		Doctor: func(ctx context.Context) (ipc.DoctorReply, error) {
 			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.DoctorReply, error) {
-				return doctorReport(ctx, db, dbPath, spoolPath, started)
+				return doctorReport(ctx, db, dbPath, spoolPath, started, h)
 			})
 		},
 		Search: func(ctx context.Context, req ipc.SearchRequest) (ipc.SearchReply, error) {
@@ -455,7 +458,7 @@ func drain(ctx context.Context, d *spool.Drainer) {
 // at, which is how a masked path quietly becomes an unmasked one. `doctor` is
 // where the real path belongs and is where it is: a local diagnostic, printed to
 // the terminal of the SID that owns the file.
-func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time) (ipc.StatusReply, error) {
+func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time, h *health) (ipc.StatusReply, error) {
 	var events int64
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&events); err != nil {
 		return ipc.StatusReply{}, fmt.Errorf("service: count events: %w", err)
@@ -468,12 +471,15 @@ func status(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started t
 	if err != nil {
 		return ipc.StatusReply{}, err
 	}
+	errs, last := h.snapshot()
 	return ipc.StatusReply{
-		SpoolDepth:   depth,
-		Events:       events,
-		Cells:        byCell,
-		UptimeMS:     time.Since(started).Milliseconds(),
-		DatabasePath: secret.MaskString(dbPath),
+		SpoolDepth:     depth,
+		Events:         events,
+		Cells:          byCell,
+		UptimeMS:       time.Since(started).Milliseconds(),
+		DatabasePath:   secret.MaskString(dbPath),
+		Errors:         errs,
+		LastCheckpoint: last,
 	}, nil
 }
 
@@ -523,25 +529,27 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 		}
 		projectID = p.ID
 	}
-	hits, err := search.Search(ctx, db, req.Query, projectID, limit)
+	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit)
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}
 	out := make([]ipc.SearchHit, len(hits))
 	for i, h := range hits {
+		name, cut := truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes)
 		out[i] = ipc.SearchHit{
 			// The same untrusted column [getEvent] masks, reaching the
 			// same wire by a different reply (backlog 29). A real id is
 			// unchanged by it, so the id a model hands back to get_event
 			// is still the one that was stored.
-			ID:           secret.MaskString(h.ID),
-			Host:         h.Host,
-			EventName:    truncateRunes(secret.MaskString(h.EventName), maxEventNameRunes),
-			ReceivedAtMS: h.ReceivedAtMS,
-			Excerpt:      h.Excerpt,
+			ID:                 secret.MaskString(h.ID),
+			Host:               h.Host,
+			EventName:          name,
+			EventNameTruncated: cut,
+			ReceivedAtMS:       h.ReceivedAtMS,
+			Excerpt:            h.Excerpt,
 		}
 	}
-	return ipc.SearchReply{Hits: out}, nil
+	return ipc.SearchReply{Hits: out, Total: total}, nil
 }
 
 // maxEventNameRunes bounds events.event_name on the way onto the wire.
@@ -552,21 +560,28 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 // fail at ipc.WriteFrame - which the CLI can only report as a failed read - and
 // would put the same megabytes in an MCP response, which has no frame to refuse
 // it (see [cells]). A shortened name is a worse answer than the real one and a
-// much better one than no answer at all.
+// much better one than no answer at all, and since backlog 17 the reply says
+// which it is.
 //
-// 64 is what the CLI prints: `engramux search` formats the name with %.64q,
-// which truncates its input to 64 runes, so nothing past this ever reached a
-// person anyway. A client that wants the whole name is what would move this.
-const maxEventNameRunes = 64
+// 256 is a bound on the reply and not on what one client prints, which is what
+// backlog 16 asked for: the old value was the CLI's display width. Measured
+// over the 902 captures, the longest name either host has ever emitted is 17
+// runes (`PermissionRequest`), and both hosts draw their names from a fixed
+// list - so at fifteen times that, a real name is never cut and this exists
+// only for a payload that lies. At 4 bytes a rune worst case, 256 runes is 1
+// KiB per hit and 100 KiB across ipc.MaxSearchLimit hits, a fortieth of the 4
+// MiB frame and small beside the excerpts. `engramux search` and `event` cut
+// again for the terminal, to 64, with their own mark.
+const maxEventNameRunes = 256
 
-// truncateRunes cuts s to at most n runes. Runes and not bytes, so the cut
-// cannot land inside one and produce U+FFFD.
-func truncateRunes(s string, n int) string {
+// truncateRunes cuts s to at most n runes and says whether it did. Runes and
+// not bytes, so the cut cannot land inside one and produce U+FFFD.
+func truncateRunes(s string, n int) (string, bool) {
 	r := []rune(s)
 	if len(r) <= n {
-		return s
+		return s, false
 	}
-	return string(r[:n])
+	return string(r[:n]), true
 }
 
 // cells is the per-cell breakdown [ipc.Cell] documents: one row per distinct
@@ -596,11 +611,7 @@ func truncateRunes(s string, n int) string {
 // LIMIT and a truncation flag, which needs a number nothing has measured, and
 // an unmeasured cap is what AGENTS.md forbids.
 func cells(ctx context.Context, db *sql.DB) ([]ipc.Cell, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT host, event_name, count(*), min(received_at), max(received_at)
-		FROM events
-		GROUP BY host, event_name
-		ORDER BY host, event_name`)
+	rows, err := db.QueryContext(ctx, store.CellsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("service: group events by cell: %w", err)
 	}

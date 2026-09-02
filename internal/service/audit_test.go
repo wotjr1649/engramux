@@ -105,7 +105,7 @@ func TestPhase6RedactionAudit(t *testing.T) {
 		t.Fatalf("ingest the audit event: status %q, err %v", ack, err)
 	}
 
-	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate())
+	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate(), newHealth())
 
 	t.Run("reply documents", func(t *testing.T) {
 		st, err := h.Status(t.Context())
@@ -390,7 +390,7 @@ func TestPhase6AnEventIdThatCarriesAUserPathIsMasked(t *testing.T) {
 		}
 	}
 
-	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate())
+	h := handlers(db, auditDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newReadGate(), newHealth())
 	samples := []secrettest.Sample{hostile}
 
 	t.Run("a real id survives masking unchanged", func(t *testing.T) {

@@ -466,7 +466,7 @@ func TestTheCellBreakdownIsReadAtEveryRequest(t *testing.T) {
 // statusOf calls [status] the way the pipe handler does.
 func statusOf(t *testing.T, db *sql.DB, dir string) ipc.StatusReply {
 	t.Helper()
-	reply, err := status(t.Context(), db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now())
+	reply, err := status(t.Context(), db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), newHealth())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -527,17 +527,24 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 		in   string
 		n    int
 		want string
+		cut  bool
 	}{
-		{name: "over the bound is cut", in: "PostToolUse", n: 5, want: "PostT"},
+		{name: "over the bound is cut", in: "PostToolUse", n: 5, want: "PostT", cut: true},
 		{name: "under the bound is untouched", in: "abc", n: 5, want: "abc"},
 		{name: "exactly the bound is untouched", in: "abcde", n: 5, want: "abcde"},
 		{name: "empty is empty", in: "", n: 5, want: ""},
-		{name: "multibyte cuts on a rune", in: "가나다라마바", n: 3, want: "가나다"},
+		{name: "multibyte cuts on a rune", in: "가나다라마바", n: 3, want: "가나다", cut: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := truncateRunes(tc.in, tc.n)
+			got, cut := truncateRunes(tc.in, tc.n)
 			if got != tc.want {
 				t.Errorf("truncateRunes(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
+			}
+			// The flag is backlog 17: a cut that left no mark made a
+			// shortened name indistinguishable from a real one of
+			// exactly the bound's length.
+			if cut != tc.cut {
+				t.Errorf("truncateRunes(%q, %d) reported cut = %v, want %v", tc.in, tc.n, cut, tc.cut)
 			}
 			if n := utf8.RuneCountInString(got); n > tc.n {
 				t.Errorf("the result is %d runes, over the bound of %d", n, tc.n)

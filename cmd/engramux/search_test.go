@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -184,7 +183,7 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 		},
 	}
 	serveSearch(t, func(context.Context, ipc.SearchRequest) (ipc.SearchReply, error) {
-		return ipc.SearchReply{Hits: hits}, nil
+		return ipc.SearchReply{Hits: hits, Total: 2}, nil
 	})
 
 	var code int
@@ -194,7 +193,8 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 		t.Errorf("exit code = %d, want 0", code)
 	}
 	when := stamp(ms)
-	want := when + "  codex        " + `"PostToolUse"` + "\n" +
+	want := "2 of 2 matches\n\n" +
+		when + "  codex        " + `"PostToolUse"` + "\n" +
 		`"0192f0c0-0000-7000-8000-000000000001"` + "\n" +
 		`"first leaf\nsecond leaf"` + "\n\n" +
 		when + "  claude-code  " + `""` + "\n" +
@@ -297,27 +297,4 @@ func TestSearchScopeReadsTheFlagOnlyInFirstPosition(t *testing.T) {
 			t.Error("a flag with no path was accepted")
 		}
 	})
-}
-
-// TestTheQPrecisionIsMeasuredInRunes holds fmt's rule, because a constant on
-// the wire rests on it and nothing else here does.
-//
-// internal/service bounds an event name at 64 RUNES, and the justification
-// written beside that constant is that this file prints the name with %.64q,
-// which truncates its input to 64 runes - so nothing past the bound ever
-// reached a person anyway. fmt documents the precision of %q as runes for
-// strings, and the two 64s therefore have to mean the same unit. If %q ever
-// counted bytes instead, every one of these formats would show fewer
-// characters than the wire carries and the constant's reasoning would be
-// wrong with nothing red.
-//
-// Multi-byte on purpose: an ASCII case passes under either rule and measures
-// nothing. Hangul is three bytes per rune, so a byte-measured precision cuts
-// this to one character.
-func TestTheQPrecisionIsMeasuredInRunes(t *testing.T) {
-	const in = "가나다라"
-	if got, want := fmt.Sprintf("%.3q", in), `"가나다"`; got != want {
-		t.Errorf("fmt.Sprintf(\"%%.3q\", %q) = %s, want %s - "+
-			"%%q precision is no longer measured in runes, and maxEventNameRunes rests on it", in, got, want)
-	}
 }

@@ -334,7 +334,7 @@ func TestReportMCPNeverDecidesTheExitCode(t *testing.T) {
 
 	var out bytes.Buffer
 	r := &report{w: &out}
-	r.reportMCP(t.Context())
+	r.reportMCP(t.Context(), filepath.Join(t.TempDir(), "claude-state.json"), filepath.Join(t.TempDir(), "config.toml"))
 
 	if r.failed {
 		t.Errorf("the MCP section failed the run:\n%s", out.String())
