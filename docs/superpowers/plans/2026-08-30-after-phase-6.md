@@ -181,10 +181,19 @@ would have reindexed every row's leaves for no change at all: the rebuild this s
 not doing, arriving through the back door. The trigger is dropped around the backfill and put back,
 and the test that holds it asserts the trigger *works* afterwards and not only that it exists.
 
+**The race script is what found the cost, and the normal suite could not.** Its first run was red on
+the Phase 5 contention gate, and the answer took three arms rather than a retry: the merge-base in a
+throwaway worktree, the branch with the boost switched off, and the branch as written. Both things
+were true — the gate is marginal on this machine before Step 4 exists, and the boost as first
+written made it fail every time. The second is fixed and the first is backlog **38**. Memory spec
+rev.6 carries the figures.
+
 **Verified**: the suite green at exit 0, the pinned linter `0 issues.` at exit 0 with both values
-read. Eleven deliberate mutations across the four commits, every one asserted present before the suite
-ran and every one killed — including two against gate M4 itself, which answered with the delete
-message and with the regression message respectively, so the gate is not vacuous.
+read, and `./scripts/race.sh` green at exit 0 on the rerun. Thirteen deliberate mutations across the
+commits, every one asserted present before its suite ran and every one killed — including two
+against gate M4 itself, which answered with the delete message and with the regression message
+respectively, so the gate is not vacuous. One mutation did not apply on its first attempt and the
+assertion in front of it is what said so, rather than the `ok` that followed.
 
 **Step 5 — injection, built and disabled.** Memory spec **M-4**. Last of the memory work, and it
 ships off.

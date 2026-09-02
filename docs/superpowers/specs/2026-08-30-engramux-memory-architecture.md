@@ -499,6 +499,26 @@ that stopped applying looks exactly like a boost that never helped.
 `TestIngestWritesTheDerivedColumns` compares what `Ingest` stored against what `Derive` answers for
 the same bytes.
 
+*The boost has a runtime cost, the Phase 5 contention gate is what priced it, and the first form was
+too expensive to ship.* `ORDER BY rank` makes FTS5 score every matching row before the first one is
+returned, so anything in that clause runs per matching row per query token. The boost was first
+written as `instr(lower(col), ?)`, and `lower()` **copies the column** before the comparison can read
+it — over `derived_output`, which holds whole tool outputs. §8's Phase 5 contention clause measured
+it: 20 ingests against 96 readers over 4,000 documents, slowest ingest **832, 845 and 928 ms** against
+§5.3's 800 ms, none of three under. Rewritten as `LIKE ... ESCAPE`, which compares in place and whose
+`OR` short-circuits, the same gate gives **375, 378, 481, 493 and 502 ms**, five of five. LIKE is
+case-insensitive for ASCII by default and nothing sets `case_sensitive_like`, so it is the same
+comparison minus the copy — and the escaping that was the reason to reject it is four lines, asserted
+through queries somebody would type rather than through the pattern builder.
+
+*The same run found that the gate was already marginal, which is not this step's to fix.* Measured at
+the commit before any of Step 4: five runs of that gate alone gave 692, 784, 852, 777 and 751 ms —
+**one of five over the budget**, and the other four inside it by less than 50 ms. So a red contention
+gate is not evidence of a regression until an arm has been measured against a baseline, and a green
+`scripts/race.sh` on that machine is roughly a four-in-five event. Backlog **38** carries it, names
+the three readings that could explain the margin, and says that moving the number is not one of the
+ways to settle it.
+
 *The derived columns are never selected and never leave the machine.* They hold copies of payload
 text, unmasked, which adds no exposure the database does not already have under I-10 — but it would
 add an egress if anything read them out. Nothing does: they appear in the `ORDER BY` and in no
