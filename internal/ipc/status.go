@@ -71,6 +71,22 @@ type StatusReply struct {
 	UptimeMS int64 `json:"uptime_ms"`
 	// DatabasePath is the database the service opened, masked.
 	DatabasePath string `json:"database_path"`
+	// Errors is how many records at ERROR or above the service has logged
+	// since it started (backlog 31). A count and not the records: the log
+	// file has those, and this says whether it is worth opening.
+	Errors int64 `json:"errors"`
+	// LastCheckpoint is how the most recent WAL checkpoint went, or nil
+	// before the first attempt of this run - nil rather than a zero
+	// instant, so "not yet" is not "at the epoch".
+	LastCheckpoint *CheckpointResult `json:"last_checkpoint"`
+}
+
+// CheckpointResult is one checkpoint attempt as the service reports it.
+type CheckpointResult struct {
+	// AtMS is when the attempt finished, milliseconds since the Unix epoch.
+	AtMS int64 `json:"at_ms"`
+	// Error is why it failed, masked, and absent when it did not.
+	Error string `json:"error,omitempty"`
 }
 
 // Cell is one host x event-name cell of the capture breakdown, and the unit

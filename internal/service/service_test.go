@@ -466,7 +466,7 @@ func TestTheCellBreakdownIsReadAtEveryRequest(t *testing.T) {
 // statusOf calls [status] the way the pipe handler does.
 func statusOf(t *testing.T, db *sql.DB, dir string) ipc.StatusReply {
 	t.Helper()
-	reply, err := status(t.Context(), db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now())
+	reply, err := status(t.Context(), db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), newHealth())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

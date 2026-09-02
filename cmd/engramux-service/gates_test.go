@@ -411,8 +411,12 @@ func TestStatusReportsWhatIsActuallyThere(t *testing.T) {
 		t.Fatalf("engramux status exited %d, want 0", res.exit)
 	}
 	for _, want := range []string{
-		fmt.Sprintf("events    %d", wantEvents),
-		fmt.Sprintf("spool     %d", wantSpool),
+		fmt.Sprintf("events      %d", wantEvents),
+		fmt.Sprintf("spool       %d", wantSpool),
+		// Backlog 31's two lines, as a freshly started service prints
+		// them: nothing logged at ERROR, and no checkpoint yet.
+		"errors      0",
+		"checkpoint  none yet",
 		maskedDatabasePath(local),
 	} {
 		if !strings.Contains(res.stdout, want) {

@@ -127,6 +127,12 @@ type Checkpointer struct {
 	// good deal shorter than Interval or the threshold trigger never fires
 	// first.
 	Poll time.Duration
+	// Report, when set, is called after every attempt with the instant it
+	// finished and its error or nil (backlog 31). It is how the status reply
+	// learns what the loop did; nothing here reads it back. An attempt the
+	// context cancelled mid-way is not reported, because a cancellation is
+	// not a checkpoint result.
+	Report func(at time.Time, err error)
 }
 
 // Run checkpoints until ctx is cancelled.
@@ -171,8 +177,15 @@ func (c *Checkpointer) Run(ctx context.Context) {
 				slog.Info("engramux-service: the WAL reached the checkpoint threshold",
 					"wal_bytes", size, "threshold_bytes", c.Threshold)
 			}
-			if err := Checkpoint(ctx, c.DB); err != nil && ctx.Err() == nil {
+			err = Checkpoint(ctx, c.DB)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
 				slog.Error("engramux-service: checkpoint the WAL", "error", err, "wal_bytes", size)
+			}
+			if c.Report != nil {
+				c.Report(time.Now(), err)
 			}
 		}
 	}

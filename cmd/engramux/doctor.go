@@ -595,6 +595,12 @@ func (r *report) reportService() {
 	r.field("uptime", "%s", (time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond))
 	r.field("events", "%d", reply.Events)
 	r.field("spool", "%d", reply.SpoolDepth)
+	// Backlog 31's two: what the service has logged at ERROR since it
+	// started, and how its last checkpoint went. Facts, not findings - a
+	// count is worth opening the log for, and only the log says what it
+	// was.
+	r.field("errors", "%d", reply.Errors)
+	r.field("checkpoint", "%s", checkpointLine(reply.LastCheckpoint))
 	// The real path, and this is the one command that gets it (spec 5.9) -
 	// which is exactly why the default masks it again on the way out.
 	r.field("database", "%s", reply.DatabasePath)

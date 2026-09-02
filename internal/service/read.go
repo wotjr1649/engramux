@@ -168,15 +168,17 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 // the request. A database with no search index is a real state - one that
 // predates the migration - and it is the state a person runs `doctor` to find
 // out about.
-func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time) (ipc.DoctorReply, error) {
-	st, err := status(ctx, db, dbPath, spoolPath, started)
+func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, started time.Time, h *health) (ipc.DoctorReply, error) {
+	st, err := status(ctx, db, dbPath, spoolPath, started, h)
 	if err != nil {
 		return ipc.DoctorReply{}, err
 	}
 	reply := ipc.DoctorReply{
-		UptimeMS:   st.UptimeMS,
-		Events:     st.Events,
-		SpoolDepth: st.SpoolDepth,
+		UptimeMS:       st.UptimeMS,
+		Events:         st.Events,
+		SpoolDepth:     st.SpoolDepth,
+		Errors:         st.Errors,
+		LastCheckpoint: st.LastCheckpoint,
 		// Not st.DatabasePath: that one is masked.
 		DatabasePath: dbPath,
 	}

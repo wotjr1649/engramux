@@ -42,6 +42,10 @@ type DoctorReply struct {
 	UptimeMS   int64 `json:"uptime_ms"`
 	Events     int64 `json:"events"`
 	SpoolDepth int   `json:"spool_depth"`
+	// Errors and LastCheckpoint are [StatusReply]'s too (backlog 31), here
+	// for the same reason the three above are.
+	Errors         int64             `json:"errors"`
+	LastCheckpoint *CheckpointResult `json:"last_checkpoint"`
 	// DatabasePath is the real path of the database the service opened.
 	DatabasePath string `json:"database_path"`
 	// TokenizerLive is the tokenizer the live search index was created

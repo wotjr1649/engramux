@@ -60,7 +60,7 @@ func TestPhase5GateNoReplyFieldCarriesAUserPath(t *testing.T) {
 	// under the user profile. It is the shape a real install has: spec 5.6
 	// puts the file under the user's local application data directory.
 	t.Run("status", func(t *testing.T) {
-		reply, err := status(t.Context(), db, egressDatabasePath, filepath.Join(dir, spoolDir), time.Now())
+		reply, err := status(t.Context(), db, egressDatabasePath, filepath.Join(dir, spoolDir), time.Now(), newHealth())
 		if err != nil {
 			t.Fatalf("status: %v", err)
 		}

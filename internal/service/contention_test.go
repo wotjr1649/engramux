@@ -63,7 +63,7 @@ func TestPhase5GateAReaderDoesNotPushIngestPastItsBudget(t *testing.T) {
 	db := openMigrated(t, filepath.Join(dir, dbName))
 	seedForContention(t, db, contentionEvents)
 
-	h := handlers(db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), newReadGate())
+	h := handlers(db, filepath.Join(dir, dbName), filepath.Join(dir, spoolDir), time.Now(), newReadGate(), newHealth())
 
 	// The readers run until the ingests are done. They are started first and
 	// given a moment to fill the queue, so the ingests below arrive into
