@@ -30,6 +30,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // Hit is one matching event, in the order FTS5 ranked it: the caller's slice
@@ -99,12 +100,26 @@ type Hit struct {
 // it costs nothing the ORDER BY was not already paying: ranking needs every
 // matching row in hand before the first one can be returned.
 func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) (hits []Hit, total int64, err error) {
+	return searchWith(ctx, db, text, projectID, limit, true)
+}
+
+// searchWith is [Search] with the derived-field boost made explicit, so that
+// gate M4 can run the same query both ways over one corpus and report the
+// difference (memory spec 5). It is unexported and has exactly two callers:
+// [Search], which passes true, and the alias in this package's export_test.go,
+// which passes false.
+//
+// A parameter rather than a package variable, because a variable a test sets is
+// a variable two parallel tests fight over, and because "the production path is
+// the one with the constant written into it" is a property worth having at the
+// call site rather than in a comment.
+func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool) (hits []Hit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query, args := matchQuery(tokens, projectID, limit)
+	query, args := matchQuery(tokens, projectID, limit, boost)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search: match: %w", err)
@@ -173,22 +188,82 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) 
 // happens to be true. A disjunction like `(? = ” OR project_id = ?)` would read
 // as tidier and would put an unmeasured expression in front of every existing
 // invocation for the sake of one fewer string.
-func matchQuery(tokens []string, projectID string, limit int) (string, []any) {
-	const (
-		head = `
+func matchQuery(tokens []string, projectID string, limit int, boost bool) (string, []any) {
+	const head = `
 		SELECT events.id, events.host, events.event_name, events.received_at, events.payload,
 		       count(*) OVER ()
 		FROM events_fts
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?`
-		tail = `
-		ORDER BY rank
-		LIMIT ?`
-	)
-	if projectID == "" {
-		return head + tail, []any{matchExpression(tokens), limit}
+
+	args := []any{matchExpression(tokens)}
+	stmt := head
+	if projectID != "" {
+		stmt += `
+		  AND events.project_id = ?`
+		args = append(args, projectID)
 	}
-	return head + `
-		  AND events.project_id = ?` + tail,
-		[]any{matchExpression(tokens), projectID, limit}
+	order, orderArgs := orderBy(tokens, boost)
+	stmt += order + `
+		LIMIT ?`
+	args = append(args, orderArgs...)
+	args = append(args, limit)
+	return stmt, args
+}
+
+// boostPerDerivedToken is what one query token found in a derived column is
+// worth against bm25's own score.
+//
+// FTS5's `rank` is bm25 and is negative, more negative being a better match, so
+// the boost is subtracted. The magnitude is a value and gate M4 is what sets it:
+// the gate logs the score distribution it measured beside the recall it
+// measured, so this constant comes out of the same run that decides whether the
+// boost survives at all. It is deliberately not a per-column weight - three
+// weights would be three unmeasured inputs to one number, and M4's per-class
+// figures already say which kind of field earned its keep, because the class is
+// a property of the query rather than of the column.
+const boostPerDerivedToken = 1.0
+
+// orderBy builds the ORDER BY clause and the arguments it needs.
+//
+// # The boost reorders and never filters
+//
+// Every token's test is inside the ordering expression and none of it is in the
+// WHERE clause, which is the whole of M-3's boundary between a ranking input and
+// a filter. A document that carries none of the query in any derived column
+// scores an unchanged `rank` and is still returned;
+// TestTheDerivedBoostChangesNoResultSet is what holds that.
+//
+// # instr and not LIKE
+//
+// `instr(lower(col), ?)` against a token this function lowered in Go, rather
+// than `col LIKE '%' || ? || '%'`. LIKE would need the token's own `%` and `_`
+// escaped, and a Windows path and a snake_case identifier are exactly the two
+// shapes this corpus is full of - so the LIKE form is a bug waiting on a query
+// somebody types, and the instr form has nothing to escape.
+//
+// The three columns are read separately rather than concatenated once, because
+// concatenating builds a new string per row per token where three instr calls
+// scan the columns in place.
+func orderBy(tokens []string, boost bool) (string, []any) {
+	if !boost {
+		return `
+		ORDER BY rank`, nil
+	}
+	var b strings.Builder
+	b.WriteString(`
+		ORDER BY rank - ? * (`)
+	args := []any{boostPerDerivedToken}
+	for i, tok := range tokens {
+		if i > 0 {
+			b.WriteString(` + `)
+		}
+		b.WriteString(`(instr(lower(events.derived_cmd), ?)` +
+			` + instr(lower(events.derived_paths), ?)` +
+			` + instr(lower(events.derived_output), ?) > 0)`)
+		lowered := strings.ToLower(tok)
+		args = append(args, lowered, lowered, lowered)
+	}
+	b.WriteString(`)`)
+	return b.String(), args
 }

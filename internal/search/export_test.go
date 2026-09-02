@@ -1,5 +1,10 @@
 package search
 
+import (
+	"context"
+	"database/sql"
+)
+
 // The query builder, reachable from this package's external test package.
 //
 // TestEveryCandidateDocumentIsReachable derives one query per candidate
@@ -23,3 +28,15 @@ var (
 	QueryTokens     = queryTokens
 	MatchExpression = matchExpression
 )
+
+// SearchUnboosted is [Search] with the derived-field boost off.
+//
+// Gate M4 measures the derived fields by running one corpus both ways and
+// comparing recall@10 and MRR (memory spec 5), and there is no honest way to do
+// that from outside the package without this. It is deliberately not a flag on
+// the exported surface: nothing a caller of this package can do turns the boost
+// off, so no reply anybody receives was ranked by a path the gate did not
+// measure.
+func SearchUnboosted(ctx context.Context, db *sql.DB, text, projectID string, limit int) ([]Hit, int64, error) {
+	return searchWith(ctx, db, text, projectID, limit, false)
+}
