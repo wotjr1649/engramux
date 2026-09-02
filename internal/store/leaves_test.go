@@ -456,6 +456,16 @@ var agreementPayloads = []namedPayload{
 	{"arrays nested one past it", nestedJSON(sqliteJSONDepthLimit+1, "[")},
 	{"objects and arrays alternating to SQLite's limit", nestedJSON(sqliteJSONDepthLimit, "{[")},
 	{"objects and arrays alternating one past it", nestedJSON(sqliteJSONDepthLimit+1, "{[")},
+	// Added 2026-09-03, when a review asked whether the shapes where
+	// encoding/json and SQLite's JSON parser each have an opinion could split
+	// the two walks. These two do not, and that is the answer rather than an
+	// absence of one: this walk emits every string leaf, so a duplicated key
+	// contributes both of its values on both sides, and json_tree visits both
+	// too. The third shape it asked about does split them and is not here -
+	// TestTheTwoJSONParsersDivergeOnALoneSurrogate has it, with the reason it
+	// is pinned rather than fixed.
+	{"a duplicated key", []byte(`{"k":"the first value","k":"the second value"}`)},
+	{"an escaped NUL", escapedNUL("tool_input", "command")},
 	{"a surrogate-pair escape", []byte(`{"k":"\uD55C\uAE00 \u0041 \uD83D\uDE00"}`)},
 }
 

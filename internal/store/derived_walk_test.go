@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
@@ -35,6 +36,43 @@ var derivedPayloads = []namedPayload{
 	{"a shallow command beside a nesting SQLite refuses", deepBesideACommand(sqliteJSONDepthLimit + 1)},
 	{"a shallow command beside a nesting SQLite accepts", deepBesideACommand(sqliteJSONDepthLimit - 4)},
 	{"text that looks like an error, in stdout", []byte(`{"tool_response":{"stdout":"error: cannot find package\nexit status 1"}}`)},
+
+	// Added 2026-09-03, when a review asked whether the shapes where
+	// encoding/json and SQLite's JSON parser each have an opinion could split
+	// these two walks. A NUL does not, and that is the answer rather than the
+	// absence of one. The two that do are not here: they are pinned in
+	// TestTheTwoJSONParsersDivergeOnADuplicatedKey and
+	// TestTheTwoJSONParsersDivergeOnALoneSurrogate, with the reason each is
+	// pinned rather than fixed.
+	//
+	// Neither is written as a literal, and that is not style: a NUL survives
+	// being typed into this file as a real NUL, which is an illegal character
+	// in Go source. It was tried the other way first and the file stopped
+	// compiling.
+	{"an escaped NUL inside the command", escapedNUL("tool_input", "command")},
+	{"an escaped NUL in the output column, the one that carries whole tool outputs",
+		escapedNUL("tool_response", "stdout")},
+}
+
+// escapedNUL builds a payload whose one value carries a NUL, and lets
+// encoding/json write the escape rather than this file spelling it.
+func escapedNUL(outer, inner string) []byte {
+	b, err := json.Marshal(map[string]any{
+		outer: map[string]any{inner: "before" + string(rune(0)) + "after"},
+	})
+	if err != nil { // two strings and two maps; there is nothing here to fail
+		panic(err)
+	}
+	return b
+}
+
+// loneSurrogate builds a payload carrying an escape that names half a surrogate
+// pair. encoding/json cannot be asked to emit one - it substitutes U+FFFD - so
+// the escape is assembled from its code points, which is also what keeps
+// anything in the editing path from decoding it on the way in.
+func loneSurrogate() []byte {
+	esc := string(rune(0x5C)) + "ud800"
+	return []byte(`{"tool_input":{"command":"lone ` + esc + ` surrogate"}}`)
 }
 
 // deepBesideACommand is the shape that made [sqliteWillParse] necessary: a
