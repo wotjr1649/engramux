@@ -238,6 +238,14 @@ hands it. Any replacement inherits that hazard, and the seam that contains it â€
 has to be reproduced or the tests write outside their temporary directory. `AGENTS.md` carries the
 row.
 
+**First run against the real hosts, 2026-09-02**, replacing the Phase 6 binaries with the merged
+build on the owner's machine: both copies, the logon task, the service start, the Codex registration
+and the eleven hook entries went through in one pass, and the four events that arrived while the
+service was down came back through the spool. The one thing that did not go through was Claude
+Code's `mcp add` against a registration the previous installer had already made â€” it exited 1 with
+the existing registration intact and pointing at the live endpoint, which `doctor` confirmed.
+Backlog 35: a re-install must not report a failure it did not cause.
+
 ### `doctor` by stage (M-6)
 
 Three changes. "Not installed yet" and "installed and broken" become different answers, each naming
