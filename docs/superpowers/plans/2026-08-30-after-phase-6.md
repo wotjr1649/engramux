@@ -51,6 +51,15 @@ attribute.
 Done when: the suite, the pinned linter and the race script are green, and the binaries reinstalled
 through `engramux install` answer Step 2's `doctor`.
 
+**Done 2026-09-02**, on `step-1-clearing-build`: eleven rows, one commit each, every one with a test
+that fails when its fix is undone and a break-it pass that watched it fail. Suite 17 packages, the
+pinned linter `0 issues.` at exit 0, the race script 16 packages with no report. Installed through
+`engramux install --apply` on the owner's machine: migration `00003` applied at the first start,
+`doctor` green with its two new lines, the search reply's total and a refusal's reason both seen at
+the terminal, and Claude Code's own `mcp list` answering `Connected` against the now-stateless server.
+The installer's first run after backlog 35 said "already points at this endpoint" where the run
+before it had reported a failure.
+
 **Step 2 — installation and diagnosis.** Memory spec **M-5** and **M-6**. Independent of every other
 step and of each other, but ordered together because `doctor`'s stage judgement and `install`'s
 notion of a complete installation are the same definition written twice if they are split.
