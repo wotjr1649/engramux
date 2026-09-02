@@ -392,14 +392,12 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		return b
 
 	default:
-		// Drain is the CLI read I-08 routes over this pipe that this
-		// build does not implement. Rejected is the
-		// honest answer, and because ipc.Ack.Verify accepts only
-		// Committed it cannot be mistaken for success.
-		//
-		// It carries no reason, because ipc.Ack has no field for one.
-		// env.Type is safe to log verbatim here and only here: validate
-		// has already confirmed it is one of spec 5.2's constants.
+		// Unreachable while validate's list and this switch name the
+		// same types, and kept so that the day they diverge answers
+		// Rejected - which ipc.Ack.Verify never accepts - rather than a
+		// zero reply. env.Type is safe to log verbatim here and only
+		// here: validate has already confirmed it is one of spec 5.2's
+		// constants.
 		slog.WarnContext(ctx, "pipe: request type is not implemented in this build", "type", env.Type)
 		return encodeAck(ctx, ipc.Rejected, env.IngestID)
 	}
@@ -433,7 +431,7 @@ func encodeAck(ctx context.Context, status ipc.AckStatus, ingestID string) []byt
 // leaves a diagnosable file rather than one absorbed row.
 //
 // The version is checked before the type on purpose. Spec 5.5's upgrade path
-// - drain, stop, replace, start - can leave an old relay binary talking to a
+// - stop, replace, start - can leave an old relay binary talking to a
 // new service, and a relay speaking a protocol this build does not should be
 // told that, not told its request type is unknown.
 func validate(env ipc.Envelope) error {
@@ -446,7 +444,7 @@ func validate(env ipc.Envelope) error {
 		if env.IngestID == "" {
 			return errIngestID
 		}
-	case ipc.Status, ipc.Doctor, ipc.Search, ipc.Drain, ipc.GetEvent, ipc.ListSessions:
+	case ipc.Status, ipc.Doctor, ipc.Search, ipc.GetEvent, ipc.ListSessions:
 	default:
 		// Bounded with a precision: the type is arbitrary bytes off the
 		// wire, capped only by ipc.MaxFrameLen, and this string reaches a

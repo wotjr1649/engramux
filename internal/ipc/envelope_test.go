@@ -91,15 +91,16 @@ func TestEnvelopeGolden(t *testing.T) {
 	}
 }
 
-// TestRequestTypes pins the five spelling values I-08 and spec 5.2 require:
+// TestRequestTypes pins the six spelling values I-08 and spec 5.2 require:
 // a typo here would silently misroute every request of that type.
 func TestRequestTypes(t *testing.T) {
 	want := map[RequestType]string{
-		IngestEvent: "IngestEvent",
-		Status:      "Status",
-		Doctor:      "Doctor",
-		Search:      "Search",
-		Drain:       "Drain",
+		IngestEvent:  "IngestEvent",
+		Status:       "Status",
+		Doctor:       "Doctor",
+		Search:       "Search",
+		GetEvent:     "GetEvent",
+		ListSessions: "ListSessions",
 	}
 	for got, want := range want {
 		if string(got) != want {
