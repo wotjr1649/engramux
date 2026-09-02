@@ -297,7 +297,48 @@ func TestACodexPathIsNormalisedPastTheExtendedLengthPrefix(t *testing.T) {
 	}
 }
 
-// // TestARepeatedHeadingGetsItsOwnKey. Migration 00004 makes (host, source_path,
+// /// TestASectionInheritsItsFileCwd. A rollout summary writes cwd once in its header
+// and then a heading, so a section that reads the field per block sees none -
+// which filed every one of them under no project and made them unreachable
+// through a scoped MCP call. Found on the first live install, on an item whose
+// own file named a project two lines above it.
+//
+// A section that carries its own cwd keeps it, which is the raw-memories file
+// shape: 109 cwd lines over 55 sections there, so most of them do.
+func TestASectionInheritsItsFileCwd(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "one.md", `# a rollout
+cwd: D:\work\engramux
+thread_id: 0198f0c1
+
+## the first task
+something
+
+## the second task
+cwd: D:\work\elsewhere
+something else
+`, Source{Host: HostCodex, Kind: KindCodexRollout})
+
+	items, _, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := map[string]string{}
+	for _, it := range items {
+		got[it.EntryKey] = it.ProjectPath
+	}
+	if want := `d:\work\engramux`; got["the first task"] != want {
+		t.Errorf("the first section is filed under %q, want the file own cwd %q", got["the first task"], want)
+	}
+	if want := `d:\work\elsewhere`; got["the second task"] != want {
+		t.Errorf("a section that carries its own cwd was overwritten: %q, want %q", got["the second task"], want)
+	}
+	if want := `d:\work\engramux`; got[""] != want {
+		t.Errorf("the leading block is filed under %q, want %q", got[""], want)
+	}
+}
+
+// TestARepeatedHeadingGetsItsOwnKey. Migration 00004 makes (host, source_path,
 // entry_key) unique, and a heading is not unique within a file: a real Codex
 // artefact on this machine repeats one, and the collector failed that constraint
 // on it where every synthesised fixture had passed. Found by indexing the real

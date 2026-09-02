@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAServiceWithNoHostHomesIndexesNothing is the test that makes a forgotten
@@ -53,6 +55,7 @@ func TestAServiceIndexesTheMemoryItIsPointedAt(t *testing.T) {
 	}
 
 	s := start(t, local)
+	waitUntilIndexed(t, s)
 	s.stop(t)
 
 	var n int64
@@ -62,6 +65,30 @@ func TestAServiceIndexesTheMemoryItIsPointedAt(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("the index matched %d documents, want 1 - the collector did not run, or ran and indexed nothing", n)
+	}
+}
+
+// / waitUntilIndexed blocks until the service has written its first memory pass.
+//
+// [start] waits for a Status reply, which the collector does not gate: it runs
+// on its own goroutine and the first pass is concurrent with the service
+// becoming answerable. A test that asserted straight after start was asserting
+// against a race it usually won - it lost one once the pass got slower, which is
+// the only warning that kind of test gives.
+//
+// The log line is the signal rather than a poll of the database, because the
+// service holds that file exclusively while it runs (I-07).
+func waitUntilIndexed(t *testing.T, s *running) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if bytes.Contains(s.logFile(t), []byte("indexed native memory")) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the service did not index native memory within 30s")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -90,7 +117,7 @@ func TestTheCLIShowsNativeMemoryAndReadsOneBack(t *testing.T) {
 			t.Fatalf("WriteFile %s: %v", name, err)
 		}
 	}
-	start(t, local)
+	waitUntilIndexed(t, start(t, local))
 
 	found := cliIn(t, local, "search", "covering")
 	if found.exit != 0 {

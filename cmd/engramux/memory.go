@@ -16,7 +16,7 @@ import (
 // event, and the difference is the data rather than the interface: Codex's
 // memory is global and Claude Code files its own under a directory key that is
 // not a path, so a large part of what this reads belongs to no project this
-// database has a row for. On the machine this was measured, 155 of 303 items.
+// database has a row for. On the machine this was measured, 63 of 303 items.
 func showMemory(args []string) int {
 	if len(args) == 0 || len(args) > 2 {
 		warn("usage: engramux memory <id> [project]")

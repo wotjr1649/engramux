@@ -224,7 +224,7 @@ not.** Codex's thread sections, its per-rollout summaries and its index entries;
 Where the delimiter is not recognised the file survives as a single document, which is M2's
 warn-and-continue applied to the unit rather than only to the fields. This section said "about
 150–200 documents" when it was written and the built parser says **303**, over 81 files — 38 Claude
-Code and 265 Codex, 127 carrying a host timestamp and 148 a project — measured by
+Code and 265 Codex, 127 carrying a host timestamp and 240 a project — measured by
 `TestGateM1EveryNativeMemoryFileParsesAndKeepsItsText`, which logs the figures on its passing path.
 The estimate was low because it counted a Codex artefact's sections and not its own leading block.
 303 against 17,043 events. The alternative that was rejected is file granularity, and one measurement rejects it:
@@ -324,9 +324,13 @@ reading; this is what running the code corrected and what it added. Every figure
 committed test that logs it, not out of a probe.
 
 *The corpus is bigger than the estimate, and the estimate is corrected above.* 303 items over 81
-files, 38 Claude Code and 265 Codex, 127 with a host timestamp and 148 with a project — so **155 of
+files, 38 Claude Code and 265 Codex, 127 with a host timestamp and 240 with a project — so **63 of
 303 belong to no project this database has a row for**, which is what decision 8's path scoping and
-`get_memory`'s optional project are for. The largest body is **20,156 B** and the largest masked body
+`get_memory`'s optional project are for. That was 148 with a project until the first live install
+showed why: a Codex rollout summary writes its `cwd` once in the file's header and then a heading, so
+every section below it read as belonging to nowhere — `project ""` on an item whose own file named one
+two lines above. A section inherits its file's `cwd` now and 92 more items are reachable through a
+scoped call. Only the path is inherited; inheriting a timestamp would date a section by its neighbour. The largest body is **20,156 B** and the largest masked body
 is also 20,156 B, nothing in that item having matched a rule; `ipc.MaxMemoryBodyBytes` is 128 KiB,
 6.6× the largest measured, on the ratio `MaxEventPayloadBytes` was set at.
 

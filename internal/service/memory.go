@@ -18,7 +18,7 @@ import (
 // memory item may belong to no project this database has a row for - Codex's
 // memory is global and Claude Code's is filed under a directory key that is not
 // a path - so requiring one would make those items unreachable through MCP. On
-// this machine that is 155 of 303 items.
+// this machine that is 63 of 303 items.
 //
 // The masking is [search.GetMemoryItem]'s, which owns the whole memory read
 // path. What this function adds is the bound and the wire shape.

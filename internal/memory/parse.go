@@ -214,11 +214,27 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 		key   string
 		block []string
 		seen  = map[string]int{}
+		// The leading block's cwd is the file's, and the sections below it
+		// inherit it when they carry none of their own. A rollout summary
+		// writes cwd once in its header and then a heading, so without
+		// this every one of its sections is filed under no project and is
+		// unreachable through a scoped MCP call - which is how it read on
+		// the first live install: `project ""` on an item whose file names
+		// one two lines up.
+		//
+		// Only cwd is inherited. A timestamp is about the block and
+		// inheriting one would date a section by its neighbour.
+		fileCwd string
 	)
 	flush := func() {
 		body, mod, cwd, w := codexBlock(s, block)
 		if body == "" {
 			return
+		}
+		if key == "" {
+			fileCwd = cwd
+		} else if cwd == "" {
+			cwd = fileCwd
 		}
 		warns = append(warns, w...)
 		items = append(items, Item{
