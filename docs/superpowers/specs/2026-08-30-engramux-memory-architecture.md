@@ -274,3 +274,33 @@ MCP being optional has a cost, and it is taken deliberately: an endpoint that is
 answering now exits 0. It is still printed and still loud. This is the same trade the service already
 makes, where a failed endpoint is logged and ingest carries on rather than the service refusing to
 start.
+
+### Publication conditions
+
+Decided 2026-09-02. §1 already makes publication wait on the memory feature being native-grade or
+better; this list is what else it waits on, written here so that the conditions have one owner instead
+of living in a session brief.
+
+1. **A first install on a clean profile.** The 1.0 spec's Windows argument has been measured on one
+   profile only, and that profile has had every build of Engramux on it. What the argument needs is an
+   install by the two shipped binaries alone onto a profile that has never run them. A *profile* is the
+   unit, not a machine, because it is the product's own unit of isolation: one service per user, a pipe
+   named from the user's SID, a data directory, two host files and a logon task per user. A second
+   local account on the owner's machine satisfies it, and it sees the one thing a disposable sandbox
+   cannot — the logon task starting the service at that account's logon. What it does not see is
+   another Windows build, and that is accepted. The condition read "a clean VM" from 2026-08-30 until
+   this revision; neither Hyper-V nor Windows Sandbox is installed on the owner's machine, a sandbox
+   could not see the logon half, and a VM's one extra answer is not worth its setup while publication
+   is this far off. What does **not** satisfy it, measured: an isolated tree on the owner's own
+   profile. Session 07 ran `install --apply` against one, and the service that run started went
+   through its scheduled task — a task runs with its principal's environment, not with the redirected
+   one the installer was given — so that instance found the real data directory and the real pipe,
+   lost the pipe race to the running service (I-09), and wrote its `stopped` line into the real log.
+   `AGENTS.md` carries the row; the 1.0 spec §7.1's soak row carries the line.
+2. **Backlog 28, the bearer token's file permissions.** The 1.0 spec §5.9 accepts the inherited DACLs
+   on the owner's machine; on a stranger's machine it is not the owner's to accept. What is the
+   product's to fix is `mcp.json`, written with a security descriptor of its own on the pattern
+   `internal/pipe`'s listener already uses. The two host files are not this product's to narrow, and
+   `doctor` reports their permissions as a finding rather than changing them.
+3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
+   nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0.
