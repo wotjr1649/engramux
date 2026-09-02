@@ -1,5 +1,11 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.5** · 2026-09-03 — rev.5 closes the one thing rev.4's **M-7** deliberately left open, the
+delivery channel, and the seven decisions that hung off it: what the artefact is, what the plugin
+does and does not carry, what Codex users get, a product version separate from the wire version, a
+release process, the signing route, and what `doctor` compares. It also corrects one measured claim
+in rev.4's M-7. rev.1 to rev.4 below.
+
 **rev.4** · 2026-09-03 — rev.4 adds **M-7**, the update path, and §8's fourth publication
 condition, which an antivirus wrote for us mid-session. rev.1 to rev.3 below.
 
@@ -458,6 +464,131 @@ avoid. It is also worse for §8's fourth condition below rather than better: a b
 user's machine has no publisher at all, so it starts from less reputation than an unsigned release,
 not more.
 
+### The delivery channel, and what it costs Codex (M-7)
+
+**Decided 2026-09-03**, in the session after M-7 was written and against what the two hosts' own
+references say today. M-7 left this open deliberately and named the consequence: until a channel
+exists, `--from` is `update`'s only door. This closes it, and it does not move the schedule — the
+plan's Step 6 still builds after Steps 4 and 5.
+
+**A GitHub Release is the substrate and a Claude Code plugin is the channel.** One zip per release,
+and the marketplace entry pointing at it carries that zip's SHA-256. Claude Code fetches it, checks
+the hash, and unpacks it under its plugin cache; `engramux update` reads that directory. The party
+that fetches is therefore the host the user already trusts for fetching, which is the whole of M-7's
+rule about outbound network — this product still has never made an outbound call and this decision
+does not give it one.
+
+**[verified] 2026-09-03** from Claude Code's own plugin and marketplace references. A marketplace
+entry accepts an `archive` source — a URL with an optional `sha256` — which needs neither git nor npm
+on the user's machine, caps the archive at 256 MiB, and requires Claude Code v2.1.224 or later.
+Installed plugins are cached one directory per version, keyed by marketplace, plugin and version,
+with old versions kept about fourteen days for sessions still running against them. The host's own
+plugin update command is what fetches, and a plugin's own version field pins what a user receives
+until it is bumped.
+
+**The zip is the plugin, and that is forced rather than chosen.** An `archive` source's zip has to be
+a plugin directory, so it carries the manifest and the two binaries. The consequence is the part
+worth writing down: the manual door and the channel consume **the same artefact**. Somebody who
+downloads the zip and unpacks it by hand points `--from` at what they unpacked and gets bytes
+identical to what the plugin cache holds. There is no second build and no second packaging step for
+the two to drift apart in.
+
+**The plugin delivers and does not configure.** Its manifest carries no hook entries and no MCP
+server entry, although both fields exist and would fit what `register` writes. Two reasons, and the
+first is I-04: a plugin's hooks are live only while the plugin is enabled, so disabling one would
+stop capture silently, which is the failure this product exists not to have. And a plugin-provided
+hook resolves against the plugin root rather than against the installed relay, so `doctor`'s check
+that the eleven entries point at the installed binary would have to accept two answers, and two
+relays of different versions could be live at once. `install` and `register` stay the only writers of
+host configuration, which is also what keeps `AGENTS.md`'s rule about an agent not editing host
+configuration meaningful.
+
+**[verified] correction to the rejection above.** M-7's paragraph rejecting a plugin lifecycle hook
+says the manifest "carries six keys". Re-read on 2026-09-03, it carries considerably more than six —
+metadata, component paths for skills, commands, agents, workflows, hooks, MCP servers, output styles
+and language servers, plus user configuration and plugin dependencies. The claim that decided
+anything is unaffected and stands: **there is still no install-time, update-time or removal-time
+lifecycle hook**, and every hook a plugin declares is a session-runtime event. The count was wrong;
+the conclusion drawn from it was not.
+
+**Codex users get the same capability and less convenience, and that is the decision rather than an
+oversight.** The release zip is the contract for both hosts: a user of either can download it, unpack
+it and run `update --from`, and what they get is byte-identical to what a plugin user gets. What is
+unequal is the noticing. **[verified] 2026-09-03** from OpenAI's own plugin documentation, Codex does
+now have a plugin system — a manifest of its own, local marketplace catalogues at a repository-scoped
+and a personal path, and a cache under its configuration home — so the shape exists. What does not
+exist there is the two things this channel is built out of: **no archive source is documented and no
+update command is documented.** A Codex plugin could carry the binaries and could not fetch a new zip
+or say that one exists, which is exactly the part being bought. Building one now would add a second
+manifest to keep in step and deliver nothing the release page does not already deliver. What is owed
+instead is that the README says this plainly rather than letting a Codex user find it out. Revisited
+when Codex documents either of the two, and the revisit is cheap because the artefact is already the
+same one.
+
+**A product version, and it is not the wire version.** Semantic versioning, `0.x` until §8's four
+publication conditions all close, injected at link time. The plugin manifest wants semver and so does
+every package manager this decision leaves on the table; nothing wants a date. `ipc.Version` stays
+what it is — a wire protocol version with exactly one consumer, the ack check, moving on a
+compatibility event. Coupling them would raise the wire version on a release that changed a document,
+and every relay and service pair a user had not restarted together would stop meeting. Two values
+because there are two questions, and `doctor` prints both.
+
+**The release runs on GitHub Actions, and that is a prerequisite rather than tidiness.** Push and
+pull request run the three checks `AGENTS.md` names, in its order. A tag builds the two binaries,
+packages the zip, computes its SHA-256, creates the release, and updates the marketplace entry in the
+commit that carries the version. The catalogue lives at the repository root beside the code it
+describes, so a version and the hash of the artefact it names cannot be committed apart. The build is
+`-trimpath` over the pinned toolchain with `CGO_ENABLED=0`, which is what makes an artefact
+attributable to a commit.
+
+**A green CI is a weaker statement than a green local run, and the tagging rule is what that buys.**
+**[verified] 2026-09-03**: a runner has no `.capture/` and no native memory, so **M1**, **M3**, the
+Phase 4 gate's corpus mode and the Phase 6 audit's masked half all skip there, each by its own
+explicit skip — the right behaviour and not a defect. What follows is a rule about tagging rather
+than about CI: a tag is pushed only after those four have been seen green on a machine that has the
+corpus, and what run that was is recorded with the release.
+
+**One artefact, windows/amd64.** Assumed rather than decided, and written here so it is visible
+rather than discovered: nothing in this product has been measured on Windows on arm64, and the 1.0
+spec's argument is written against the platform it was measured on. Reversing it is one entry in a
+build matrix and a second zip, on the day somebody asks.
+
+**No certificate is bought, and what replaces buying one is named.** §8's fourth condition is an
+outcome and stays one; this is the separate decision it left. **[verified] 2026-09-03** from
+Microsoft's own comparison of code signing options, last updated 2026-08-29, which is wider than the
+two costs §8 recorded. Azure Artifact Signing — formerly Trusted Signing, about ten dollars a month,
+no hardware token, CI-native — is **unavailable to this project**: organisations are limited to the
+USA, Canada, the EU and the UK, and **individual developers to the USA and Canada**. That is a
+geographic bar rather than a price, and it removes the cheapest option before cost is discussed. An
+OV certificate is 150 to 300 dollars a year worldwide and still carries the June 2023 hardware
+requirement §8 records. EV is confirmed as no longer worth its premium for SmartScreen, which §8
+already says. What §8 did not have is **SignPath Foundation**, which signs qualifying open-source
+projects at OV level for free through a managed pipeline: an OSI-approved licence with no commercial
+dual-licensing qualifies and `LICENSE` is Apache-2.0, but its other two bars do not clear today — the
+project must **already be released in the form to be signed**, and it must build on a **trusted build
+system**. Both are exactly what the release decision above creates. So signing is not rejected, it is
+**sequenced**, and what unblocks it is a release process rather than a purchase.
+
+**The false-positive submission is a line in the release checklist rather than a reaction.** Every
+release is submitted to Microsoft: it is free, it fixes the detection for everyone rather than for
+one machine, and §8's own reading says the alternative does not hold — without a signature there is
+no publisher identity for reputation to accumulate against, so every new binary is a new unknown.
+Waiting for a report makes the first user the reporter, and a first user who meets a behavioural
+detection on an unsigned binary mostly does not report it.
+
+**`doctor` compares three versions, because there are three and they fail differently.** The
+installed binary, the service actually running, and the newest version present in the plugin cache.
+Installed against running catches a replacement that was copied and never restarted, which is the
+state an interrupted reinstall leaves on this machine today. Cache against installed is what M-7's
+done-condition asks for, a newer binary beside the installed one. The first pair is answerable with
+no channel at all, so a user who never installs the plugin still gets the more useful half.
+
+**`scripts/reinstall.sh` becomes a one-line wrapper and is not deleted.** `update --from dist/`
+replaces the sequence the script exists for, and what is left after it is `doctor` and `status`.
+Three commands is still worth one, and the script keeps the place where `AGENTS.md`'s two carve-outs
+are explained. M-7's own prediction, that it becomes nearly empty, is what happens — "nearly" is the
+answer and not "entirely".
+
 ---
 
 ## 3. What "more precise than native" means, measurably
@@ -697,3 +828,11 @@ of living in a session brief.
    for at most 460 days, which makes it a recurring chore rather than a purchase. This is not a small
    project's problem alone — `openai/codex`, one of the two hosts this product serves, has its own
    Defender false-positive issue on the same shape.
+
+   **The route past those two costs was found on 2026-09-03 and is decided in M-7 rather than
+   here**, because it is a decision and this is a condition: signing is sequenced behind a release
+   process rather than bought, the cheapest paid option turns out to be closed to this project by
+   geography, and the free one is closed only until a release exists. What that changes about this
+   condition is nothing — the outcome is still a stranger's first run working or being documented,
+   and the false-positive submission still moves it. What it changes is that "sign the binaries"
+   now has an answer instead of a price tag.

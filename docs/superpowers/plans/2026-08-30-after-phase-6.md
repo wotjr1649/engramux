@@ -1,5 +1,9 @@
 # Execution order after Phase 6
 
+**rev.3** · 2026-09-03 — rev.2 was 2026-09-02. This revision records that Step 6's one open
+question, the delivery channel, was decided before the step rather than inside it, and that the
+release process it needs is part of that step rather than a new one.
+
 **rev.2** · 2026-09-02 — rev.1 was 2026-08-30. This revision records that the soak closed, admits
 backlog **34** into Step 1, replaces the merge order the Node installer's deletion had set, and names
 where the publication conditions live.
@@ -176,14 +180,24 @@ sequence forever, in bash, in a product whose argument is two binaries and no ru
 Blocked by: nothing technical. Unblocks: the fourth publication condition, partly — a user who can
 update is a user who can be told to.
 
-One thing this step decides that M-7 deliberately left open: **the delivery channel.** Until one
-exists — a plugin that carries the binaries, a package manager, or a downloaded folder — `update` has
-no local marker to read and `--from` is its only door. Which channel it is belongs to the session
-that builds this, against what exists then.
+**The delivery channel is no longer this step's to decide.** rev.2 left it here, on the argument that
+it belonged to the session that builds against what exists then. It was taken on 2026-09-03 instead,
+in the memory spec **rev.5**'s own M-7 section, because half of it was already decided and because
+what the two hosts' references say today answered more of it than a preference would have. Nothing
+about the schedule moved. This step executes against that section and restates none of it — the
+channel, what the artefact is, what the plugin carries, what Codex users get, the version scheme,
+the signing route and what `doctor` compares are all values and all live there.
+
+**What that adds to this step is the release half.** The step's own done-condition needs something
+for `update` to find, so building the release path is inside this step rather than beside it:
+splitting them makes two steps neither of which can verify the other. The one piece that is *not*
+here is the push and pull-request check workflow — it changes nothing the binary does, so by this
+repository's own rule it lands on `main` whenever somebody writes it, and it is worth writing before
+this step rather than during it.
 
 Done when: `update` replaces a running installation and restarts what was there when a copy fails,
-`doctor` reports a newer binary beside the installed one, and `scripts/reinstall.sh` is either a
-one-line wrapper or gone.
+`doctor` reports all three versions rev.5 names, a release exists that the channel can serve, and
+`scripts/reinstall.sh` is the one-line wrapper rev.5 decided it becomes.
 
 ## Not ordered here
 
