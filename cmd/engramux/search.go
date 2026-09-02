@@ -67,6 +67,12 @@ func search(args []string) int {
 		return 0
 	}
 
+	// How many were shown against how many matched (backlog 33), so a list
+	// that is everything reads differently from the first twenty of a
+	// thousand. Always printed rather than only when they differ: a line
+	// that appears sometimes is a line a reader has to know to look for.
+	_, _ = fmt.Fprintf(os.Stdout, "%d of %d matches\n\n", len(reply.Hits), reply.Total)
+
 	for _, h := range reply.Hits {
 		// Three of the four are quoted, and the rule is the schema
 		// rather than the field's name. events.host has a CHECK

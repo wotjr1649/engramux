@@ -69,7 +69,7 @@ func BenchmarkProjectScope(b *testing.B) {
 			b.Run(term.name+"/"+arm.name, func(b *testing.B) {
 				var hits int
 				for b.Loop() {
-					h, err := search.Search(b.Context(), db, term.text, arm.project, limit)
+					h, _, err := search.Search(b.Context(), db, term.text, arm.project, limit)
 					if err != nil {
 						b.Fatalf("search: %v", err)
 					}

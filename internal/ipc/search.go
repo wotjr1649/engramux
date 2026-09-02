@@ -99,6 +99,13 @@ type SearchReply struct {
 	// FTS5 gave them. An empty slice is a search that matched nothing, and
 	// is only distinguishable from a refusal after [SearchReply.Verify].
 	Hits []SearchHit `json:"hits"`
+	// Total is how many events matched before the limit cut the list, so
+	// Total >= len(Hits) always, and Total > len(Hits) says the caller saw
+	// the first len(Hits) of more (backlog 33). It is the count of what the
+	// MATCH and the project filter admitted together, taken in the same
+	// statement as the hits, so the two cannot disagree about which rows
+	// were in.
+	Total int64 `json:"total"`
 }
 
 // SearchHit is one matching event: enough to find it again and read it, and

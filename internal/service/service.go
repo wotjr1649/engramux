@@ -524,7 +524,7 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 		}
 		projectID = p.ID
 	}
-	hits, err := search.Search(ctx, db, req.Query, projectID, limit)
+	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit)
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}
@@ -542,7 +542,7 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 			Excerpt:      h.Excerpt,
 		}
 	}
-	return ipc.SearchReply{Hits: out}, nil
+	return ipc.SearchReply{Hits: out, Total: total}, nil
 }
 
 // maxEventNameRunes bounds events.event_name on the way onto the wire.

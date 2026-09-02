@@ -184,7 +184,7 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 		},
 	}
 	serveSearch(t, func(context.Context, ipc.SearchRequest) (ipc.SearchReply, error) {
-		return ipc.SearchReply{Hits: hits}, nil
+		return ipc.SearchReply{Hits: hits, Total: 2}, nil
 	})
 
 	var code int
@@ -194,7 +194,8 @@ func TestSearchPrintsOneBlockPerHit(t *testing.T) {
 		t.Errorf("exit code = %d, want 0", code)
 	}
 	when := stamp(ms)
-	want := when + "  codex        " + `"PostToolUse"` + "\n" +
+	want := "2 of 2 matches\n\n" +
+		when + "  codex        " + `"PostToolUse"` + "\n" +
 		`"0192f0c0-0000-7000-8000-000000000001"` + "\n" +
 		`"first leaf\nsecond leaf"` + "\n\n" +
 		when + "  claude-code  " + `""` + "\n" +
