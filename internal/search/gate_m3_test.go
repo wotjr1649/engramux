@@ -267,7 +267,12 @@ func readM3Fixture(t *testing.T) []m3Query {
 			t.Fatalf("line %d of the M3 fixture names the host %q, want %q or %q",
 				n, host, memory.HostClaude, memory.HostCodex)
 		}
-		q := m3Query{line: n, host: host, query: strings.TrimSpace(parts[1]), answer: parts[2]}
+		// Both trimmed, and the answer for the same reason the query is: an
+		// editor that leaves a trailing space on a line's last column would
+		// otherwise make an answer nothing carries, and the failure would read
+		// as "no item carries the answer at all" - which is true and is not
+		// what happened.
+		q := m3Query{line: n, host: host, query: strings.TrimSpace(parts[1]), answer: strings.TrimSpace(parts[2])}
 		if q.query == "" || q.answer == "" {
 			t.Fatalf("line %d of the M3 fixture has an empty query or answer", n)
 		}
