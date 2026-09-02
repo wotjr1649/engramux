@@ -32,6 +32,7 @@ go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # s
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
 bash scripts/soak-summary.sh docs/evidence/soak/soak.tsv                     # reduces a soak series to the figures spec §7.1 records
+bash scripts/reinstall.sh                                                    # dist/ over the installed service, then doctor and status
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
@@ -151,6 +152,7 @@ row on its own, delete the row — the test is the better owner.
 | `schtasks /end` then `/run` back to back leaves **nothing** running, and the log blames the pipe | `/end` returns before the process is gone. The `/run` starts a second instance while the first is still exiting, that instance loses the pipe race and exits with `pipe: listen: … Access is denied` — which is I-09 working — and then the first finishes dying. What is left is no service at all, with a log line that reads like a singleton conflict rather than like an empty machine. Observed. Wait for the old one to stop answering before starting the new one: `until ! engramux.exe status >/dev/null 2>&1; do sleep 1; done`. A `status` that succeeds during the gap is being answered by the instance that is on its way out, so polling for success before `/run` proves nothing |
 | A test runs the installer and quietly edits your own Claude Code configuration | Registering the MCP endpoint runs `claude mcp add --scope user`, and that binary resolves its **own** configuration file — it does not read the `HOME` and `USERPROFILE` a test hands it, so the redirection that isolates every other file isolates nothing here. Two seams stop it and a test has to use one: `host.RegisterClaudeMCP` takes the executable as an argument, so a test points it at a stub (the test binary re-executed, `internal/host/claude_test.go`); and `host.ClaudeCLI` reads `PATH`, so a test that exercises the lookup overrides `PATH` to a directory it made. Anything calling the wired `realSystem` without doing one of those is writing outside its own temporary directory. The Node installer this replaced had the same hazard and an empty `PATH` was what stopped it |
 | You verify the installer against a redirected tree, and the service it starts lands on the real one | The installer starts the service through the logon task it has just registered, and Task Scheduler runs a task with its **principal's** environment, not with the environment of whoever ran `schtasks` — so the `LOCALAPPDATA` and `USERPROFILE` you redirected reach every file the installer writes and nothing the task starts. Observed 2026-08-30: session 07's isolated `install --apply` started a service that resolved the real data directory and the real SID-derived pipe, lost the pipe race to the running service (I-09, so nothing was harmed) and wrote its `stopped` line into the **real** service log. Had the real service been down, that binary would have served the real database. Redirecting the environment is not isolation for anything that goes through the task; the only thing that is, is a different user — the memory spec §8's clean-profile condition. Until one exists, stop the real service before an isolated `--apply`, or keep the run without `--apply` |
+| A PowerShell one-liner run through bash loses `$_` | bash expands it before PowerShell ever sees it: `$_` is bash's own "last argument of the previous command", so `$_.Resources` arrives as something like `unsetenv.Resources` and PowerShell answers CommandNotFound for it. Observed. Escape it `\$_`, or write the pipeline with no `$_` at all — `Get-MpThreat \| Format-List Name,ID` rather than a `Where-Object { $_... }`. Every other `$name` and `$( )` in the string goes the same way |
 | A `.md` you edited from a Python script comes back CRLF, and nothing complains | `pathlib.Path.write_text` opens in text mode, so on Windows every newline is written as CRLF. `.gitattributes` says `*.md text eol=lf`, so git normalises the blob on `add`: the diff is right, the commit is right, and only the working copy is wrong — which is why nobody notices. Pass `newline=""` to both `read_text` and `write_text`, or repair with `sed -i 's/\r$//'` and confirm with `file`. Two things bite afterwards. A `sed` or `grep` pattern anchored at end-of-line behaves differently on the two halves of a mixed tree. And rewriting a file whose content does not change leaves `git status` printing ` M` from a stale stat cache while `git diff HEAD` exits 0 — the exit code is the answer, `status` is not, and chasing that costs more than the original mistake |
 | A heredoc'd Python script writes `\r\n` into a document as two real line breaks | Same rule as the Go one below, one layer further out: `bash <<'EOF'` protects against the *shell*, not against Python's own string escapes. A row written to explain CRLF was itself split into three rows by the `\r\n` inside it. Anything containing a backslash escape goes through a file-write tool, not through a script literal — and read the result back before believing it |
 | A tool-output parser works for one host and silently misreads the other | In the captured corpus `tool_response` is an object from Claude Code but a string or an array from Codex (spec §4.4). Those are the shapes observed, not a contract the hosts promise — preserve a shape you do not recognise instead of assuming it away |
@@ -180,7 +182,34 @@ row on its own, delete the row — the test is the better owner.
   addresses, and real SIDs before committing.
 - **An agent does not edit the user's host configuration** (`~/.claude`, `~/.codex`) during a
   session — ask the user to run the command. This is a rule about agent behavior, not a product
-  constraint: Engramux writing hook configuration with the user's consent is in scope.
+  constraint: Engramux writing hook configuration with the user's consent is in scope. `register`
+  and `unregister` stay on the user's side of it always: they write host configuration
+  unconditionally and there is no precondition that can make them not.
+
+  **Two carve-outs, narrowed until the condition is what makes them safe rather than the reader
+  being this repository's owner.** Both were decided on 2026-09-02, after a session spent nine
+  turns waiting on a human for commands that mostly wrote nothing.
+
+  An agent may **stop and start the installed service**. It writes no file, and it loses no event:
+  a relay that cannot reach the service spools, and the drain replays — measured, four events came
+  back that way during that session's own reinstall. Having stopped it, an agent restarts it in the
+  same turn, and says so when it cannot.
+
+  An agent may run **`engramux install --apply`** *only after `doctor` reports that both hosts
+  already point at the endpoint*. Under that condition the install writes no host configuration at
+  all — it copies two binaries, re-registers the logon task and rewrites `mcp.json`, all of which
+  are this product's own files. Measured twice on 2026-09-02: both runs answered `already up to
+  date` and `already points at this endpoint` and touched neither host file. When the condition does
+  not hold, the agent stops and asks, which is what makes this safe on a machine that has never
+  installed rather than only on one that has: there, `doctor` reports the hosts unregistered and the
+  condition refuses.
+
+  `scripts/reinstall.sh` is the whole cycle in one command. It deliberately does **not** check the
+  condition above — that is a rule about the agent, not about installing, and a script that enforced
+  it would refuse the user's own first install, which is the one time it is certainly right to run.
+
+  Both carve-outs are for an interactive turn. Unattended work — a loop, a scheduled task — does not
+  take them.
 
 ### For coding agents
 
