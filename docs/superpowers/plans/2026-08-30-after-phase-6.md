@@ -159,6 +159,42 @@ decides whether Step 5 ships enabled.
 
 Done when: gate **M4** passes — and **M4** is the step's own delete condition, not a formality.
 
+**Done 2026-09-03**, on `step-4-derived-fields`: four commits, and the corpus was read before any of
+them. It corrected the step rather than confirming it — two of M-3's seven fields have nothing in
+this corpus to read, and its error spans turn out to be prose rather than a field — so what was
+built is three columns and not seven, and P1's four literals and M4's three classes are reconciled
+by that measurement. Memory spec **rev.6** carries all of it; nothing here repeats a figure from it.
+
+**The gate passed and the pass is small**, which is the part worth carrying: three of three classes
+improved, none regressed, and the recall movement is one document in one class. The boost reorders
+the top ten and rarely reaches into it. The weight behind that is a plateau the sweep found rather
+than a number somebody liked.
+
+**Three walks rather than two.** 00002's lesson is that a Go walk and a SQL backfill drift silently;
+00005 adds a third place the same value is written, the insert, and a test for each pair — because a
+perfect backfill beside an insert that never binds the columns gives a database whose old events
+rank and whose new ones do not, and a ranking input has no integrity check to notice.
+
+**One thing the migration nearly did by accident.** These columns are not indexed text, which is the
+whole of decision 7 — but `events_fts` is external content with an update trigger, so the backfill
+would have reindexed every row's leaves for no change at all: the rebuild this step is defined by
+not doing, arriving through the back door. The trigger is dropped around the backfill and put back,
+and the test that holds it asserts the trigger *works* afterwards and not only that it exists.
+
+**The race script is what found the cost, and the normal suite could not.** Its first run was red on
+the Phase 5 contention gate, and the answer took three arms rather than a retry: the merge-base in a
+throwaway worktree, the branch with the boost switched off, and the branch as written. Both things
+were true — the gate is marginal on this machine before Step 4 exists, and the boost as first
+written made it fail every time. The second is fixed and the first is backlog **38**. Memory spec
+rev.6 carries the figures.
+
+**Verified**: the suite green at exit 0, the pinned linter `0 issues.` at exit 0 with both values
+read, and `./scripts/race.sh` green at exit 0 on the rerun. Thirteen deliberate mutations across the
+commits, every one asserted present before its suite ran and every one killed — including two
+against gate M4 itself, which answered with the delete message and with the regression message
+respectively, so the gate is not vacuous. One mutation did not apply on its first attempt and the
+assertion in front of it is what said so, rather than the `ok` that followed.
+
 **Step 5 — injection, built and disabled.** Memory spec **M-4**. Last of the memory work, and it
 ships off.
 

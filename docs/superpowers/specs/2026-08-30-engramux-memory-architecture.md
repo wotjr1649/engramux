@@ -1,10 +1,14 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.6** · 2026-09-03 — rev.6 records what building **M-3** settled: two of its seven fields have
+nothing in the corpus to read, its error spans are prose rather than a field, gate **M4** passes
+small, and the boost's weight is a measured plateau rather than a taste. rev.1 to rev.5 below.
+
 **rev.5** · 2026-09-03 — rev.5 closes the one thing rev.4's **M-7** deliberately left open, the
 delivery channel, and the seven decisions that hung off it: what the artefact is, what the plugin
 does and does not carry, what Codex users get, a product version separate from the wire version, a
 release process, the signing route, and what `doctor` compares. It also corrects one measured claim
-in rev.4's M-7. rev.1 to rev.4 below.
+in rev.4's M-7.
 
 **rev.4** · 2026-09-03 — rev.4 adds **M-7**, the update path, and §8's fourth publication
 condition, which an antivirus wrote for us mid-session. rev.1 to rev.3 below.
@@ -408,6 +412,118 @@ The distinction is load-bearing and easy to lose. A derived field exists **to fi
 summary exists **to answer instead of one**. The moment a derived value is what the reader is given
 rather than what the reader is given a route to, M-3 has become M-1's rejected option. The evidence
 for the boundary is the same 42.5%-versus-43.9% result above.
+
+### What building it settled (M-3)
+
+**[verified] 2026-09-03, on `step-4-derived-fields`.** M-3's field list was written against what a
+capture ought to carry. This is what it does carry, and two of the seven are not there at all.
+
+*Three of M-3's seven fields are already columns, two are unreachable, and the rest is three.* Tool
+name, session and timestamp have been columns of `events` since `00001`, so M-3 adds nothing for
+them. Against the 902 captures, **`tool_input.command` is present on 534, `tool_input.file_path` on
+120 and `tool_response.filePath` on 54, and a non-empty `tool_response.stdout` on 220.** Against
+that: **`tool_response.stderr` is present on 241 documents and non-empty on none of them,
+`success` appears on 3, and exactly one key in the whole corpus matches
+/exit|return.?code|errno/.** So M-3's *exit codes* and *success flag* have nothing to read and are
+not built — recorded here rather than silently dropped, because a field nobody can fill is a
+different thing from a field nobody wrote yet. And M-3's *error spans* are not a field either:
+**227 documents carry error-shaped text and 62 of those carry it in `stdout`**, in prose. The three
+columns are therefore a command line, a touched path, and what a tool answered.
+
+*P1's four literals and M4's "three classes" are reconciled by the same measurement.* §3 names an
+error message, a stack frame, a command line and a path; M4 says three. With no structured error
+field in the corpus, an error message and a stack frame are one class here — both live in what a
+tool answered — and the three classes are the three columns. `TestPhase4GateM4DerivedFieldsEarnTheirPlace`
+carries that reasoning at its own head, and it is not the same as §8's Phase 4 class *a path
+basename*: that one asks whether the tokenizer reaches a basename in any string leaf, this one asks
+whether the ranking prefers the document that actually touched the file. 174 candidates against 900.
+
+*M4 passes, and the honest reading of the pass is that it is small.* Measured over the corpus at the
+weight below, boost off then on:
+
+| Class | Candidates | recall@10 | MRR |
+|---|---|---|---|
+| a command line | 534 | 0.680 → 0.680 | 0.242 → 0.262 |
+| a touched path | 120 | 0.480 → **0.520** | 0.134 → 0.170 |
+| an error message | 96 | 0.760 → 0.760 | 0.555 → 0.613 |
+
+Three of three classes improved and none regressed, which is what M4 asks. What the table also says
+is that the boost **reorders the top ten and rarely reaches into it**: one class gained one document
+at k, and the other two moved only in MRR. That is a real effect and a modest one, and it is written
+here as the number rather than as "the gate passed" so that a later revision considering whether to
+keep this code is arguing with a figure.
+
+*The weight is a measured boundary and the sweep found two regimes rather than a continuum.* The
+gate was run at 1, 2, 3, 4, 5, 20 and 100. Below 5 the boost only reorders inside the top ten — the
+error class's MRR climbs 0.580, 0.587, 0.607, 0.613 — and recall@10 does not move in any class. At
+**5** the touched-path class reaches 0.520, the only recall movement in the sweep. At **20 and at
+100 every one of the six figures is identical to 5**: the boost dominates bm25 within the matched
+set, the order becomes field matches first and bm25 among the rest, and there is nothing further for
+a larger number to buy. 5 is therefore the smallest weight that reaches the plateau, which is where
+this stands — a larger one changes no answer, and a smaller one leaves bm25 more say exactly where
+the derived match is the weaker signal.
+
+*The boost reorders and never filters, and that is asserted rather than intended.* Every token's
+test is inside the `ORDER BY` and none of it is in the `WHERE`. A boost written into the filter
+would pass every ordering assertion and quietly turn a ranking input into a feature nobody asked
+for, so `TestTheDerivedBoostChangesNoResultSet` compares the sorted result sets of the two arms over
+six queries — and a break-it pass that moved one predicate into the `WHERE` is what showed it fails
+when it should.
+
+*Migration `00005` costs no rebuild, and keeping it that way took one line nobody would have
+missed.* Decision 7 settled that Step 3 and Step 4 are two migrations because these columns are a
+ranking input rather than indexed text. But `events_fts` is external content with an update trigger,
+so an `UPDATE` touching only the three new columns still fires it — deleting and reinserting every
+row's `leaves` for no change at all, which is the rebuild this migration is defined by not doing
+arriving through the back door. The trigger is dropped around the backfill and recreated after it,
+and `TestTheDerivedBackfillLeavesTheFTSIndexAlone` asserts three things rather than one: that
+`integrity-check` still passes, that the trigger is back, and that it still works — a trigger
+recreated with the wrong body passes a count and fails an update probe.
+
+*One divergence between the two walks existed only because the guard was looked for.* `Derive` and
+the backfill answer the same question in Go and in SQL, and the shape that separates them is not a
+rule but a limit: **SQLite stops at 1000 open containers where Go stops at 10000**, and the
+backfill's `CASE` guards on `json_valid`. A payload carrying a shallow `tool_input.command` beside a
+deeply nested sibling would therefore be derived on one side and not the other, for one row, with
+nothing saying so. `sqliteWillParse` is what closes it and both sides of that limit are cases.
+`TestTheTwoDerivedWalksAgree` compares **947 rows over three columns** — 4 fixtures, 22 derived
+shapes, 19 validity shapes and 901 corpus captures — of which **675 derive something on both
+sides**; the non-empty count is asserted too, because a backfill that wrote the empty string
+everywhere would agree with a Go walk that also did and the comparison would pass having compared
+nothing.
+
+*A third walk exists because the first two cannot see the failure with the longest fuse.* A perfect
+backfill beside an insert that never binds the columns gives a database whose old events rank and
+whose new ones do not, and nothing reports it — a ranking input has no integrity check, and a boost
+that stopped applying looks exactly like a boost that never helped.
+`TestIngestWritesTheDerivedColumns` compares what `Ingest` stored against what `Derive` answers for
+the same bytes.
+
+*The boost has a runtime cost, the Phase 5 contention gate is what priced it, and the first form was
+too expensive to ship.* `ORDER BY rank` makes FTS5 score every matching row before the first one is
+returned, so anything in that clause runs per matching row per query token. The boost was first
+written as `instr(lower(col), ?)`, and `lower()` **copies the column** before the comparison can read
+it — over `derived_output`, which holds whole tool outputs. §8's Phase 5 contention clause measured
+it: 20 ingests against 96 readers over 4,000 documents, slowest ingest **832, 845 and 928 ms** against
+§5.3's 800 ms, none of three under. Rewritten as `LIKE ... ESCAPE`, which compares in place and whose
+`OR` short-circuits, the same gate gives **375, 378, 481, 493 and 502 ms**, five of five. LIKE is
+case-insensitive for ASCII by default and nothing sets `case_sensitive_like`, so it is the same
+comparison minus the copy — and the escaping that was the reason to reject it is four lines, asserted
+through queries somebody would type rather than through the pattern builder.
+
+*The same run found that the gate was already marginal, which is not this step's to fix.* Measured at
+the commit before any of Step 4: five runs of that gate alone gave 692, 784, 852, 777 and 751 ms —
+**one of five over the budget**, and the other four inside it by less than 50 ms. So a red contention
+gate is not evidence of a regression until an arm has been measured against a baseline, and a green
+`scripts/race.sh` on that machine is roughly a four-in-five event. Backlog **38** carries it, names
+the three readings that could explain the margin, and says that moving the number is not one of the
+ways to settle it.
+
+*The derived columns are never selected and never leave the machine.* They hold copies of payload
+text, unmasked, which adds no exposure the database does not already have under I-10 — but it would
+add an egress if anything read them out. Nothing does: they appear in the `ORDER BY` and in no
+select list, and §8's Phase 5 clause sweeps a marshalled reply with the detector rather than naming
+fields, so a future select that changed that would be caught rather than reviewed for.
 
 ### Replacing an installed build is its own command (M-7)
 
