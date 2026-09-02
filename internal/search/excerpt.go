@@ -59,8 +59,16 @@ func excerpt(payload []byte, tokens []string) string {
 	// leaves - or one nested past SQLite's depth limit, which that walk
 	// answers "" for - has no excerpt, and that is an empty string rather
 	// than a special case here.
-	text := store.Leaves(secret.Mask(payload))
+	return excerptText(store.Leaves(secret.Mask(payload)), tokens)
+}
 
+// excerptText is the window itself, over text that is already masked.
+//
+// It is separate from [excerpt] because a memory item's body is not a payload:
+// it is plain text rather than JSON, so it is masked with [secret.MaskString]
+// and there is no walk to do. Everything below the mask is the same for both,
+// and having two copies of it would be two places for the window to drift.
+func excerptText(text string, tokens []string) string {
 	runes := []rune(text)
 	if len(runes) <= excerptRunes {
 		return text

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/wotjr1649/engramux/internal/secret"
 )
 
 // Gates M1 and M2 of the memory spec's section 5.
@@ -39,6 +41,7 @@ func TestGateM1EveryNativeMemoryFileParsesAndKeepsItsText(t *testing.T) {
 	}
 
 	var items, files, withStamp, withProject int
+	var maxBody, maxMasked int
 	byHost := map[string]int{}
 	for i, s := range sources {
 		got, _, err := Parse(s)
@@ -61,6 +64,13 @@ func TestGateM1EveryNativeMemoryFileParsesAndKeepsItsText(t *testing.T) {
 			if it.SourcePath != s.Path {
 				t.Errorf("source %d: an item does not carry the file it came from", i)
 			}
+			// What get_memory's reply bound has to be measured against.
+			// Masking expands - it rewrites a matched run into a longer
+			// tag - so the stored size is not the answer and the masked
+			// one is (spec 5.9, and the same rule get_event's bound is
+			// under).
+			maxBody = max(maxBody, len(it.Body))
+			maxMasked = max(maxMasked, len(secret.MaskString(it.Body)))
 		}
 		if line, ok := missingValue(t, s, got); !ok {
 			t.Fatalf("source %d (%s, %s): line %d has a value that reached no item's body", i, s.Host, s.Kind, line)
@@ -68,6 +78,8 @@ func TestGateM1EveryNativeMemoryFileParsesAndKeepsItsText(t *testing.T) {
 	}
 	t.Logf("M1: %d files, %d items (claude-code %d, codex %d), %d with a host timestamp, %d with a project",
 		files, items, byHost[HostClaude], byHost[HostCodex], withStamp, withProject)
+	t.Logf("M1: largest body %d B, largest masked body %d B - what get_memory's bound is measured against",
+		maxBody, maxMasked)
 }
 
 // missingValue is M1's lossless clause. It returns the 1-based number of the
