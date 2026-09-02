@@ -378,6 +378,17 @@ func (r *report) reportInstalled(bin, relay string, installed []string, hooks []
 func (r *report) reportLocal() {
 	r.line("local")
 
+	// First, because it changes what every pipe read below means. The
+	// variable exists for the test suite (ipc.TestPipeSIDEnv), every process
+	// that sees it derives a different pipe name, and a shell that still
+	// exports it makes this command diagnose a pipe nobody is serving - which
+	// reads exactly like a service that is down (backlog 6). The name is
+	// printed and the value is not: the value is a SID.
+	if os.Getenv(ipc.TestPipeSIDEnv) != "" {
+		r.fail("pipe name", "%s is set in this environment, so the service and mcp sections "+
+			"below read a test pipe and not the installed service's - unset it", ipc.TestPipeSIDEnv)
+	}
+
 	if self, err := os.Executable(); err != nil {
 		r.fail("this binary", "unreadable: %v", err)
 	} else {
