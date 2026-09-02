@@ -597,11 +597,7 @@ func truncateRunes(s string, n int) string {
 // LIMIT and a truncation flag, which needs a number nothing has measured, and
 // an unmeasured cap is what AGENTS.md forbids.
 func cells(ctx context.Context, db *sql.DB) ([]ipc.Cell, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT host, event_name, count(*), min(received_at), max(received_at)
-		FROM events
-		GROUP BY host, event_name
-		ORDER BY host, event_name`)
+	rows, err := db.QueryContext(ctx, store.CellsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("service: group events by cell: %w", err)
 	}
