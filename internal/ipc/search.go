@@ -106,6 +106,15 @@ type SearchReply struct {
 	// statement as the hits, so the two cannot disagree about which rows
 	// were in.
 	Total int64 `json:"total"`
+	// MemoryHits are the matching native memory items, best first, ranked by
+	// their own index. They are a second list rather than more of the first
+	// because the two rankings are not comparable - see [MemoryHit].
+	//
+	// Absent from a reply that has none, so a search of a machine with no
+	// native memory is the document it always was.
+	MemoryHits []MemoryHit `json:"memory_hits,omitempty"`
+	// MemoryTotal is Total for that list.
+	MemoryTotal int64 `json:"memory_total,omitempty"`
 }
 
 // SearchHit is one matching event: enough to find it again and read it, and

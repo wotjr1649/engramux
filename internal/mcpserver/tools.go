@@ -1,4 +1,4 @@
-// Package mcpserver is spec 5.9's MCP surface: the four tools, and the
+// Package mcpserver is spec 5.9's MCP surface, as the memory spec rev.2 widened it: the five tools, and the
 // Streamable HTTP transport on 127.0.0.1 that carries them.
 //
 // # It answers with the same closures the pipe does
@@ -47,15 +47,17 @@ import (
 )
 
 // ErrNoHandler is returned by [New] when the handler it was given cannot answer
-// one of the four tools.
+// one of the five tools.
 //
 // It is an error rather than a nil check per call. [mcp.AddTool] registers a
 // tool unconditionally, so a nil field would become a tool a model can see and
 // a nil dereference when it calls one; refusing to build the server at all is
 // the failure that is visible at the moment it is caused.
-var ErrNoHandler = errors.New("mcpserver: the handler cannot answer all four tools")
+var ErrNoHandler = errors.New("mcpserver: the handler cannot answer all five tools")
 
-// New builds the MCP server spec 5.9 specifies: four tools over h.
+// / New builds the MCP server spec 5.9 specifies, as the memory spec rev.2 widened
+// it: five tools over h. The fifth is get_memory, and what the memory spec says
+// about the count is that section 5.9 rows naming four are the ones that moved.
 //
 // # The project argument is required here and optional on the wire
 //
@@ -72,7 +74,7 @@ var ErrNoHandler = errors.New("mcpserver: the handler cannot answer all four too
 // of anything at run time: it either panics on every start or on none, and the
 // tests in this package are what run it.
 func New(h pipe.Handler) (*mcp.Server, error) {
-	if h.Search == nil || h.GetEvent == nil || h.ListSessions == nil || h.Status == nil {
+	if h.Search == nil || h.GetEvent == nil || h.ListSessions == nil || h.Status == nil || h.GetMemory == nil {
 		return nil, ErrNoHandler
 	}
 
@@ -89,7 +91,10 @@ func New(h pipe.Handler) (*mcp.Server, error) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "search",
 		Description: "Full-text search over the raw text of the hook events Engramux captured, " +
-			"best match first. Each hit carries an excerpt; pass a hit's id to get_event for the whole event.",
+			"and over the memory Claude Code and Codex write for themselves. Best match first. " +
+			"The reply carries two ranked lists: hits are events, and memory_hits are native memory " +
+			"items - the two are ranked by separate indexes and their scores are not comparable. " +
+			"Pass a hit's id to get_event, or a memory hit's id to get_memory, for the whole document.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, ipc.SearchReply, error) {
 		reply, err := h.Search(ctx, ipc.SearchRequest{Query: in.Query, Limit: in.Limit, Project: in.Project})
 		if err != nil {
@@ -122,6 +127,21 @@ func New(h pipe.Handler) (*mcp.Server, error) {
 			return nil, nil, refused(err)
 		}
 		reply.Version, reply.Type = ipc.Version, ipc.GetEvent
+		return nil, reply, nil
+	})
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "get_memory",
+		Description: "One native memory item in full, with secrets masked. This is the equivalent of " +
+			"get_event for the memory Claude Code and Codex write for themselves: pass the id of a " +
+			"memory hit that a search returned. The item is null when no item with that id exists in " +
+			"that project, and the body is null - with body_bytes still set - when it is too large.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getMemoryIn) (*mcp.CallToolResult, ipc.GetMemoryReply, error) {
+		reply, err := h.GetMemory(ctx, ipc.GetMemoryRequest{ID: in.ID, Project: in.Project})
+		if err != nil {
+			return nil, ipc.GetMemoryReply{}, refused(err)
+		}
+		reply.Version, reply.Type = ipc.Version, ipc.GetMemory
 		return nil, reply, nil
 	})
 
@@ -169,6 +189,15 @@ type (
 	getEventIn struct {
 		ID      string `json:"id" jsonschema:"the event id, as a search hit reports it"`
 		Project string `json:"project" jsonschema:"the absolute path of the project worktree the event belongs to. An id from another project answers no event"`
+	}
+	getMemoryIn struct {
+		ID string `json:"id" jsonschema:"the memory item id, as a search reply's memory_hits report it"`
+		// Optional where get_event's is required, and the difference is
+		// not an oversight: a memory item may belong to no project this
+		// database has a row for, because Codex's memory is global and
+		// Claude Code files its own under a directory key rather than a
+		// path. Requiring one would make those items unreachable.
+		Project string `json:"project,omitempty" jsonschema:"the absolute path of the project worktree the item belongs to. Optional: native memory may belong to no project, and omitting this searches all of them"`
 	}
 	listSessionsIn struct {
 		Project string `json:"project" jsonschema:"the absolute path of the project worktree to list. It must be absolute, and a UNC path is refused"`

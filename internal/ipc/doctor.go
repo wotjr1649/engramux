@@ -14,7 +14,7 @@ import (
 // the reader of those may be a model that repeats what it read into a transcript
 // that leaves the machine. This reply has exactly one caller - `engramux doctor`,
 // printing to the terminal of the SID that owns the file - and it is deliberately
-// **not** one of the four MCP tools. A tool that exposed it would put the
+// **not** one of the five MCP tools. A tool that exposed it would put the
 // unmasked path back on the surface the masking exists for.
 //
 // # Why the comparison and not the strings alone

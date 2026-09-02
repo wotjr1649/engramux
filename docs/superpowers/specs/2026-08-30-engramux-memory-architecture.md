@@ -1,8 +1,11 @@
 # Engramux — memory architecture, after 1.0
 
-**rev.2** · 2026-09-02 — rev.1 was 2026-08-30. This revision reads both hosts' memory on the
-owner's machine, corrects two clauses of M-2 the reading falsified, and answers the questions Step 3
-could not be written without. It adds a fifth MCP tool and says which 1.0 rows that moves.
+**rev.3** · 2026-09-02 — rev.1 was 2026-08-30; rev.2 and rev.3 are both 2026-09-02, and they are one
+day's three states of the same section. **rev.2** read both hosts' memory on the owner's machine,
+corrected two clauses of M-2 the reading falsified, answered the nine questions Step 3 could not be
+written without, added a fifth MCP tool and named the 1.0 rows that moves. **rev.3** records what
+building it then settled: three defects the real corpus found that no synthesised fixture did, and
+the one estimate the built parser falsified.
 
 **Scope.** What Engramux does about *memory* once Phase 6 closes, and how installation and diagnosis
 change to match. It **supersedes nothing**. `2026-08-27-engramux-1.0-design.md` rev.4 remains the
@@ -219,8 +222,12 @@ Claude Code's is on by default for everyone else, which is the machine this feat
 **2 — One memory item is one block the host's own format delimits, and one whole file where it does
 not.** Codex's thread sections, its per-rollout summaries and its index entries; Claude Code's notes.
 Where the delimiter is not recognised the file survives as a single document, which is M2's
-warn-and-continue applied to the unit rather than only to the fields. About 150–200 documents against
-17,043 events. The alternative that was rejected is file granularity, and one measurement rejects it:
+warn-and-continue applied to the unit rather than only to the fields. This section said "about
+150–200 documents" when it was written and the built parser says **303**, over 81 files — 38 Claude
+Code and 265 Codex, 127 carrying a host timestamp and 240 a project — measured by
+`TestGateM1EveryNativeMemoryFileParsesAndKeepsItsText`, which logs the figures on its passing path.
+The estimate was low because it counted a Codex artefact's sections and not its own leading block.
+303 against 17,043 events. The alternative that was rejected is file granularity, and one measurement rejects it:
 Codex's raw-memories file is 291,566 B where the median document either side of it is about 5 KB, so
 file granularity makes the bulk of Codex's content one document, and an excerpt cut from it answers
 nothing.
@@ -309,6 +316,81 @@ reader to find.** §5.9's *"the four tools"*, §8's Phase 5 row and §8's Phase 
 four MCP tool results"*, and §10's closed question 3. There are **five** tools after Step 3, and the
 Phase 6 audit's sweep is over five results and five errors. Nothing else in those rows moves: each new
 surface is swept by the same detector, in both modes, against the same definition of an egress.
+
+### What building it settled (M-2)
+
+**[verified] 2026-09-02, on `step-3-native-memory`.** The nine decisions above were taken against a
+reading; this is what running the code corrected and what it added. Every figure here comes out of a
+committed test that logs it, not out of a probe.
+
+*The corpus is bigger than the estimate, and the estimate is corrected above.* 303 items over 81
+files, 38 Claude Code and 265 Codex, 127 with a host timestamp and 240 with a project — so **63 of
+303 belong to no project this database has a row for**, which is what decision 8's path scoping and
+`get_memory`'s optional project are for. That was 148 with a project until the first live install
+showed why: a Codex rollout summary writes its `cwd` once in the file's header and then a heading, so
+every section below it read as belonging to nowhere — `project ""` on an item whose own file named one
+two lines above. A section inherits its file's `cwd` now and 92 more items are reachable through a
+scoped call. Only the path is inherited; inheriting a timestamp would date a section by its neighbour. The largest body is **20,156 B** and the largest masked body
+is also 20,156 B, nothing in that item having matched a rule; `ipc.MaxMemoryBodyBytes` is 128 KiB,
+6.6× the largest measured, on the ratio `MaxEventPayloadBytes` was set at.
+
+*Three defects the real corpus found that no synthesised fixture did, all three now owned by a test.*
+
+1. **A heading is not unique within a file.** Migration `00004` makes `(host, source_path, entry_key)`
+   unique and a Codex artefact here repeats a heading, so the collector failed that constraint on the
+   first pass over the machine's own memory. Only a repeat is perturbed, because an id is derived
+   from the key and a caller holds one across a tick.
+2. **The parser was destroying the context a credential rule matches on.** A line reading
+   `secret: <value>` had its label stripped, and §6.1's credential rule matches on exactly that word —
+   so the mask found nothing and the body reached a reply bare, *detected clean*, because the shape
+   the detector matches on was the part the parser removed. Same for `password`, `passwd`, `token`
+   and `api_key`. The label set is closed now: the thirteen field names the reading measured, and
+   anything else is kept verbatim, which is M2's rule one layer down.
+3. **A URL scheme parsed as a field label.** `postgres://user:pw@host` became the label `postgres`
+   and the value `//user:pw@host`, which is the connection-string rule's own prefix removed. The
+   closed label set fixes this one too.
+
+Two and three were found by the **Phase 6 redaction audit widened to five surfaces**, which is the
+change that pays for itself in this build: the audit's literal-needle half caught both where its
+detector half reported clean, which is the exact division that clause was written for. The audit's
+own fixture was wrong first and the audit found that too — it wrote the event payload's *bytes* as a
+memory body, and a payload's newlines are escaped, so the dotenv rule's multiline anchor never fired.
+A memory body is markdown; the fixture now carries the samples as text, under the same premise the
+payload half has.
+
+*The host timestamp does not enter the indexed text, on either host.* It is written on every document,
+so its parts — a year, a month, an offset — would be tokens of all of them, which is the defect §5.7
+measured `cwd` at 900 of 901 documents. **M1 is what found that the two sides disagreed about it**:
+Claude Code's `modified` was going to the column and Codex's `updated_at` was going to both. A
+time-qualified query gets the column, which is §3's P3.
+
+*M3 was verified once and then left to skip.* Against a fixture generated from this machine's corpus —
+which is not the human-labelled one M3 asks for, and was deleted — **claude-code 1 of 1 over 38 items
+and codex 11 of 11 over 265**. Replacing `ORDER BY rank` with an id order took codex to 10 of 11 and
+failed the gate, so the gate is not vacuous. What remains is the fixture, and it is the owner's.
+
+*Decision 9 has a cost the first live upgrade showed, and it is priced rather than fixed.* The SDK
+derives an output schema for `search` from `ipc.SearchReply` and a client caches it at connect, so a
+**session that was already open across the upgrade rejects the reply** the moment it carries memory
+hits — *"Structured content does not match the tool's output schema: data must NOT have additional
+properties"*. Observed at the terminal, from a real Claude Code session: the same call against a
+project with no native memory succeeded, because `omitempty` left both new fields out and the reply
+still matched the old schema exactly. The service logged nothing; it is the client's validation and
+not the server's. A reconnect fixes it, which is what "one build is one compatibility event" already
+means. The alternative is `get_event`'s: an `any` output type produces no schema and nothing to
+validate, so a future field could never do this — and it costs the model the shape of the reply, which
+`get_event` gave up under duress rather than by choice. **Kept typed**, and the next revision that
+grows this document should know it is choosing again.
+
+*M2 fires in production, and the three shapes are the ones the reading predicted.* The live service's
+first pass logged two unknown `.md` names — the two subtrees §1's README reading does not name — and
+one index bullet with no link. Warned, and all three still indexed.
+
+*One test was fake and a break-it pass is what said so.* The memory hit's masking test searched for a
+literal user name the *body* carried, and the source path a test writes to is under the machine's own
+temporary directory — so it carries the **real** user name and the assertion never reached the field
+it was named for. It sweeps the marshalled hit with the detector now, which is what §8's Phase 5
+clause does and for this reason.
 
 ### Why derived fields are not a summary (M-3)
 

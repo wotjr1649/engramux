@@ -73,3 +73,9 @@ a build.
 |---|---|---|
 | 28 | `mcp.json` **and both host configuration files** | **The bearer token sits in three files whose DACLs are all inherited.** Measured (spec 7.1) on `mcp.json`: every ACE is `(I)`, Go's `f.Chmod(0o600)` writes nothing to it, and on the machine measured a machine-local group holds `(RX)`. The installer then copies the same token into `~/.codex/config.toml` and Claude Code's user configuration, whose permissions this product does not set at all - and the token is sticky, so all three copies are long-lived rather than per-start. Spec 5.9 accepts the exposure, because the token is the whole of the control at that transport either way. Narrowing `mcp.json` is a change of its own: a security descriptor built with `golang.org/x/sys/windows` and passed to `CreateFile`, which is a different atomic-write path from `os.CreateTemp` plus rename. `internal/pipe`'s listener already builds a DACL, so there is a pattern to reuse. Narrowing the other two is not this product's to do. **Scheduled 2026-09-02 as a publication condition** rather than a step — memory spec §8 — with `mcp.json` narrowed and the two host files reported by `doctor` as a finding |
 
+
+## Raised by Step 3's first live install, 2026-09-02
+
+| # | Where | What |
+|---|---|---|
+| 36 | `internal/memory`'s `firstLine` | **A memory item's title is often the wrong line.** A Codex rollout summary's sections all begin with the same prose label, so eight of the fourteen hits in the first live `engramux search` printed the title `Outcome: success` - which tells a reader nothing and is the field they scan. The excerpt carries the substance, so this is a display defect and not a retrieval one. What a better title would be is the decision: the file's own first-level heading, the entry key, or the first line that is not a label the parser recognises. Not blocking, and no test owns it because no test can say which of those is right |

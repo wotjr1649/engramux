@@ -281,7 +281,7 @@ func guard(srv *mcp.Server, token string) http.Handler {
 	// transport and authorization arguments are about - and measured on a
 	// bare server it changes the offered list in no other way. What it gives
 	// up is nothing this product uses: no session map, so no Mcp-Session-Id
-	// and no server-to-client request, and the four tools are request and
+	// and no server-to-client request, and the five tools are request and
 	// reply. GET and DELETE answer 405, which the spec allows a server that
 	// offers no listening stream. The map was kept through Phase 6 on
 	// purpose, so that the soak's working-set series had it to watch (spec

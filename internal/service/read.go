@@ -156,7 +156,7 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 // It is the one reply that carries the real database path. Every other reply
 // masks it (spec 5.9), because the reader of those may be a model; this one has
 // a single caller printing to the terminal of the SID that owns the file, and it
-// is deliberately not one of the four MCP tools.
+// is deliberately not one of the five MCP tools.
 //
 // The tokenizer comparison is here rather than in a tool because I-07 leaves
 // this process as the only one that can read the live schema, and because the

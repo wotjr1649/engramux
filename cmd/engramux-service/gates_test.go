@@ -40,7 +40,7 @@ func relay(t *testing.T, local string, stdin []byte) {
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built
 	cmd := exec.CommandContext(t.Context(), relayBin)
-	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+	cmd.Env = childEnv(local)
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -96,7 +96,7 @@ func cliInWith(t *testing.T, local string, env []string, args ...string) cliResu
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built, args are the caller's literals
 	cmd := exec.CommandContext(t.Context(), relayBin, args...)
-	cmd.Env = append(append(os.Environ(), "LOCALAPPDATA="+local), env...)
+	cmd.Env = childEnv(local, env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -256,7 +256,7 @@ func TestASecondInstanceIsRefusedByThePipe(t *testing.T) {
 	var out bytes.Buffer
 	//nolint:gosec // G204: serviceBin is the binary TestMain built
 	second := exec.CommandContext(t.Context(), serviceBin)
-	second.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+	second.Env = childEnv(local)
 	second.Stdout = &out
 	second.Stderr = &out
 
@@ -841,7 +841,7 @@ func TestThirtyConcurrentStartsLeaveOneService(t *testing.T) {
 		var out bytes.Buffer
 		//nolint:gosec // G204: serviceBin is the binary TestMain built
 		cmd := exec.CommandContext(t.Context(), serviceBin)
-		cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+		cmd.Env = childEnv(local)
 		cmd.Stdout, cmd.Stderr = &out, &out
 		insts[i] = &instance{cmd: cmd, out: &out}
 	}

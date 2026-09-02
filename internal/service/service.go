@@ -44,6 +44,7 @@ import (
 
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/mcpserver"
+	"github.com/wotjr1649/engramux/internal/memory"
 	"github.com/wotjr1649/engramux/internal/pipe"
 	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/search"
@@ -72,6 +73,25 @@ const (
 //
 // A var so a test can shrink it; nothing else writes to it.
 var drainInterval = 30 * time.Second
+
+// memoryInterval is how often the two hosts' native memory is re-read while the
+// service is up (memory spec rev.2, M-2 decision 3).
+//
+// Five minutes rather than the drain's half a minute, because what is behind it
+// is different. The spool holds events that have already missed a live delivery;
+// native memory is a host's own consolidation, which happens at the end of a
+// session at the most and on the machine this was measured had not happened in
+// over two weeks. A pass over unchanged files is one os.Stat over about 80 of
+// them and no database work at all, so the interval is not sized against the
+// cost of a pass - it is sized against how long a new note may sit unsearchable,
+// and five minutes is shorter than the session that produced it.
+//
+// The same five minutes as checkpointInterval, and that is a coincidence rather
+// than a coupling: the two loops have their own tickers and neither waits for
+// the other.
+//
+// A var for the same reason drainInterval is one.
+var memoryInterval = 5 * time.Minute
 
 // Spec 5.4's checkpoint policy, as the three numbers [store.Checkpointer]
 // takes. Vars for the same reason drainInterval is one.
@@ -251,6 +271,15 @@ func run(ctx context.Context, dir string, h *health) error {
 		})
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		collectMemory(bgCtx, db, &memory.Collector{
+			ClaudeHome: memory.ClaudeHome(),
+			CodexHome:  memory.CodexHome(),
+		})
+	}()
+
 	// One Handler for both surfaces. The MCP tools call these closures
 	// directly rather than dialing the pipe, so a tool call takes the same
 	// read gate a CLI read takes - see internal/mcpserver for why that is
@@ -331,6 +360,11 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 				return listSessions(ctx, db, req)
 			})
 		},
+		GetMemory: func(ctx context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.GetMemoryReply, error) {
+				return getMemory(ctx, db, req)
+			})
+		},
 	}
 }
 
@@ -398,6 +432,47 @@ func checkpointOnTheWayOut(ctx context.Context, db *sql.DB) {
 	defer cancel()
 	if err := store.Checkpoint(ctx, db); err != nil {
 		slog.Error("engramux-service: checkpoint the WAL on the way out", "error", err)
+	}
+}
+
+// collectMemory re-reads both hosts' native memory now and then every
+// memoryInterval, until ctx is cancelled (memory spec rev.2, M-2 decision 3).
+//
+// Now first, for the same reason the drain reads now first: a service that has
+// just started has whatever the hosts wrote while it was down sitting on disk,
+// and waiting out an interval before looking is latency for nothing.
+//
+// It holds the single connection while it writes, like everything else here, and
+// [memory.Collector] is what keeps that short: a pass over unchanged files is
+// one os.Stat each and touches the database not at all.
+//
+// A pass that fails is one pass's problem. The files are still on disk and the
+// next tick tries again, which is the drain's rule and for the same reason.
+func collectMemory(ctx context.Context, db *sql.DB, c *memory.Collector) {
+	t := time.NewTicker(memoryInterval)
+	defer t.Stop()
+	for {
+		rep, err := c.Collect(ctx, db, time.Now())
+		for _, w := range rep.Warnings {
+			// The path is deliberately absent: these are the user's own
+			// notes and a memory file's name can be a slug of its title.
+			// What a reader needs is that a shape was not recognised and
+			// which, and the reason carries that.
+			slog.Warn("engramux-service: native memory", "reason", w.Reason)
+		}
+		if rep.Written > 0 || rep.Removed > 0 {
+			slog.Info("engramux-service: indexed native memory",
+				"files", rep.Files, "skipped", rep.Skipped,
+				"written", rep.Written, "removed", rep.Removed)
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			slog.Error("engramux-service: index native memory", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
 	}
 }
 
@@ -522,12 +597,18 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	// project.FromArgument - which refuses "" as not absolute, and is right
 	// to for the two request types where a project is required.
 	var projectID string
+	var projectKeys []string
 	if req.Project != "" {
 		p, err := project.FromArgument(req.Project)
 		if err != nil {
 			return ipc.SearchReply{}, err
 		}
 		projectID = p.ID
+		// The memory index is scoped by the path the host wrote and not by
+		// the derived id, because the two hosts write different things and
+		// neither converts to the other without the filesystem (memory spec
+		// rev.2, M-2 decision 8).
+		projectKeys = memory.ProjectKeys(p.Root)
 	}
 	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit)
 	if err != nil {
@@ -549,7 +630,39 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 			Excerpt:            h.Excerpt,
 		}
 	}
-	return ipc.SearchReply{Hits: out, Total: total}, nil
+	// The second list, on the same query and the same limit. It is a second
+	// statement rather than a second call a caller has to make, which is what
+	// P4 means by one query - see ipc.MemoryHit for why it is a second list
+	// and not more of the first.
+	//
+	// A failure here fails the whole reply rather than answering half of it,
+	// on the rule [status] is under: a caller cannot tell an empty list that
+	// was read from one that was never filled in.
+	mem, memTotal, err := search.SearchMemory(ctx, db, req.Query, projectKeys, limit)
+	if err != nil {
+		return ipc.SearchReply{}, err
+	}
+	memOut := make([]ipc.MemoryHit, len(mem))
+	for i, h := range mem {
+		// Already masked by internal/search, which owns the whole memory
+		// read path - see search.SearchMemory for why the split the event
+		// path makes is not made here.
+		memOut[i] = ipc.MemoryHit{
+			ID:             h.ID,
+			Host:           h.Host,
+			Kind:           h.Kind,
+			SourcePath:     h.SourcePath,
+			Title:          h.Title,
+			HostModifiedMS: h.HostModifiedMS,
+			Excerpt:        h.Excerpt,
+		}
+	}
+	if len(memOut) == 0 {
+		// nil rather than an empty slice, so the omitempty tag holds and a
+		// machine with no native memory gets the document it always got.
+		memOut = nil
+	}
+	return ipc.SearchReply{Hits: out, Total: total, MemoryHits: memOut, MemoryTotal: memTotal}, nil
 }
 
 // maxEventNameRunes bounds events.event_name on the way onto the wire.

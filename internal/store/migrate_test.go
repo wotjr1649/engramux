@@ -153,6 +153,11 @@ func TestForeignKeyCheckReportsADanglingRow(t *testing.T) {
 // memory_items into projects, events into projects and sessions, observations
 // into projects and events. Six references, five rows.
 //
+// memory_items is the one whose reference is optional - 00004 made project_id
+// nullable, because neither host's memory can promise a projects row exists for
+// it - so it is seeded *with* a project on purpose. A satisfied reference is
+// what foreign_key_check has to walk, and a NULL would leave that key unchecked.
+//
 // privacy_class and redaction_version are written through internal/secret rather
 // than as literals, because the column exists to hold what that package produces
 // and a literal would not notice the two drifting apart.
@@ -180,15 +185,57 @@ func seed(t *testing.T, db *sql.DB) {
 		{"observations", `INSERT INTO observations (id, project_id, event_id, kind, body, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			[]any{"o-1", seedProject, seedEvent, "file-touched", "internal/store/store.go", int64(1003)}},
-		{"memory_items", `INSERT INTO memory_items (id, project_id, key, body, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			[]any{"m-1", seedProject, "convention", "one connection, held exclusively", int64(1004), int64(1004)}},
+		memoryItemsSeed(t, db),
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s.sql, s.args...); err != nil {
 			t.Fatalf("INSERT into %s: %v", s.what, err)
 		}
 	}
+}
+
+// memoryItemsSeed picks the statement that matches the memory_items this
+// database actually has. The table has two shapes and which one is present is a
+// migration version: 00001's, which two tests below reach on purpose by running
+// UpTo(1) so that they can insert rows that predate the leaves column, and
+// 00004's, which is what every other caller sees.
+//
+// Detecting rather than passing a version in is deliberate. The two version-1
+// tests are about events and would have to learn about memory_items to pass a
+// flag, and a flag is a second thing to keep in step with the schema. The column
+// is the fact.
+func memoryItemsSeed(t *testing.T, db *sql.DB) struct {
+	what string
+	sql  string
+	args []any
+} {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT count(*) FROM pragma_table_info('memory_items') WHERE name = 'host'`).Scan(&n); err != nil {
+		t.Fatalf("read the memory_items columns: %v", err)
+	}
+	if n == 0 {
+		return struct {
+			what string
+			sql  string
+			args []any
+		}{"memory_items", `INSERT INTO memory_items (id, project_id, key, body, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			[]any{"m-1", seedProject, "convention", "one connection, held exclusively", int64(1004), int64(1004)}}
+	}
+	return struct {
+		what string
+		sql  string
+		args []any
+	}{"memory_items", `INSERT INTO memory_items (id, host, kind, source_path, entry_key,
+			                                     project_path, project_id, title, body,
+			                                     host_modified_at, privacy_class,
+			                                     redaction_version, indexed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		[]any{"m-1", "codex", "rollout-summary", `D:\work\engramux\MEMORY.md`, "0198f0c1",
+			`D:\work\engramux`, seedProject, "one connection", "one connection, held exclusively",
+			int64(1004), seedPrivacyClass.String(), int64(secret.Version), int64(1004)}}
 }
 
 const (
@@ -264,6 +311,8 @@ func TestMigrateCreatesTheDeclaredTables(t *testing.T) {
 	want := []string{
 		"events", "events_fts", "events_fts_config", "events_fts_data",
 		"events_fts_docsize", "events_fts_idx", "goose_db_version",
+		"memory_fts", "memory_fts_config", "memory_fts_data",
+		"memory_fts_docsize", "memory_fts_idx",
 		"memory_items", "observations", "projects", "sessions",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
@@ -419,10 +468,10 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
 	// The literal is bumped by hand with every migration added, so a
-	// migration that arrives without anyone noticing fails here. 3 is
-	// 00003, the cell index (backlog 34).
-	if v != 3 {
-		t.Fatalf("db version = %d, want 3", v)
+	// migration that arrives without anyone noticing fails here. 4 is
+	// 00004, the native memory table and its index (memory spec rev.2, M-2).
+	if v != 4 {
+		t.Fatalf("db version = %d, want 4", v)
 	}
 }
 
@@ -516,7 +565,10 @@ func TestDeletingAProjectCascades(t *testing.T) {
 	db := migrated(t)
 	seed(t, db)
 
-	children := []string{"sessions", "events", "observations", "memory_items"}
+	// memory_items is deliberately absent. Its key to projects sets null rather
+	// than cascading, for the reason 00004 gives, and
+	// TestDeletingAProjectLeavesItsMemoryBehind is what holds that half.
+	children := []string{"sessions", "events", "observations"}
 	for _, table := range children {
 		if n := countRows(t, db, table); n != 1 {
 			t.Fatalf("before delete: %s rows = %d, want 1", table, n)
