@@ -1,6 +1,8 @@
 # Engramux — memory architecture, after 1.0
 
-**rev.1** · 2026-08-30
+**rev.2** · 2026-09-02 — rev.1 was 2026-08-30. This revision reads both hosts' memory on the
+owner's machine, corrects two clauses of M-2 the reading falsified, and answers the questions Step 3
+could not be written without. It adds a fifth MCP tool and says which 1.0 rows that moves.
 
 **Scope.** What Engramux does about *memory* once Phase 6 closes, and how installation and diagnosis
 change to match. It **supersedes nothing**. `2026-08-27-engramux-1.0-design.md` rev.4 remains the
@@ -190,6 +192,123 @@ Whether a future release can put the same namespace behind a non-file backend is
 what would settle it is a release whose memory directory is empty while its memory works. Until then
 the file walk is correct and it is not guaranteed to stay correct, which is one more reason the
 warn-and-continue rule is a gate and not a style.
+
+### Step 3's open questions, answered (M-2)
+
+**Decided 2026-09-02**, against the reading above and not against a preference. Nine decisions; the
+five the plan named, plus four the reading forced into the open. Each says what it costs, because a
+decision whose cost is not written is one nobody can reopen.
+
+**1 — Step 3 proceeds with both hosts' memory switched off, and is not blocked by that.** The
+question was put the other way first and the framing was wrong: none of M1, M2 or M3 requires a live
+format. M1 is over *"every native memory file present on the machine"* and 79 files are present. M2's
+inputs are synthesised by the test, and the snapshot turns out to carry five real drift shapes
+already — an index bullet with no target, an entry with an extra key, 14 of 55 raw sections missing a
+field, 3 of 55 summaries without a branch field, 1 of 18 notes without the timestamp §3's P3 compares
+against — which is better material than a live directory that happens to be well-formed. M3 needs a
+population and not a stream, and the gate's own wording already reports *"against each native
+memory's own ceiling"*, so a small ceiling is a number it prints rather than a failure. What is given
+up is exactly two things and both are small: whether Codex commits each consolidation stays
+**[unverified]** — one commit against a clean tree cannot separate write-and-commit from write-only,
+and a single live consolidation would settle it — and a format change in a future host release
+produces no new file here, so it is invisible on this machine. The second is what M2 exists for at
+runtime rather than in a gate, which is the point of that gate's shape. The owner's own configuration
+is left alone deliberately: it was set off twice on one host and three times on the other, and
+Claude Code's is on by default for everyone else, which is the machine this feature ships for.
+
+**2 — One memory item is one block the host's own format delimits, and one whole file where it does
+not.** Codex's thread sections, its per-rollout summaries and its index entries; Claude Code's notes.
+Where the delimiter is not recognised the file survives as a single document, which is M2's
+warn-and-continue applied to the unit rather than only to the fields. About 150–200 documents against
+17,043 events. The alternative that was rejected is file granularity, and one measurement rejects it:
+Codex's raw-memories file is 291,566 B where the median document either side of it is about 5 KB, so
+file granularity makes the bulk of Codex's content one document, and an excerpt cut from it answers
+nothing.
+
+**3 — Collection is the drain's ticker with a modification-time and size short-circuit.** Re-stat the
+directories on the interval and re-read only what changed. It reuses a mechanism that is already in
+the service, adds no handle and no thread, and therefore leaves the Phase 6 soak's baseline —
+handles 198 → 240, threads 15–18, working set 61–75 MB — directly comparable to the next series,
+which is the instrument that would see this decision go wrong. A scan at service start was rejected
+because the service runs for days and memory written mid-session would not be searchable until a
+restart. A file watcher was rejected on a measurement: Claude Code's memory directory is a
+*subdirectory of the transcript directory*, whose siblings are 36, 104 and 4 transcript files and
+whose parent holds 3,823, so a recursive watch fires on every session write this product's hooks are
+already capturing, and a per-directory watch needs its watch set rebuilt every time a project appears.
+
+**4 — M3's fixture is the owner's, lives outside the repository, and the gate skips when it is
+absent.** The same shape `.capture/` and `TestPhase4Gate`'s corpus mode already have. Nothing is
+promoted, nothing is redacted, and nothing leaks; what is given up is that the gate does not run on
+anyone else's machine and its result is an observation of one. Whether 25 queries per host is
+reachable against a Claude Code population of 18 notes is **deferred to the fixture's construction**
+rather than decided here, because the gate already reports against the population's own ceiling.
+
+**5 — `memory_items` keeps its name and loses its schema.** Migration `00004` drops it and creates it
+again with the columns the reading says are needed: host; kind; the source file path; the entry key
+within that file; a title; the body; the host's own timestamp, separate from ours; a project path;
+`privacy_class` and `redaction_version`; and when we indexed it. Dropping is safe and checked rather
+than assumed — no shipped code writes that table, and its only references are five lines of
+`internal/store/migrate_test.go`. The present schema does not fit for two reasons that are not
+matters of taste. It has no `host` column, so `UNIQUE (project_id, key)` makes the two hosts collide
+on any key they share. And `project_id` is `NOT NULL` with a foreign key into `projects`, which
+cannot express a Claude Code memory whose git root this database has no row for — the three that
+exist include no project this repository is one of — or a Codex entry whose `cwd` names a directory
+no event ever came from.
+
+**6 — Native memory gets its own external-content FTS table, and its ranked list stays its own.**
+The tokenizer clause is taken from the migration's own `CREATE` statement rather than written twice,
+which is the discipline `TestEveryCandidateDocumentIsReachable` already uses. `events_fts` is not
+touched, so the cost on an existing installation is a small index over about 950 KB rather than a
+rebuild — and the rebuild is what is being avoided: `00002` cost 1.30 s and doubled the file at 8,177
+events and 40 MB, and this database is now 17,043 events and 182 MB. The rejected alternative was one
+FTS over a view unioning both — FTS5 does accept a view as `content=` — and it was rejected because
+it pays that rebuild on every installation and couples two tables through one rowid space, which the
+`00002` header already warns must never be renumbered. The two lists are **not merged**: bm25 is not
+comparable across indexes whose document frequencies come from populations of about 200 and 17,043,
+and a normalisation rule invented to merge them would be an unmeasured input to M3's own recall
+number.
+
+**7 — Step 3 and Step 4 do not share an FTS rebuild, and are two migrations.** The plan asked this
+to be settled before either migration is written. M-3's own wording is that the derived fields are
+*"rule-based columns beside the payload"* — filters and a ranking input, not indexed text — and M4
+measures them with the boost on and off, which is a scoring change rather than an index change. So
+the batching argument the `00002` row exists to make does not apply. If Step 4 turns out to need
+indexed text after all, it earns its own rebuild then, on its own evidence.
+
+**8 — A memory item is scoped by the path the host wrote, not by a foreign key.** The row carries the
+project path — Claude Code's memory directory resolves to one, Codex's entries each carry their own
+`cwd` — and a project-scoped request compares that path against the requested project's root. The
+foreign key is filled when a `projects` row happens to exist and is otherwise empty; it is a
+convenience and never the scoping mechanism. Keying on the foreign key alone was rejected because it
+makes every unmatched memory unreachable through MCP, and creating a `projects` row per unmatched
+path was rejected because it fills the project list and `list_sessions` with directories no event
+ever came from.
+
+**9 — One `search` call returns both lists, and `get_memory` is `get_event`'s equivalent.** P4 is
+defined as *"one query reaches answers that exist only in the other host's sessions or memory"*, and
+a separate search tool breaks that literally: the model has to know to make a second call, and a
+model that does not is the agent-retrieved regression SWE Context Bench measured at four points below
+no memory at all. So `SearchReply` gains a second array rather than the surface gaining a second
+search. `get_memory` is added rather than `get_event` being taught a second kind of id, because a
+tool whose name does not describe what it returns is the defect, and because §8's Phase 5 gate on
+`get_event` checking the project with the id is written about events. Its reply bound is **measured**
+before it ships and recorded in the 1.0 spec §7.1, on the same rule `get_event`'s bound was: the
+bodies it will carry are 789–19,408 B for Claude Code notes, median 4,725, and 3,092–19,698 B for
+Codex's per-rollout summaries.
+
+**Forced by an existing invariant rather than chosen here, and recorded so no review reads them as
+open.** A memory hit's source path is a user path, so it is masked on the MCP surface — `§8`'s Phase 5
+egress clause sweeps a marshalled reply with the detector rather than naming fields, so nothing had
+to be added for it to be caught, and it would be caught. The CLI prints masked by default with the
+real values behind `--full`, which is M-6's rule and not a second decision. And the index is over the
+original text, never a masked form, for the reason §5.7 gives: masking happens at egress, and an
+external-content index of masked text disagrees with the table `rebuild` reads.
+
+**What this contradicts in `2026-08-27-engramux-1.0-design.md` rev.4, named rather than left for a
+reader to find.** §5.9's *"the four tools"*, §8's Phase 5 row and §8's Phase 6 row, which counts *"the
+four MCP tool results"*, and §10's closed question 3. There are **five** tools after Step 3, and the
+Phase 6 audit's sweep is over five results and five errors. Nothing else in those rows moves: each new
+surface is swept by the same detector, in both modes, against the same definition of an egress.
 
 ### Why derived fields are not a summary (M-3)
 

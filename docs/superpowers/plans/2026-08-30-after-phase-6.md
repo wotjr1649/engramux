@@ -96,6 +96,11 @@ measured until it exists.
 
 Blocked by: nothing. Unblocks: gate **M3**, and the coverage half of **M8**.
 
+Its design questions were open when this revision was written and are not any more: the memory spec
+**rev.2** reads both hosts' memory on the owner's machine and answers all of them under M-2, adding
+a fifth MCP tool and naming the 1.0 rows that moves. This step is executed against that revision, and
+nothing here restates a value from it.
+
 Done when: gates **M1**, **M2** and **M3** pass. **M2** is the one to watch — a parser that skips
 quietly passes a review and fails a format change silently, which is the failure this gate is shaped
 against.
@@ -107,7 +112,8 @@ it selects over is complete.
 Before writing the migration, settle whether Step 3 and Step 4 share an FTS rebuild. If they do,
 they are one migration and one backfill; if the derived fields are filters on the base table and
 never enter the index, they are two and the batching argument disappears. The 1.0 spec's `00002` row
-is what makes the question worth asking rather than assuming.
+is what makes the question worth asking rather than assuming. **Settled 2026-09-02** in the memory
+spec rev.2's M-2: they are two, and the reason is there rather than here.
 
 Blocked by: Step 3, for judgement rather than for compilation. Unblocks: gate **M7**, which is what
 decides whether Step 5 ships enabled.
