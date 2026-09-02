@@ -369,6 +369,23 @@ which is not the human-labelled one M3 asks for, and was deleted — **claude-co
 and codex 11 of 11 over 265**. Replacing `ORDER BY rank` with an id order took codex to 10 of 11 and
 failed the gate, so the gate is not vacuous. What remains is the fixture, and it is the owner's.
 
+*Decision 9 has a cost the first live upgrade showed, and it is priced rather than fixed.* The SDK
+derives an output schema for `search` from `ipc.SearchReply` and a client caches it at connect, so a
+**session that was already open across the upgrade rejects the reply** the moment it carries memory
+hits — *"Structured content does not match the tool's output schema: data must NOT have additional
+properties"*. Observed at the terminal, from a real Claude Code session: the same call against a
+project with no native memory succeeded, because `omitempty` left both new fields out and the reply
+still matched the old schema exactly. The service logged nothing; it is the client's validation and
+not the server's. A reconnect fixes it, which is what "one build is one compatibility event" already
+means. The alternative is `get_event`'s: an `any` output type produces no schema and nothing to
+validate, so a future field could never do this — and it costs the model the shape of the reply, which
+`get_event` gave up under duress rather than by choice. **Kept typed**, and the next revision that
+grows this document should know it is choosing again.
+
+*M2 fires in production, and the three shapes are the ones the reading predicted.* The live service's
+first pass logged two unknown `.md` names — the two subtrees §1's README reading does not name — and
+one index bullet with no link. Warned, and all three still indexed.
+
 *One test was fake and a break-it pass is what said so.* The memory hit's masking test searched for a
 literal user name the *body* carried, and the source path a test writes to is under the machine's own
 temporary directory — so it carries the **real** user name and the assertion never reached the field

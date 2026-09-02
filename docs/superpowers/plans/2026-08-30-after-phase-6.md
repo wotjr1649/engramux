@@ -105,6 +105,41 @@ Done when: gates **M1**, **M2** and **M3** pass. **M2** is the one to watch — 
 quietly passes a review and fails a format change silently, which is the failure this gate is shaped
 against.
 
+**Done 2026-09-02**, on `step-3-native-memory`: nine commits, the design settled before any of them.
+The reading came first and corrected the section it was written into — no setting names Claude Code's
+memory path, and Codex's line-level index schema stopped being `[unverified]` — then nine decisions,
+then the build. Memory spec **rev.3** carries all of it; nothing here repeats a value from it.
+
+**The gates.** **M1** over this machine's own memory: 81 files, 303 items, no crash and no text
+silently dropped, asserted as a partition rather than a byte comparison because the parsers
+deliberately drop a field's key name. **M2** over synthesised drift, all three shapes, each asserted
+on both halves — something warned, and nothing was lost. **M3** verified once against a fixture
+generated from the corpus and then left to skip, because a generated fixture is not the
+human-labelled one it asks for: claude-code 1 of 1 over 38 items, codex 11 of 11 over 265, and
+replacing `ORDER BY rank` with an id order took codex to 10 of 11 and failed the gate.
+
+**What the real corpus found that no synthesised fixture did**, four defects, each now owned by a
+test: a heading is not unique within a file; the parser was stripping the very word §6.1's credential
+rule matches on, so a credential reached a reply bare and *detected clean*; a URL scheme parsed as a
+field label; and a Codex rollout summary's sections did not inherit the `cwd` their own file names,
+which filed 92 items under no project. The middle two came out of widening the Phase 6 redaction
+audit to the five surfaces it now has, through the literal-needle half that clause exists for.
+
+**Verified**: the suite 17 packages ok, the pinned linter `0 issues.` at exit 0 with both values read,
+`./scripts/race.sh` 17 packages with no report at exit 0. **Installed** through `engramux install
+--apply` twice — the second time to carry the `cwd` fix — with `doctor` green at exit 0, migration
+`00004` applied, and the service's own log reading `indexed native memory files=81 written=303` on its
+first pass. **P4 seen at the terminal**: one `engramux search` returned `14 of 14 native memory
+matches` across `codex-rollout`, `codex-index`, `codex-raw` and `claude-note:project`, and a hit's id
+round-tripped through `engramux memory` to the whole item. The live MCP surface was called from a real
+Claude Code session and answered; what that call also showed is decision 9's one cost, which the spec
+now prices — a client that cached the reply schema before the upgrade rejects a reply carrying memory
+hits until it reconnects. The service's own log carries M2 firing in production on the three shapes
+the reading predicted.
+
+**One row raised and none closed**: backlog **36**, a memory item's title. **28** is still the only
+other one, and it is still a publication condition.
+
 **Step 4 — derived fields.** Memory spec **M-3**. After Step 3 rather than before it because the
 retrieval evidence puts the points in the selector, and a selector is easier to judge once the corpus
 it selects over is complete.
