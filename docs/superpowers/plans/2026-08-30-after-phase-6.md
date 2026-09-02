@@ -33,8 +33,8 @@ add), **33** (a search reply with no match count), **9**'s three remaining shipp
 **6**. **16**, **17** and **27** are wire-contract changes and belong here too, because one build is
 one compatibility event and three separate ones are three.
 
-**34** joins on 2026-09-02, the index on `events (host, event_name)`, as its own migration — the one
-schema change in this step. Admitted because the soak measured it as the shipped binary's only defect
+**34** joins on 2026-09-02, the covering index behind the status reply's per-cell breakdown, as its
+own migration — the one schema change in this step. Admitted because the soak measured it as the shipped binary's only defect
 and the 1.0 spec §7.1's read-deadline row decides it comes before any change to the deadline; and
 because an index-only migration carries none of the rebuild and backfill cost that the no-schema rule
 exists to batch (the 1.0 spec's `00002` row is what that rule is about).
