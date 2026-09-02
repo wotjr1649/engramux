@@ -164,6 +164,27 @@ of this plan.
 Done when: **M5**, **M6** and **M9** pass and **M8** is reported. Enabling it for a user is a
 separate act from shipping it, and **M7** is what licenses that act.
 
+**Step 6 — the update path.** Memory spec **M-7**. `engramux update` as its own command: the two
+binaries and the service lifecycle, never host configuration, with `--from` as an escape hatch rather
+than the default.
+
+After Steps 4 and 5 rather than into either, and the reason is that nobody has this product installed
+but its owner — an update path is a feature with no users yet. What put it on the list at all is that
+the *developer* reinstall is the same sequence, and `scripts/reinstall.sh` was about to be that
+sequence forever, in bash, in a product whose argument is two binaries and no runtime.
+
+Blocked by: nothing technical. Unblocks: the fourth publication condition, partly — a user who can
+update is a user who can be told to.
+
+One thing this step decides that M-7 deliberately left open: **the delivery channel.** Until one
+exists — a plugin that carries the binaries, a package manager, or a downloaded folder — `update` has
+no local marker to read and `--from` is its only door. Which channel it is belongs to the session
+that builds this, against what exists then.
+
+Done when: `update` replaces a running installation and restarts what was there when a copy fails,
+`doctor` reports a newer binary beside the installed one, and `scripts/reinstall.sh` is either a
+one-line wrapper or gone.
+
 ## Not ordered here
 
 The 1.0 backlog rows that needed no build were taken during the soak and are not steps. The

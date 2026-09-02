@@ -1,5 +1,8 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.4** · 2026-09-03 — rev.4 adds **M-7**, the update path, and §8's fourth publication
+condition, which an antivirus wrote for us mid-session. rev.1 to rev.3 below.
+
 **rev.3** · 2026-09-02 — rev.1 was 2026-08-30; rev.2 and rev.3 are both 2026-09-02, and they are one
 day's three states of the same section. **rev.2** read both hosts' memory on the owner's machine,
 corrected two clauses of M-2 the reading falsified, answered the nine questions Step 3 could not be
@@ -54,6 +57,7 @@ rather than to replace it with a description of it.
 | **M-3** | **Derive search *fields*, never search *answers*.** Rule-based columns beside the payload — touched paths, commands and exit codes, error spans, tool name, success flag, session, timestamp. The payload is not rewritten (I-10) | Decided |
 | **M-4** | **Hook-time injection is built, and ships disabled.** It is turned on per user only after §5's gates pass. This is the row that contradicts rev.4 §2's pull-only decision, and it contradicts it for 1.0-and-after, not for 1.0 | Decided |
 | **M-5** | **Installation moves into the Go binary.** `engramux install` replaces `scripts/install-hooks.mjs`, and the Node dependency goes with it | Decided |
+| **M-7** | **Replacing an installed build is its own command.** `engramux update` is `install --apply` minus everything that writes host configuration, and Engramux never fetches what it runs | Decided |
 | **M-6** | **`doctor` judges by stage.** "Not installed yet" and "installed and broken" become different answers with different next commands; MCP becomes optional rather than required for a green result; the eleven hook entries are checked; and the output is masked by default, with `--full` for the real values | Decided |
 
 ### Why there is no summariser (M-1)
@@ -399,6 +403,61 @@ summary exists **to answer instead of one**. The moment a derived value is what 
 rather than what the reader is given a route to, M-3 has become M-1's rejected option. The evidence
 for the boundary is the same 42.5%-versus-43.9% result above.
 
+### Replacing an installed build is its own command (M-7)
+
+**Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
+this product installed but its owner, so an update path is a feature with no users yet; what forced
+the decision now is that the *developer* reinstall is the same sequence, and it was about to be a
+bash script forever.
+
+**`engramux update` is `install --apply` minus everything that writes host configuration.** It
+replaces the two binaries and takes the service through the 1.0 spec §5.5 sequence — stop, wait for
+the exclusive lock to be released, replace, start — and it restarts what was there when a copy fails.
+It never touches `~/.codex/config.toml`, Claude Code's user configuration, or the hook entries.
+
+That division is the point, and it is worth stating why it is not a second door to one room. Safety
+here comes from **the definition of the command** rather than from a condition on the caller: an
+agent may run `update` full stop, where `install --apply` needs `doctor` to have confirmed both hosts
+are already registered (`AGENTS.md`). A narrower command with a guarantee attached is a better
+boundary than a wider one with a rule beside it, and `scripts/reinstall.sh` becomes nearly empty when
+this exists — which is the sign it is the right shape.
+
+**Engramux does not get outbound network, and this decision is where that was tested.** Measured
+2026-09-03: `net/http` is imported by exactly one shipped file, `internal/mcpserver/serve.go`, and it
+uses it to *listen* on loopback; the three other `url.Parse` calls are string parsing. **This product
+has never made an outbound call.** So "update itself when there is a newer tag" is not a small
+request — it is a new capability class, and the binary an updater fetches is the classic supply-chain
+surface. The answer is that **whatever fetches is not Engramux**: a delivery channel updates a local
+marker, and `update` reads it. The noticing survives; the fetching stays with whoever already has the
+user's trust for fetching.
+
+`--from <directory>` survives as an **escape hatch and not the default** — it is how a developer
+updates from a build tree and how an offline or proxied user updates from a folder they downloaded.
+Until a delivery channel exists it is the only door, and that is accepted rather than hidden.
+
+**What is rejected, with the reason, because each will be proposed again.**
+
+*Hook-triggered automatic update.* Three independent things stop it, and any one is enough. The
+relay's whole budget is 1 s (§5.3) and this sequence is a service stop, a lock release, 19 MB of
+copying, a start and a migration. Windows cannot overwrite a running image — `AGENTS.md` has the row
+— and the `SessionStart` relay *is* the binary that would be replaced. So it would need a detached
+child process, which is exactly the installation architecture `AGENTS.md` forbids taking as a model.
+Beyond the mechanics it is unattended work escalating itself, and a failure leaves the user with no
+service at the moment a session starts, which is I-04 broken quietly.
+
+*Hanging it on a plugin's update.* **[verified] 2026-09-03** from Claude Code's own plugin reference:
+there is no install-time, update-time or removal-time lifecycle hook. A plugin manifest carries six
+keys and its hooks are all session-runtime events. The one automated lifecycle step is a dependency
+install with `npm ci` or `bun install`, which is the Node runtime **M-5** removed. So there is no
+event to hang an updater on, and the nearest thing — a `SessionStart` hook — is rejected above.
+
+*Building on the user's machine.* `go install` is not offered and source is not the primary path. The
+product's argument is two statically linked binaries and no runtime, which is the same reason
+`CGO_ENABLED=0` is a boundary; a Go toolchain is a heavier runtime than the C one that rule exists to
+avoid. It is also worse for §8's fourth condition below rather than better: a binary built on the
+user's machine has no publisher at all, so it starts from less reputation than an unsigned release,
+not more.
+
 ---
 
 ## 3. What "more precise than native" means, measurably
@@ -608,3 +667,33 @@ of living in a session brief.
    `doctor` reports their permissions as a finding rather than changing them.
 3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
    nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0.
+4. **A first run that survives the machine's own antivirus, and is documented.** Written as an
+   outcome rather than as a mechanism, which the other three are too, and deliberately: signing is
+   not a pass. **[verified] 2026-09-03**, on the owner's machine, mid-session: Windows Defender
+   removed `engramux.exe` from both the build directory and the install directory as
+   `Behavior:Win32/Execution.A!ml`, severity 5, `DidThreatExecute` False — blocked before it ran, so
+   nothing was compromised. `Behavior:` and `!ml` are the finding: a behavioural machine-learning
+   detection on executing a freshly built, rare, unsigned binary, not a signature on the bytes. The
+   service binary was untouched and kept running, so capture never stopped. It was **not** the first:
+   `Trojan:Win32/Commando.A!ml` fired on 2026-08-30 against the soak sampler's `schtasks /create`, so
+   two of the four detections that machine has ever recorded are Engramux doing what it is designed
+   to do — run a new unsigned executable, and register a scheduled task. A stranger's first install is
+   those same two shapes. Backlog **37** carries the measurement.
+
+   **Why the condition is not "sign the binaries".** Microsoft's SmartScreen change of March 2024
+   removed the instant-bypass an EV certificate used to grant; OV and EV now both accumulate
+   reputation through download volume. So signing is not a switch that turns the detection off — it
+   is what makes reputation *accumulate across releases* instead of resetting on every build, which
+   is a real and different benefit. A first release by a new publisher still has no reputation, so a
+   condition that named signing would be satisfied by something that does not yet deliver the
+   outcome. What satisfies this condition is that a stranger's first run works, or that the
+   documentation tells them exactly what will happen and what to do — and submitting the binary to
+   Microsoft as a false positive, which is free and fixes it for everyone rather than for one
+   machine, is the cheapest thing that moves it.
+
+   Two costs of signing are recorded so the decision is made against them rather than against a
+   guess: a code signing key has had to live on FIPS 140-2 Level 2 hardware since June 2023, so there
+   is a token as well as a certificate; and from March 2026 a publicly trusted certificate is valid
+   for at most 460 days, which makes it a recurring chore rather than a purchase. This is not a small
+   project's problem alone — `openai/codex`, one of the two hosts this product serves, has its own
+   Defender false-positive issue on the same shape.
