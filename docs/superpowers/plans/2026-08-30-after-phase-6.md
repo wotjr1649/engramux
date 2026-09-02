@@ -39,6 +39,10 @@ and the 1.0 spec §7.1's read-deadline row decides it comes before any change to
 because an index-only migration carries none of the rebuild and backfill cost that the no-schema rule
 exists to batch (the 1.0 spec's `00002` row is what that rule is about).
 
+**35** joins the same day, from the first real run of `engramux install`: a re-install must not report
+Claude Code's registration as failed when the host already points at the endpoint (backlog 35, memory
+spec §8). Admitted because Step 1's own reinstall is the next time the installer runs on this machine.
+
 Blocked by: nothing since the soak closed; it branches from the `main` that carries Step 2. Unblocks:
 nothing — every later step is independent of it. It goes first because it is the only step whose
 content is already settled, and because a smaller queue makes the next build's failures easier to
