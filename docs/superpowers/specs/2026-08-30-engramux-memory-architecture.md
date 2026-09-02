@@ -92,11 +92,104 @@ already paid.
 
 The cost accepted is a dependency on two formats with no stability promise. Claude Code's is
 publicly documented — location, index file, load limit, frontmatter fields — and its location is
-configurable, so it must be **resolved from settings and never hardcoded**. Codex's file names are in
-its own repository but the line-level schema of its index is **[unverified]** — nobody in this
-session read one. The parser therefore follows the rule rev.4's §4.4 already imposes on
-`tool_response`: **preserve a shape you do not recognise, warn, and continue.** A silent skip is a
-failure, not a fallback.
+configurable, so it must be **resolved and never hardcoded**. Codex's file names are in
+its own repository but the line-level schema of its index was **[unverified]** when this revision was
+written — nobody in that session read one. The parser therefore follows the rule rev.4's §4.4 already
+imposes on `tool_response`: **preserve a shape you do not recognise, warn, and continue.** A silent
+skip is a failure, not a fallback.
+
+Two clauses of that paragraph are amended by the reading below and are marked here so nobody follows
+them: **"resolved from settings" was the wrong mechanism** — no setting names a memory path, and what
+must be resolved is the configuration home from the environment — and **Codex's line-level schema is
+no longer `[unverified]`**, it is read out in full below.
+
+**[verified] 2026-09-02 — both hosts' memory was read on the owner's machine, and the two clauses marked above are
+corrected.** Shapes and counts only; these are the owner's private notes and no line
+of one is quoted here, in a commit, or in a test. Reproduce by reading the two directories named
+below and tabulating; the throwaway scripts that did it are not in the tree, so every count here is
+`[verified once, no committed harness]` until M1 and M2 own them.
+
+*Claude Code — the location is not a setting.* The memory of a project lives at
+`<configuration home>/projects/<project key>/memory/`, and only the configuration **home** moves: it
+is the `CLAUDE_CONFIG_DIR` environment variable, default `~/.claude`. The published settings schema
+carries exactly **one** memory property, the boolean `autoMemoryEnabled`, and **no property names a
+path** — so "resolved from settings" above is the wrong instruction and the right one is *resolved
+from the environment, with the documented default*. The project key is the project path with the
+drive colon and every separator folded to `-`, and the schema's own words are that it is *"derived
+from the git repository, shared across worktrees"*: of the three keys present, **two decode to a
+directory that is a git root and one does not**, so there is a fallback to the working directory and
+a parser must not assume a repository. **94 project directories on this machine, 3 with a `memory/`**
+— 21 files, 151,102 B, every one `.md`, every one flat with no subdirectory.
+
+*Claude Code — the index and the notes.* Each memory directory holds one `MEMORY.md` and it has
+**no frontmatter**. Its entries are markdown list items of the form link-then-em-dash-then-
+description; **6, 11 and 1 entries, and 18 of 18 resolve to a file that exists, 0 missing**. One of
+the three indexes carries a heading and two do not, and **one index line is a bullet that is not an
+entry at all** — no link, no target — so M2's drift case is already in the corpus rather than
+hypothetical. The 18 non-index notes each carry a YAML block with the top-level keys `name`,
+`description` and `metadata`, 18 of 18. `metadata` is a **nested block and not inline JSON**, with
+`node_type` (18 of 18, one value, `memory`), `type` (18 of 18, **four** values — 10 / 5 / 2 / 1 over
+the taxonomy), `originSessionId` (18 of 18, UUID shape) and `modified` (**17 of 18**, ISO-8601 with
+milliseconds and a trailing `Z`). One note therefore has no `modified`, which is the field §3's P3
+compares against, and a parser that requires it fails on 1 of 18 here. Descriptions run 60–668
+characters, median 173; note bodies 789–19,408 B, median 4,725. The three indexes are 239 / 2,466 /
+18,326 B at 4 / 7 / 13 lines, all under the documented 200-line and 25 KB load limit, so **nothing on
+this machine exercises that truncation** and a test for it needs a synthesised index.
+
+*Codex — the directory is the git repository its README describes, and it has one commit.*
+`~/.codex/memories`, a fixed location. Branch `main`, **one** commit, **no remote**, working tree
+clean against it, 60 tracked paths. The newest file mtime is a week after that commit and the tree is
+still clean, so the bytes now on disk are the bytes of the baseline commit and **nothing has been
+committed since**; whether the consolidation writes and commits, or writes only, is `[unverified]`
+and one live consolidation on a machine with the feature on would settle it. Four artefacts, matching
+§1's README reading: an index `MEMORY.md` (39,977 B, 386 lines), a consolidated `memory_summary.md`
+(7,217 B, 83 lines), a raw-memories file (291,566 B, 3,181 lines) and **55** per-rollout summaries.
+Two subtrees the README-level reading does not name are also there, one holding an instructions file
+and one holding a skill.
+
+*Codex — the line-level schema, which was the `[unverified]` this reading exists to close.* None of
+the four artefacts has frontmatter; every field is a bare `key: value` line or an inline `key=value`
+inside parentheses. The index's file entries are **22** bullets of the form path-then-parenthesised
+pairs, with the key set `cwd`, `rollout_path`, `thread_id`, `updated_at` on **21 of 22** and one
+carrying a fifth, `head` — a first drift case in a population of 22. **The index references 22 of the
+55 rollout summaries; 33 are unreferenced**, so an indexer that walks the index alone reaches 40% of
+what is on disk, and reaching the rest means walking the directory. Around those entries the index is
+10 first-level headings, 46 second, 32 third, 96 further bullets and 20 `scope:` / `applies_to:`
+field lines. The raw-memories file is **55** second-level sections keyed by thread id — one per
+rollout summary — under 89 third-level task headings, and its field set is **not uniform**: the full
+nine-key set on 41 of 55, 7 sections missing `keywords`, 5 missing `keywords` with two more, and 1
+carrying only four keys. The per-rollout summaries are 3,092 / 7,129 / 19,698 B with `cwd`,
+`thread_id`, `updated_at` and `rollout_path` on 55 of 55 and **`git_branch` on 52 of 55**. So on
+Codex's side a required-field parser fails on 14 of 55 raw sections and 3 of 55 summaries; the M2
+requirement to warn and continue is load-bearing on the corpus that exists today, not against a
+future format change. Two value formats matter to a parser and are recorded as formats: `updated_at`
+is ISO-8601 with a numeric offset and no milliseconds — a **different shape from Claude Code's**
+`modified`, which is UTC with milliseconds — and the path fields are absolute Windows paths of which
+**39 carry the `\\?\` extended-length prefix against 16 that do not**, in one file, so a path
+comparison that does not normalise it will miss 39 of those 55 lines.
+
+*Neither host's memory is live on this machine, and that is the reading's most consequential fact.*
+Claude Code's auto memory is **off** — `autoMemoryEnabled` false in the user settings and
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY` set to 1 beside it — and its files span 2026-07-18 to 2026-08-04.
+Codex's is **off** in three places at once: `memories` false at the top level of its configuration and
+a `[memories]` table setting `generate_memories` and `use_memories` false; its files span 2026-08-01
+to 2026-08-17 and the 55 summaries share a single mtime to the minute. So both directories are frozen
+snapshots, and three things follow that the design has to take rather than assume away. A collection
+strategy cannot be chosen by measuring change rate here, because the measured change rate is zero.
+M3's fixture is drawn from a Claude Code population of **18 notes over 3 projects**, one of which is
+not a repository and none of which is this one — whether 25 queries answerable from that host alone
+even exist is now a question the gate has to answer before it is written, and it is `[unverified]`.
+And the parser cannot be validated against a live format: it is being written against two snapshots,
+which makes M2's warn-and-continue the whole of the defence rather than a courtesy.
+
+*One risk this reading found and did not settle.* Claude Code resolves memory through an internal
+storage layer that addresses it by namespace, project key and relative path rather than by file path
+directly, and the binary carries a start-up warning about a **v5 storage backend** bound to the
+configuration home. On this machine that layer is file-backed and the files above are what it holds.
+Whether a future release can put the same namespace behind a non-file backend is **[unverified]**;
+what would settle it is a release whose memory directory is empty while its memory works. Until then
+the file walk is correct and it is not guaranteed to stay correct, which is one more reason the
+warn-and-continue rule is a gate and not a style.
 
 ### Why derived fields are not a summary (M-3)
 
