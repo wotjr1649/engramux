@@ -81,6 +81,39 @@ func TestTheTwoJSONParsersDivergeOnALoneSurrogate(t *testing.T) {
 	}
 }
 
+// TestTheTwoJSONParsersDivergeOnARawInvalidByte is the same defect reached
+// through a different door, named separately because the mechanism is not the
+// same: above it is an escape naming half a surrogate pair, here it is a byte
+// that is not valid UTF-8 sitting raw inside a JSON string. Neither validator
+// rejects it - Go's scanner and SQLite's json_valid both check structure rather
+// than the encoding of string contents - so [sqliteWillParse] cannot remove the
+// difference either.
+//
+// It belongs to backlog 39 with the surrogate, and it was named by the review
+// that found the other two rather than by this file's author.
+func TestTheTwoJSONParsersDivergeOnARawInvalidByte(t *testing.T) {
+	t.Parallel()
+
+	// 0xFF cannot begin a UTF-8 sequence. Built from bytes for the same
+	// reason the surrogate is: it does not survive being a literal.
+	payload := append([]byte(`{"tool_input":{"command":"a`), 0xFF)
+	payload = append(payload, []byte(`b"}}`)...)
+
+	const goSide = "a�b"
+	sqlSide := "a" + string([]byte{0xFF}) + "b"
+	if goSide == sqlSide {
+		t.Fatal("the two expected values are equal; this test compares nothing")
+	}
+
+	if got := Derive(payload).Cmd; got != goSide {
+		t.Errorf("Derive: got %q, want the U+FFFD substitution %q", got, goSide)
+	}
+	db := migrated(t)
+	if got := sqlExtractText(t, db, payload, `$.tool_input.command`); got != sqlSide {
+		t.Errorf("json_extract: got %q, want the raw byte preserved %q", got, sqlSide)
+	}
+}
+
 // TestTheTwoJSONParsersDivergeOnADuplicatedKey pins the newer one.
 //
 // It is asserted on [Derive] and on json_extract rather than on [Leaves],
