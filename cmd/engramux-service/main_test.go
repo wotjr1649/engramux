@@ -84,6 +84,32 @@ type running struct {
 	exited bool
 }
 
+// childEnv is the environment every child this package spawns gets: this
+// process's, plus the three redirections that keep a test off the machine's real
+// files.
+//
+// LOCALAPPDATA is the service's own directory, and the two host homes are the
+// native memory indexer's (memory spec rev.2, M-2). The homes matter for a
+// reason the other seam does not have: the memory directories belong to the two
+// hosts and hold the user's private notes, so a service started without these
+// reads them into a test database. Measured: a service started without them and
+// killed half a second later had already written 8 rows of the machine's own
+// memory. They point at subdirectories of the test's own that do not exist,
+// which internal/memory reads as "this host has no memory here" - not an error
+// and not a warning, because a machine with one host installed is ordinary.
+//
+// Every exec in this package goes through here, and
+// TestAServiceWithNoHostHomesIndexesNothing is what makes a site that forgets
+// visible.
+func childEnv(local string, extra ...string) []string {
+	env := append(os.Environ(),
+		"LOCALAPPDATA="+local,
+		"CLAUDE_CONFIG_DIR="+filepath.Join(local, "no-claude-home"),
+		"CODEX_HOME="+filepath.Join(local, "no-codex-home"),
+	)
+	return append(env, extra...)
+}
+
 // start runs the service with a LOCALAPPDATA of its own and waits until it is
 // answering on the pipe.
 //
@@ -100,7 +126,7 @@ func start(t *testing.T, local string) *running {
 	// process runs is a data race the detector would catch.
 	var out bytes.Buffer
 	cmd := exec.CommandContext(t.Context(), serviceBin)
-	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+	cmd.Env = childEnv(local)
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Start(); err != nil {
