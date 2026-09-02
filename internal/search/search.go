@@ -247,17 +247,30 @@ const boostPerDerivedToken = 5.0
 // scores an unchanged `rank` and is still returned;
 // TestTheDerivedBoostChangesNoResultSet is what holds that.
 //
-// # instr and not LIKE
+// # LIKE with an explicit escape, and not instr(lower(col), ?)
 //
-// `instr(lower(col), ?)` against a token this function lowered in Go, rather
-// than `col LIKE '%' || ? || '%'`. LIKE would need the token's own `%` and `_`
-// escaped, and a Windows path and a snake_case identifier are exactly the two
-// shapes this corpus is full of - so the LIKE form is a bug waiting on a query
-// somebody types, and the instr form has nothing to escape.
+// The first version of this was `instr(lower(col), ?)` against a token lowered
+// in Go, on the argument that LIKE would need the token's own `%` and `_`
+// escaped and a Windows path is full of both. The escaping is four lines
+// ([likeContains]) and the `lower()` is not free, which is the whole of why this
+// changed: **`lower()` copies the column before the comparison can look at it**,
+// and `derived_output` holds whole tool outputs. `ORDER BY rank` makes FTS5
+// score every matching row before the first one is returned, so that copy
+// happens per matching row per token - and internal/service's Phase 5 contention
+// gate is what measured the cost. Over its 4,000-document corpus at 96 readers
+// the slowest ingest went from a baseline of 692-852 ms to 832-928 ms against
+// spec 5.3's 800 ms, consistently over where the baseline was intermittently
+// under. With LIKE the boost costs no allocation and the arm returns to the
+// baseline's distribution.
 //
-// The three columns are read separately rather than concatenated once, because
-// concatenating builds a new string per row per token where three instr calls
-// scan the columns in place.
+// LIKE is case-insensitive for ASCII by default and nothing sets
+// `case_sensitive_like`, so this is the same comparison `lower()` on both sides
+// was making, minus the copy.
+//
+// The three columns are three OR'd terms rather than a concatenation, because
+// concatenating builds a new string per row per token - the same allocation in a
+// different place - and because OR short-circuits: a query that matches the
+// command line never looks at the output.
 func orderBy(tokens []string, boost bool) (string, []any) {
 	if !boost {
 		return `
@@ -271,12 +284,29 @@ func orderBy(tokens []string, boost bool) (string, []any) {
 		if i > 0 {
 			b.WriteString(` + `)
 		}
-		b.WriteString(`(instr(lower(events.derived_cmd), ?)` +
-			` + instr(lower(events.derived_paths), ?)` +
-			` + instr(lower(events.derived_output), ?) > 0)`)
-		lowered := strings.ToLower(tok)
-		args = append(args, lowered, lowered, lowered)
+		b.WriteString(`(events.derived_cmd LIKE ? ESCAPE '\'` +
+			` OR events.derived_paths LIKE ? ESCAPE '\'` +
+			` OR events.derived_output LIKE ? ESCAPE '\')`)
+		pattern := likeContains(tok)
+		args = append(args, pattern, pattern, pattern)
 	}
 	b.WriteString(`)`)
 	return b.String(), args
+}
+
+// likeContains turns a query token into the LIKE pattern that matches any text
+// containing it.
+//
+// The backslash escapes itself first, then the two wildcards, which is the only
+// order that works: escaping `%` before `\` would then escape the backslash the
+// first step just wrote. `ESCAPE '\'` at the call site is what makes the
+// character mean this.
+//
+// Without it a token of `100%` matches everything and a token of `main_test.go`
+// matches `mainXtest.go` - and a Windows path and a snake_case identifier are
+// the two shapes this corpus is full of, so it is a query somebody types rather
+// than a hypothetical.
+func likeContains(token string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(token)
+	return "%" + escaped + "%"
 }

@@ -3,6 +3,7 @@ package search_test
 import (
 	"database/sql"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -121,6 +122,84 @@ func TestTheDerivedBoostChangesNoResultSet(t *testing.T) {
 		}
 	}
 }
+
+// TestTheDerivedBoostTreatsAWildcardInAQueryAsText is the escaping the boost's
+// LIKE terms need, asserted through a query somebody would actually type rather
+// than through the pattern builder.
+//
+// Each case is two documents carrying the *same prose*, so both match the same
+// way and bm25 ranks them by nothing but repetition - the decoy repeats it and
+// therefore wins without the boost. What separates them is the derived column:
+// the right document's command is the query literally, the decoy's differs by
+// exactly the character a LIKE wildcard would paper over. Unescaped, the boost
+// lifts both and the decoy's better bm25 keeps it first; escaped, only the right
+// document is lifted.
+func TestTheDerivedBoostTreatsAWildcardInAQueryAsText(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		query   string
+		command string
+		// decoy differs from command only where an unescaped LIKE
+		// metacharacter in the query would match anyway.
+		decoy string
+	}{
+		{
+			name:    "an underscore is an underscore and not any character",
+			query:   "main_test.go",
+			command: "go test -run TestX ./main_test.go",
+			decoy:   "go test -run TestX ./mainZtest.go",
+		},
+		{
+			name:    "a percent sign is a percent sign and not any run of characters",
+			query:   "cover%",
+			command: "go tool cover% report",
+			decoy:   "go tool coverage-everything% report",
+		},
+		{
+			name:    "a backslash is a backslash and not an escape",
+			query:   `dist\engramux.exe`,
+			command: `signtool verify dist\engramux.exe`,
+			decoy:   `signtool verify distXengramux.exe`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The prose is identical on both and repeated on the
+			// decoy, so without a boost the decoy ranks first. That
+			// is what makes an unescaped pattern visible: it lifts
+			// both, and the decoy stays where bm25 put it.
+			const prose = "the query text appears here so that both documents match: "
+			db, name := boostDB(t, map[string]string{
+				"the right document": `{"tool_input":{"command":` + quote(tc.command) +
+					`},"prompt":` + quote(prose+tc.query) + `}`,
+				"the decoy": `{"tool_input":{"command":` + quote(tc.decoy) +
+					`},"prompt":` + quote(prose+tc.query+" "+tc.query+" "+tc.query) + `}`,
+			})
+
+			boosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
+				return search.Search(t.Context(), db, tc.query, "", limit)
+			})
+			unboosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
+				return search.SearchUnboosted(t.Context(), db, tc.query, "", limit)
+			})
+			if len(boosted) != 2 || len(unboosted) != 2 {
+				t.Fatalf("both arms must return both documents; boosted %d, unboosted %d",
+					len(boosted), len(unboosted))
+			}
+			if unboosted[0] != "the decoy" {
+				t.Fatalf("without the boost %q ranks first; the case needs the decoy there to discriminate",
+					unboosted[0])
+			}
+			if boosted[0] != "the right document" {
+				t.Errorf("with the boost %q ranks first; want %q - the query's %q was treated as a wildcard",
+					boosted[0], "the right document", tc.query)
+			}
+		})
+	}
+}
+
+// quote is [strconv.Quote], named for what it is used for: putting a literal
+// that carries backslashes and quotes into a JSON payload a test builds.
+func quote(s string) string { return strconv.Quote(s) }
 
 // boostDB builds a database holding one event per named payload, and returns it
 // with the map from the event id [store.Ingest] minted to the caller's own name
