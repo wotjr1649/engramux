@@ -47,6 +47,7 @@ func newTree(t *testing.T) *tree {
 		ClaudePath:  mk("home", ".claude", "settings.json"),
 		CodexHooks:  mk("home", ".codex", "hooks.json"),
 		CodexConfig: mk("home", ".codex", "config.toml"),
+		ClaudeMCP:   mk("home", ".claude.json"),
 		MCPJSON:     mk("local", "engramux", "mcp.json"),
 		TaskName:    `\EngramuxTest`,
 	}

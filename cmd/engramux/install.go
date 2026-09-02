@@ -123,6 +123,7 @@ func resolvePaths(local, home string, args []string) (host.Options, error) {
 		ClaudePath:  envOr("ENGRAMUX_CLAUDE_SETTINGS", filepath.Join(home, ".claude", "settings.json")),
 		CodexHooks:  envOr("ENGRAMUX_CODEX_HOOKS", filepath.Join(home, ".codex", "hooks.json")),
 		CodexConfig: envOr("ENGRAMUX_CODEX_CONFIG", filepath.Join(home, ".codex", "config.toml")),
+		ClaudeMCP:   envOr("ENGRAMUX_CLAUDE_MCP", filepath.Join(home, ".claude.json")),
 		MCPJSON:     filepath.Join(data, "mcp.json"),
 		TaskName:    taskName(withoutFlags(args)),
 	}, nil

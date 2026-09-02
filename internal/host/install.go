@@ -41,8 +41,14 @@ type Options struct {
 	ClaudePath  string
 	CodexHooks  string
 	CodexConfig string
-	MCPJSON     string
-	TaskName    string
+	// ClaudeMCP is Claude Code's own state file, ~/.claude.json, which is
+	// where `claude mcp add --scope user` writes. This product never writes
+	// it (see claude.go); it reads it to learn whether the host already
+	// points at the endpoint about to be registered (backlog 35). Empty
+	// means "do not know", which registers.
+	ClaudeMCP string
+	MCPJSON   string
+	TaskName  string
 	// Binaries defaults to the relay and the service. It is a field so that a
 	// test can name something it can actually lock.
 	Binaries []Binary
@@ -266,15 +272,35 @@ func Install(ctx context.Context, opt Options, sys System) ([]string, error) {
 		}
 	}
 
-	if err := sys.RegisterClaude(ctx, ep); err != nil {
-		say("claude-code mcp: %v", err)
-	} else {
-		say("claude-code mcp: registered %s at user scope", MCPName)
+	// A host that already points at this endpoint has nothing to add, and
+	// asking Claude Code's CLI to add it anyway exits 1 - measured on the
+	// first real re-install, 2026-09-02 (backlog 35) - which reported a
+	// failure nothing had caused. Skipping also keeps the token off a
+	// command line one more time than it has to be. A file that cannot be
+	// read is not a "no": registering is what the run always did, and the
+	// CLI's own answer is the one to trust then.
+	switch already, err := PointsAtEndpoint(opt.ClaudeMCP, ep.URL); {
+	case err != nil:
+		say("claude-code mcp: cannot read %s (%v) - registering anyway", opt.ClaudeMCP, err)
+		registerClaude(ctx, sys, ep, say)
+	case already:
+		say("claude-code mcp: already points at this endpoint")
+	default:
+		registerClaude(ctx, sys, ep, say)
 	}
 
 	say("")
 	say("done. check it with: %s doctor", relay)
 	return report, nil
+}
+
+// registerClaude runs the host's own CLI and reports what happened.
+func registerClaude(ctx context.Context, sys System, ep *Endpoint, say func(string, ...any)) {
+	if err := sys.RegisterClaude(ctx, ep); err != nil {
+		say("claude-code mcp: %v", err)
+	} else {
+		say("claude-code mcp: registered %s at user scope", MCPName)
+	}
 }
 
 // removeMCP takes the endpoint out of both hosts. It needs no endpoint to do

@@ -131,7 +131,7 @@ func runDoctor(w io.Writer, args []string) int {
 	r.reportInstalled(opt.BinDir, relay, installed, hooks)
 	r.reportLocal()
 	r.reportService()
-	r.reportMCP(ctx)
+	r.reportMCP(ctx, opt.ClaudeMCP, opt.CodexConfig)
 
 	if r.failed {
 		return 1
@@ -287,7 +287,7 @@ func readHostHooks(opt host.Options, relay string) []hostHooks {
 func readOneHostHooks(label, path, relay string) hostHooks {
 	state := hostHooks{label: label, path: path}
 
-	text, err := readCapped(path, maxHostConfig)
+	text, err := host.ReadCapped(path, host.MaxHostConfig)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		state.absent = true
@@ -662,7 +662,7 @@ func (r *report) reportService() {
 // service bound another, and the URL in that file no longer answers. Neither
 // check can be fooled by a shape this product did not write, because both
 // strings are ones it publishes.
-func (r *report) reportMCP(ctx context.Context) {
+func (r *report) reportMCP(ctx context.Context, claudeMCP, codexConfig string) {
 	r.line("mcp      optional - capture works without any of this")
 
 	spoolPath, err := spool.Dir()
@@ -689,14 +689,12 @@ func (r *report) reportMCP(ctx context.Context) {
 		r.field("listening", "yes")
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		r.note("hosts", "unreadable: %v", err)
-		return
-	}
+	// The two paths are the installer's own (resolvePaths), so what this
+	// section reads is what `install --apply` would write to or skip - one
+	// definition, which is memory spec M-6's rule for the hook table too.
 	for _, h := range []struct{ label, path, marker string }{
-		{"claude code", filepath.Join(home, ".claude.json"), `"engramux":`},
-		{"codex", filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.engramux]"},
+		{"claude code", claudeMCP, `"engramux":`},
+		{"codex", codexConfig, "[mcp_servers.engramux]"},
 	} {
 		r.reportHostMCP(h.label, h.path, endpoint, h.marker)
 	}
@@ -719,7 +717,7 @@ func (r *report) reportMCP(ctx context.Context) {
 // some other way reads as not registered, which is a false negative and is the
 // direction to be wrong in.
 func (r *report) reportHostMCP(label, path, endpoint, marker string) {
-	text, err := readCapped(path, maxHostConfig)
+	text, err := host.ReadCapped(path, host.MaxHostConfig)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		r.note(label, "no configuration file at %s", path)
@@ -732,41 +730,6 @@ func (r *report) reportHostMCP(label, path, endpoint, marker string) {
 	default:
 		r.note(label, "not registered - run `engramux install --apply`")
 	}
-}
-
-// maxHostConfig bounds how much of a host configuration is read.
-//
-// ~/.claude.json is Claude Code's own state file rather than a static
-// configuration - it holds per-project history alongside the MCP entries - so
-// it is not a small file and nothing bounds how large it gets. 16 MiB is far
-// past any observed size and is a bound rather than a budget: a file over it is
-// reported as unreadable instead of being half-searched, because a substring
-// that is not in the first 16 MiB is indistinguishable from one that is not
-// there at all.
-const maxHostConfig = 16 << 20
-
-// readCapped reads path, refusing a file over cap rather than truncating it.
-func readCapped(path string, cap int64) (string, error) {
-	//nolint:gosec // G304: path is the user's home directory joined with
-	// constants of this file. No part of it is input.
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if info.Size() > cap {
-		return "", fmt.Errorf("%s is %d bytes, over the %d this reads", path, info.Size(), cap)
-	}
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 // probeMCP opens a TCP connection to the published endpoint and closes it.
