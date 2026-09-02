@@ -114,6 +114,12 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	// spec 7.4's payload sizes a third pass is microseconds, and it is not
 	// to be optimised into one without a measurement saying it was worth it.
 	leaves := Leaves(env.Payload)
+	// The fourth decode, and hoisted for the same reason as the three above:
+	// it walks the payload and it does not need the transaction. What it
+	// costs is measured with the rest in BenchmarkIngest; what it would cost
+	// inside the transaction is every other ingest waiting on the one
+	// connection.
+	derived := Derive(env.Payload)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -163,13 +169,15 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO events (id, project_id, session_id, host, source, event_name,
 		                    tool_name, tool_use_id, payload, leaves, privacy_class,
-		                    redaction_version, received_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                    redaction_version, received_at,
+		                    derived_cmd, derived_paths, derived_output)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO NOTHING`,
 		env.IngestID, projectID, sessionID, h, string(src), eventName,
 		nullable(fields, "tool_name"), nullable(fields, "tool_use_id"),
 		string(env.Payload), leaves, privacyClass,
-		int64(secret.Version), now.UnixMilli()); err != nil {
+		int64(secret.Version), now.UnixMilli(),
+		derived.Cmd, derived.Paths, derived.Output); err != nil {
 		return ipc.Rejected, fmt.Errorf("store: insert event %s: %w", env.IngestID, err)
 	}
 
