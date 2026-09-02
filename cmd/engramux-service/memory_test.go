@@ -40,7 +40,7 @@ func TestAServiceWithNoHostHomesIndexesNothing(t *testing.T) {
 func TestAServiceIndexesTheMemoryItIsPointedAt(t *testing.T) {
 	local := t.TempDir()
 	codex := filepath.Join(local, "no-codex-home")
-	if err := os.MkdirAll(filepath.Join(codex, "memories"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(codex, "memories"), 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	for name, body := range map[string]string{
@@ -79,7 +79,7 @@ var memoryIDLine = regexp.MustCompile(`"([0-9a-f]{32})"`)
 func TestTheCLIShowsNativeMemoryAndReadsOneBack(t *testing.T) {
 	local := t.TempDir()
 	codex := filepath.Join(local, "no-codex-home")
-	if err := os.MkdirAll(filepath.Join(codex, "memories"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(codex, "memories"), 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	for name, body := range map[string]string{

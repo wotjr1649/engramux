@@ -196,11 +196,15 @@ func sweep(ctx context.Context, db *sql.DB, live map[string]bool) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("memory: list the indexed files: %w", err)
 	}
+	// Deferred and then closed explicitly, which is internal/search.Search's
+	// shape and for its reason: an open cursor holds the single connection
+	// (spec 5.4), and the deletes below need it. Close is idempotent, so the
+	// defer stays as the path every error return takes.
+	defer func() { _ = rows.Close() }()
 	var gone []string
 	for rows.Next() {
 		var path string
 		if err := rows.Scan(&path); err != nil {
-			_ = rows.Close()
 			return 0, fmt.Errorf("memory: scan an indexed file: %w", err)
 		}
 		if !live[path] {
@@ -208,7 +212,6 @@ func sweep(ctx context.Context, db *sql.DB, live map[string]bool) (int, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return 0, fmt.Errorf("memory: read the indexed files: %w", err)
 	}
 	if err := rows.Close(); err != nil {

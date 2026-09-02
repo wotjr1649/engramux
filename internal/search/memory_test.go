@@ -52,7 +52,7 @@ func memoryDB(t *testing.T, sections ...string) *sql.DB {
 
 func writeFile(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

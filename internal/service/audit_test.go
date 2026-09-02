@@ -556,7 +556,7 @@ func auditMemory(t *testing.T, db *sql.DB, dir string, samples []secrettest.Samp
 		}
 	}
 	home := filepath.Join(dir, "codex-home")
-	if err := os.MkdirAll(filepath.Join(home, "memories"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "memories"), 0o750); err != nil {
 		t.Fatalf("make the audit memory directory: %v", err)
 	}
 	for name, body := range map[string]string{

@@ -168,19 +168,19 @@ func m3Carriers(t *testing.T, db *sql.DB, host, answer string) int {
 	if err != nil {
 		t.Fatalf("list a host's items: %v", err)
 	}
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			t.Fatalf("scan an id: %v", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		t.Fatalf("read the ids: %v", err)
 	}
+	// Closed before the reads below, which take the same single connection.
 	if err := rows.Close(); err != nil {
 		t.Fatalf("close the ids: %v", err)
 	}
@@ -241,6 +241,7 @@ func m3Corpus(t *testing.T) *sql.DB {
 // chose, which is the same defect a parser that skips quietly has.
 func readM3Fixture(t *testing.T) []m3Query {
 	t.Helper()
+	//nolint:gosec // G304: m3FixturePath is this file's own package-level path, not a caller's
 	f, err := os.Open(m3FixturePath)
 	if err != nil {
 		if os.IsNotExist(err) {
