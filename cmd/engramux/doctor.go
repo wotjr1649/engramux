@@ -9,13 +9,17 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/wotjr1649/engramux/internal/host"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/mcpconf"
 	"github.com/wotjr1649/engramux/internal/schedule"
+	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
 
@@ -29,80 +33,366 @@ const taskBudget = 30 * time.Second
 // beside this binary, because that is how the two ship (spec 5.1).
 const serviceName = "engramux-service.exe"
 
+// fullFlag prints the values this command masks by default.
+const fullFlag = "--full"
+
 // doctor reports everything knowable about this installation, and it is built
 // around the moment it is most needed being the moment it is most broken - which
 // is spec 10's first open question, answered here and recorded in spec 5.5.
 //
-// Three halves with different availability:
+// # It answers by stage, and that is memory spec M-6's first change
+//
+// "Not installed yet" and "installed and broken" are different answers with
+// different next commands. Before this, a fresh machine got four failing
+// sections and no instruction anywhere: no task, no service, no endpoint, no
+// binary, every one of them true and none of them the point. The point was that
+// nobody had run the installer. [nothingIsInstalled] is that judgement, and it
+// is deliberately unanimous - a machine with any one of the three signs of an
+// installation gets the full report, because at that point "what is broken" is
+// the question and "install it" is not the answer.
+//
+// # Sections, and what each one needs to be readable
 //
 //   - The task registration is a Windows query. It needs no service, no pipe and
 //     no database, so it is readable exactly when Windows is running.
+//   - The eleven hook entries are two files under the user's home directory,
+//     read with the paths `install` itself computes ([resolvePaths]). They are
+//     M-6's third change and the one surface a working capture actually depends
+//     on: a relay nothing invokes captures nothing, and nothing else in the
+//     product looks at that table after it is written.
 //   - The local state - where the two binaries are, how deep the spool is, what
 //     the log last said - is files on disk. Also readable with nothing running.
 //   - The service's own numbers, the real database path and the tokenizer
 //     comparison are only reachable over the pipe: I-07 leaves no other way to
 //     read them and I-08 routes them here.
 //
-// So a service that is down does not make this command useless. Every half is
-// read and printed, the unreachable one is marked rather than omitted, and the
-// exit code is 1 if any of them failed. A version that returned at the first
+// So a service that is down does not make this command useless. Every section
+// is read and printed, the unreachable one is marked rather than omitted, and
+// the exit code is 1 if any of them failed. A version that returned at the first
 // failure would print nothing about the registration whenever the service was
 // down - which is exactly the moment somebody runs this.
 //
-// Exit 1 on any failure, as spec 10 requires. There is no partial success: a
-// machine with no registration is a machine where nothing starts the service at
-// the next logon, and that is a finding, not a footnote.
-func doctor(args []string) int {
-	name := taskName(args)
+// # MCP is optional, which is M-6's second change
+//
+// The MCP section reports and does not decide the exit code. A capture-only
+// installation is a supported state: the hooks are in, events are being stored,
+// and nobody has pointed a host at the reader surface. That machine is green.
+// The cost is stated rather than hidden - an endpoint that is published and not
+// answering exits 0 with a loud NO in the report - and it is the same trade the
+// service already makes, where [serveMCP] logs a failed endpoint and keeps
+// ingesting rather than refusing to start.
+//
+// # The default is masked, and --full prints the real values
+//
+// This report is the output a person is most likely to paste into a public
+// issue, and it carried two things worth removing from that paste: the real
+// database path, which spec 5.9 hands only to this command, and the task
+// principal, which is a Windows SID. Every value printed here goes through
+// [secret.MaskString] unless --full was given, and the principal is a verdict
+// rather than a SID for the same reason the tokenizer is a verdict rather than
+// two strings - the question is "is this the right user", not "what is the
+// number".
+//
+// Measured before importing internal/secret into this binary, which is the hook
+// relay as well as the CLI (spec 5.1): +288,768 bytes, +6.5%, and 40 us to
+// compile the rule table at init, against a relay process that lives about
+// 11 ms. That is 0.36% of one hook event, and it is why this import was taken
+// where net/http's +93.7% was refused in [probeMCP].
+func doctor(args []string) int { return runDoctor(os.Stdout, args) }
+
+// runDoctor is [doctor] with its writer passed in, which is what makes the
+// masking testable: the alternative is a rule about what reaches a terminal
+// that nothing can ever read back.
+func runDoctor(w io.Writer, args []string) int {
+	r := &report{w: w, full: slices.Contains(args, fullFlag)}
+
+	opt, err := currentPaths(withoutFlags(args))
+	if err != nil {
+		r.line("doctor: %v", err)
+		return 1
+	}
+	relay := filepath.Join(opt.BinDir, host.RelayName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), taskBudget)
 	defer cancel()
 
-	// Stdout, because this is the CLI path and a report is what was asked
-	// for. Every line below is a finding, including the ones that say
-	// something could not be read.
-	ok := reportTask(ctx, name)
-	if !reportLocal() {
-		ok = false
+	// Read before anything is printed, because the stage judgement needs all
+	// three answers and the first section printed is already an answer.
+	task, taskErr := schedule.Query(ctx, opt.TaskName)
+	hooks := readHostHooks(opt, relay)
+	installed := installedBinaries(opt.BinDir)
+
+	if nothingIsInstalled(taskErr, hooks, installed) {
+		r.reportNotInstalled(opt, relay)
+		return 1
 	}
-	if !reportService() {
-		ok = false
-	}
-	if !reportMCP(ctx) {
-		ok = false
-	}
-	if !ok {
+
+	r.reportTask(opt.TaskName, task, taskErr)
+	r.reportInstalled(opt.BinDir, relay, installed, hooks)
+	r.reportLocal()
+	r.reportService()
+	r.reportMCP(ctx)
+
+	if r.failed {
 		return 1
 	}
 	return 0
 }
 
-// reportLocal prints what is knowable with nothing running, and reports whether
-// all of it could be read.
+// report is where every line of this command goes, and the one place the
+// masking decision is made.
+type report struct {
+	w    io.Writer
+	full bool
+	// failed is set by [report.fail] and by nothing else, so "what makes this
+	// command exit 1" is a list of call sites rather than a chain of returned
+	// booleans that a new section can forget to join.
+	failed bool
+}
+
+// mask is what every value this command prints goes through. It is applied to
+// the whole formatted line rather than per value, because a line assembled from
+// two sources has no seam a caller could be trusted to mark: the rule is that
+// nothing reaches w unmasked, and one call site is how that is checked.
 //
-// It is the half added because `doctor` is run when the service is down. The
+// A false positive costs a placeholder in a diagnostic and a false negative
+// costs a user's SID in a public issue, which is internal/secret's own trade
+// and the reason it is generous.
+func (r *report) mask(v string) string {
+	if r.full {
+		return v
+	}
+	return secret.MaskString(v)
+}
+
+// line writes one unindented line.
+func (r *report) line(format string, args ...any) {
+	_, _ = fmt.Fprintln(r.w, r.mask(fmt.Sprintf(format, args...)))
+}
+
+// field writes one indented label and value. It is a fact, not a finding.
+func (r *report) field(label, format string, args ...any) {
+	_, _ = fmt.Fprintf(r.w, "  %-22s %s\n", label, r.mask(fmt.Sprintf(format, args...)))
+}
+
+// fail writes a field and makes the command exit 1.
+func (r *report) fail(label, format string, args ...any) {
+	r.failed = true
+	r.field(label, format, args...)
+}
+
+// note writes a field that reports a problem the exit code deliberately does
+// not carry. It exists so that "this is not counted" is visible at the call
+// site rather than inferred from the absence of a [report.fail].
+func (r *report) note(label, format string, args ...any) {
+	r.field(label, format, args...)
+}
+
+// installedNames is what an installation puts in its bin directory.
+var installedNames = []string{host.RelayName, host.ServiceName}
+
+// installedBinaries returns the names of [installedNames] that are in bin.
+func installedBinaries(bin string) []string {
+	var found []string
+	for _, name := range installedNames {
+		if _, err := os.Stat(filepath.Join(bin, name)); err == nil {
+			found = append(found, name)
+		}
+	}
+	return found
+}
+
+// nothingIsInstalled reports whether this machine has no sign of an
+// installation at all: no logon task, neither binary in place, and not one
+// Engramux hook entry in either host.
+//
+// Unanimity is the rule, and it is the conservative direction. Any one sign
+// present means somebody ran the installer, so the useful answer is what is
+// broken - and a report that says "not installed" to a machine that is
+// half-installed would send the user to `install --apply` while hiding the
+// failure that half-install actually hit.
+//
+// A task that could not be read is not a task that is absent, and a host
+// configuration that could not be read is not one with no entries. Both fall
+// through to the full report, where they are findings with their own lines.
+func nothingIsInstalled(taskErr error, hooks []hostHooks, installed []string) bool {
+	if !errors.Is(taskErr, schedule.ErrNotRegistered) {
+		return false
+	}
+	if len(installed) > 0 {
+		return false
+	}
+	for _, h := range hooks {
+		if h.err != nil || len(h.wired) > 0 || len(h.stale) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// reportNotInstalled is the whole output on a machine nobody has installed
+// this on: the three things that are absent, and the one command that changes
+// that. It replaces four red sections that were each individually true.
+func (r *report) reportNotInstalled(opt host.Options, relay string) {
+	r.line("engramux is not installed for this user.")
+	r.field("logon task", "%s is not registered", opt.TaskName)
+	r.field("binaries", "neither is in %s", opt.BinDir)
+	r.field("hook entries", "none in either host configuration")
+	r.line("")
+
+	self, err := os.Executable()
+	if err != nil {
+		// Not a finding: the answer below is still the answer, and the only
+		// thing lost is being able to spell the command with a full path.
+		self = host.RelayName
+	}
+	r.line("install it with: %s install --apply", self)
+	r.line("that copies both binaries to %s, writes the hook entries into both hosts,", opt.BinDir)
+	r.line("registers the logon task and starts the service - in one pass.")
+}
+
+// hostHooks is one host configuration's answer to M-6's question: are the
+// eleven entries there, and do they point at the installed relay.
+//
+// The three lists are disjoint and together cover [host.EventNames], so a
+// reader can tell present-and-wrong from absent - which are different problems
+// with the same remedy but very different meanings. Stale means an earlier
+// install wrote a path that has since moved, and every event still fires into
+// a binary that is not there; missing means the merge never reached that event.
+type hostHooks struct {
+	label   string
+	path    string
+	err     error
+	absent  bool
+	wired   []string
+	stale   []string
+	missing []string
+}
+
+// readHostHooks reads both hosts' hook tables through the paths install itself
+// computes.
+func readHostHooks(opt host.Options, relay string) []hostHooks {
+	return []hostHooks{
+		readOneHostHooks("claude-code", opt.ClaudePath, relay),
+		readOneHostHooks("codex", opt.CodexHooks, relay),
+	}
+}
+
+// readOneHostHooks classifies every event in one host configuration.
+//
+// A file that is not there is not a fault. [host.PlanMerge] skips one rather
+// than creating it, because a user with only one of the two hosts installed is
+// an ordinary user - so an absent file here means that host is not on this
+// machine, and reporting it red would make every single-host machine fail.
+func readOneHostHooks(label, path, relay string) hostHooks {
+	state := hostHooks{label: label, path: path}
+
+	text, err := readCapped(path, maxHostConfig)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		state.absent = true
+		return state
+	case err != nil:
+		state.err = err
+		return state
+	}
+
+	found, err := host.HookCommands([]byte(text), host.EventNames())
+	if err != nil {
+		state.err = err
+		return state
+	}
+	for _, event := range host.EventNames() {
+		commands := found[event]
+		switch {
+		case len(commands) == 0:
+			state.missing = append(state.missing, event)
+		case slices.ContainsFunc(commands, func(c string) bool { return host.PointsAt(c, relay) }):
+			state.wired = append(state.wired, event)
+		default:
+			state.stale = append(state.stale, event)
+		}
+	}
+	return state
+}
+
+// trouble names what is wrong with a host's entries, in the two ways it can be.
+func (h hostHooks) trouble() string {
+	var parts []string
+	if len(h.missing) > 0 {
+		parts = append(parts, fmt.Sprintf("%d missing (%s)", len(h.missing), strings.Join(h.missing, ", ")))
+	}
+	if len(h.stale) > 0 {
+		parts = append(parts, fmt.Sprintf("%d pointing somewhere else (%s)", len(h.stale), strings.Join(h.stale, ", ")))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// reportInstalled prints what an installation is: the two binaries in the
+// directory `install` copies them to, and the eleven hook entries in each host
+// checked against the relay in that directory.
+//
+// This section decides the exit code, and that is the point of adding it. The
+// hook table is what makes capture happen at all - memory spec M-6's third
+// change - and until now it was the one major surface `doctor` never looked at:
+// a machine could pass every other section while every event fired into a path
+// that no longer existed.
+//
+// The binaries are here rather than in [report.reportLocal] because these two
+// are the installation's and that one's are whichever copy of the CLI the user
+// happened to run. Both are worth printing and only these decide whether the
+// installation works.
+func (r *report) reportInstalled(bin, relay string, installed []string, hooks []hostHooks) {
+	r.line("installation %s", bin)
+
+	for _, want := range installedNames {
+		if slices.Contains(installed, want) {
+			r.field(want, "present")
+		} else {
+			r.fail(want, "MISSING - run `engramux install --apply`")
+		}
+	}
+
+	events := len(host.EventNames())
+	for _, h := range hooks {
+		switch {
+		case h.absent:
+			r.note(h.label, "no configuration file at %s - this host is not installed here", h.path)
+		case h.err != nil:
+			r.fail(h.label, "unreadable: %v", h.err)
+		case len(h.wired) == events:
+			r.field(h.label, "%d of %d events point at the installed relay", events, events)
+		default:
+			r.fail(h.label, "%d of %d point at it, %s - run `engramux install --apply`",
+				len(h.wired), events, h.trouble())
+		}
+	}
+}
+
+// reportLocal prints what is knowable with nothing running.
+//
+// It is the section added because `doctor` is run when the service is down. The
 // spool depth is a directory listing and the last log line is a file read;
 // neither needs the pipe, and between them they answer "is the relay still
 // capturing, and what did the service say before it stopped".
-func reportLocal() bool {
-	_, _ = fmt.Fprintln(os.Stdout, "local")
+func (r *report) reportLocal() {
+	r.line("local")
 
-	ok := true
-	self, err := os.Executable()
-	if err != nil {
-		field("this binary", "unreadable: "+err.Error())
-		ok = false
+	if self, err := os.Executable(); err != nil {
+		r.fail("this binary", "unreadable: %v", err)
 	} else {
-		field("this binary", self)
+		r.field("this binary", "%s", self)
 	}
+	// Reported and not counted. This is the pair `engramux register` would
+	// use, which is a fact about the copy of the CLI that was run rather than
+	// about the installation - a user running the one they unpacked, or a
+	// developer running dist/, has no service binary beside it and nothing is
+	// wrong. [report.reportInstalled] is where the binaries that matter are
+	// checked.
 	if exe, err := serviceExe(); err != nil {
-		// Not fatal to the command and still a finding: a registration
-		// pointing at a binary that is not there is a task that fails
-		// silently at every logon.
-		field("service binary", "MISSING - "+err.Error())
-		ok = false
+		r.note("service beside it", "none - `engramux register` from here would fail: %v", err)
 	} else {
-		field("service binary", exe)
+		r.field("service beside it", "%s", exe)
 	}
 
 	// Derived from the spool's own directory rather than from
@@ -116,39 +406,38 @@ func reportLocal() bool {
 	// writes to would report a spool that is not the spool.
 	spoolPath, err := spool.Dir()
 	if err != nil {
-		field("data directory", "unreadable: "+err.Error())
-		return false
+		r.fail("data directory", "unreadable: %v", err)
+		return
 	}
 	dir := filepath.Dir(spoolPath)
-	field("data directory", dir)
+	r.field("data directory", "%s", dir)
 
 	if depth, err := spool.Depth(spoolPath); err != nil {
-		field("spool", "unreadable: "+err.Error())
-		ok = false
+		r.fail("spool", "unreadable: %v", err)
 	} else {
 		// A depth that is not zero with the service down is the count of
 		// events waiting for it to come back - which is I-04 working,
 		// not a fault.
-		field("spool", fmt.Sprint(depth))
+		r.field("spool", "%d", depth)
 	}
 
 	line, err := lastLogLine(filepath.Join(dir, logsDirName, logFileName))
 	if err != nil {
-		field("last log line", "unreadable: "+err.Error())
-		ok = false
+		r.fail("last log line", "unreadable: %v", err)
 	} else {
 		// Quoted and bounded: it is a line out of a file, and although
 		// the service writes it through I-10's filter (spec 5.6), this
 		// command has no way to know the file it just read was written
-		// by this build.
-		field("last log line", fmt.Sprintf("%.400q", line))
+		// by this build - which is also why it goes through the mask on
+		// its way out like everything else here.
+		r.field("last log line", "%.400q", line)
 	}
-	return ok
 }
 
 // The names spec 5.6 gives the log file this command reads without the service.
 // They are restated here rather than taken from internal/service, which owns the
-// layout and cannot be imported into this binary - see [reportLocal] for why.
+// layout and cannot be imported into this binary - see [report.reportLocal] for
+// why.
 const (
 	logsDirName = "logs"
 	logFileName = "engramux-service.log"
@@ -196,50 +485,74 @@ func lastLogLine(path string) (string, error) {
 	return "", nil
 }
 
-// reportTask prints the registered task, and reports whether it could be read.
-func reportTask(ctx context.Context, name string) bool {
-	_, _ = fmt.Fprintf(os.Stdout, "task     %s\n", name)
+// reportTask prints the registered task.
+func (r *report) reportTask(name string, t schedule.Task, err error) {
+	r.line("task     %s", name)
 
-	t, err := schedule.Query(ctx, name)
 	if err != nil {
 		if errors.Is(err, schedule.ErrNotRegistered) {
-			field("not registered", "nothing starts the service at logon - run `engramux register`")
+			r.fail("not registered", "nothing starts the service at logon - run `engramux register`")
 		} else {
-			field("unreadable", err.Error())
+			r.fail("unreadable", "%v", err)
 		}
-		return false
+		return
 	}
 
-	field("command", t.Command)
-	// The principal, which is the setting most worth seeing: this must be
-	// the interactive user rather than SYSTEM, and unelevated, even when the
-	// shell that registered it was elevated.
-	field("principal", t.UserID)
-	field("logon type", t.LogonType)
+	r.field("command", "%s", t.Command)
+	r.reportPrincipal(t.UserID)
+	r.field("logon type", "%s", t.LogonType)
 	// RunLevel and enabled are absent from what Windows hands back whenever
 	// they equal their defaults, and these are the defaults. So these two
 	// lines report a value that was very probably never on the wire - which
 	// is the correct reading of absence, not a gap being papered over.
-	field("run level", t.RunLevel)
-	field("enabled", fmt.Sprint(t.Enabled))
-	field("logon trigger", yesNo(t.HasLogonTrigger, "present", "MISSING - nothing starts it at logon"))
-	field("hidden", fmt.Sprint(t.Hidden))
+	r.field("run level", "%s", t.RunLevel)
+	r.field("enabled", "%t", t.Enabled)
+	r.field("logon trigger", "%s", yesNo(t.HasLogonTrigger, "present", "MISSING - nothing starts it at logon"))
+	r.field("hidden", "%t", t.Hidden)
 	// The two spec 5.5 names explicitly, and the two Phase 3's [manual] gate
 	// asks for.
-	field("execution time limit", t.ExecutionTimeLimit)
-	field("multiple instances", t.MultipleInstancesPolicy)
+	r.field("execution time limit", "%s", t.ExecutionTimeLimit)
+	r.field("multiple instances", "%s", t.MultipleInstancesPolicy)
 	if t.RestartInterval == "" {
-		field("restart on failure", "none")
+		r.field("restart on failure", "none")
 	} else {
-		field("restart on failure", fmt.Sprintf("%d times, one every %s", t.RestartCount, t.RestartInterval))
+		r.field("restart on failure", "%d times, one every %s", t.RestartCount, t.RestartInterval)
 	}
-	field("on battery", yesNo(!t.DisallowStartIfOnBatteries, "starts", "WILL NOT START"))
-	field("onto battery", yesNo(!t.StopIfGoingOnBatteries, "keeps running", "STOPS"))
-	return true
+	r.field("on battery", "%s", yesNo(!t.DisallowStartIfOnBatteries, "starts", "WILL NOT START"))
+	r.field("onto battery", "%s", yesNo(!t.StopIfGoingOnBatteries, "keeps running", "STOPS"))
 }
 
-// reportService prints what only the service can answer, and reports whether it
-// answered.
+// reportPrincipal prints who the task runs as, as a verdict rather than as the
+// SID Windows hands back.
+//
+// The principal is the setting most worth seeing - it must be the interactive
+// user rather than SYSTEM, and unelevated, even when the shell that registered
+// it was elevated - and it is also the one value in this report that names the
+// machine's owner. Comparing it here answers the question and prints nothing
+// that identifies anybody; --full prints the SID, which is what somebody
+// reading an unfamiliar registration actually needs.
+//
+// [schedule.Register] registers os/user's Uid, so the same package answers both
+// sides of this comparison and a mismatch means the task really was registered
+// by another account.
+func (r *report) reportPrincipal(sid string) {
+	if r.full {
+		r.field("principal", "%s", sid)
+		return
+	}
+	u, err := user.Current()
+	switch {
+	case err != nil:
+		r.fail("principal", "cannot be compared: %v", err)
+	case u.Uid == sid:
+		r.field("principal", "this user")
+	default:
+		r.fail("principal", "ANOTHER USER - the task does not run as the user whose hooks these are; "+
+			"re-run with %s to see both", fullFlag)
+	}
+}
+
+// reportService prints what only the service can answer.
 //
 // It sends the Doctor request, which is what spec 5.2 reserved that type for. It
 // is not the Status request with extra fields on it: this reply carries the real
@@ -251,40 +564,54 @@ func reportTask(ctx context.Context, name string) bool {
 // edited in place leaves an index built by the old clause and a file claiming the
 // new one, with nothing saying so; the strings are printed only when they
 // disagree, because that is when they are worth reading.
-func reportService() bool {
-	_, _ = fmt.Fprintln(os.Stdout, "service")
+func (r *report) reportService() {
+	r.line("service")
 
 	reply, err := askDoctor()
 	if err != nil {
 		// The error names the pipe, which is the whole point: it says
 		// what could not be read rather than only that something could
 		// not be.
-		field("not answering", err.Error())
-		return false
+		r.fail("not answering", "%v", err)
+		return
 	}
-	field("uptime", (time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond).String())
-	field("events", fmt.Sprint(reply.Events))
-	field("spool", fmt.Sprint(reply.SpoolDepth))
-	// The real path, and this is the one command that gets it (spec 5.9).
-	field("database", reply.DatabasePath)
+	r.field("uptime", "%s", (time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond))
+	r.field("events", "%d", reply.Events)
+	r.field("spool", "%d", reply.SpoolDepth)
+	// The real path, and this is the one command that gets it (spec 5.9) -
+	// which is exactly why the default masks it again on the way out.
+	r.field("database", "%s", reply.DatabasePath)
 
 	switch {
 	case reply.TokenizerReadError != "":
-		field("index tokenizer", "unreadable: "+reply.TokenizerReadError)
-		return false
+		r.fail("index tokenizer", "unreadable: %s", reply.TokenizerReadError)
 	case reply.TokenizerAgrees():
-		field("index tokenizer", fmt.Sprintf("agrees with the migration (%.64q)", reply.TokenizerLive))
+		r.field("index tokenizer", "agrees with the migration (%.64q)", reply.TokenizerLive)
 	default:
-		field("index tokenizer", fmt.Sprintf("DISAGREES - the index was built with %.64q, "+
+		r.fail("index tokenizer", "DISAGREES - the index was built with %.64q, "+
 			"the migration declares %.64q; the index needs a rebuild",
-			reply.TokenizerLive, reply.TokenizerExpected))
-		return false
+			reply.TokenizerLive, reply.TokenizerExpected)
 	}
-	return true
 }
 
 // reportMCP prints spec 5.9's endpoint, whether it is answering, and whether
-// each host is pointed at it, and reports whether all of that held.
+// each host is pointed at it.
+//
+// # Nothing here decides the exit code, and that is memory spec M-6
+//
+// MCP is optional. A capture-only installation - hooks in, events stored, no
+// host pointed at the reader surface - is a supported state and must be able to
+// be green, and before this an endpoint that was never published made it red.
+// The two lines this used to fail on, an unpublished endpoint and one nothing
+// is listening on, are still printed and still loud; what changed is that they
+// no longer decide whether the installation is working, because capture does
+// not depend on them.
+//
+// The host lines were already outside the exit code, for a reason that still
+// holds: a host configuration is another product's file, edited by the user,
+// and a `doctor` pointed at a test service on a machine whose real
+// configuration names the real one would report stale, correctly, and fail a
+// test that has nothing to do with it.
 //
 // # The token is not here, and could not be
 //
@@ -295,18 +622,16 @@ func reportService() bool {
 // # The guard is probed rather than assumed
 //
 // A published URL says the service bound something once. What says it is
-// answering now, with the bearer check in front of it, is a request with no
-// token: 401 is the guard doing its job, a refused connection is a stale
-// mcp.json, and any other status is something else answering on that port.
+// answering now is a dial - see [probeMCP] for why it is a dial and not a
+// request with no bearer token.
 //
 // # The host check is a substring search and not a parser
 //
 // Claude Code's MCP configuration lives in ~/.claude.json - at the top level
 // for the user scope and under projects.<path> for the local one - and Codex's
-// in ~/.codex/config.toml. Two formats, two schemas, three places, and this
-// binary is the hook relay (spec 5.1), so a TOML parser and a JSON schema would
-// be linked into a process spawned once per hook event to answer a question
-// with three states.
+// in ~/.codex/config.toml. Two formats, two schemas, three places, and the hook
+// table this command now parses properly is JSON in both hosts while these are
+// not.
 //
 // A host that names this endpoint is pointed at it, whichever scope wrote it. A
 // host that names engramux without naming the endpoint is stale, which is the
@@ -314,66 +639,47 @@ func reportService() bool {
 // service bound another, and the URL in that file no longer answers. Neither
 // check can be fooled by a shape this product did not write, because both
 // strings are ones it publishes.
-//
-// # The host lines are reported and do not decide the exit code
-//
-// The exit code is about this installation. A host configuration is another
-// product's file, edited by the user, and neither of its states is a fault of
-// the service: not registered is a machine where capture works and nobody has
-// asked for the reader surface yet, and even stale is a line to act on rather
-// than a service that is down. Folding either into the exit code would also
-// make the exit code depend on whose machine it ran on - a `doctor` pointed at
-// a test service on a machine whose real configuration names the real one would
-// report stale, correctly, and fail a test that has nothing to do with it.
-//
-// What the exit code is for here is the two lines above: an endpoint that was
-// never published, and one nothing is listening on.
-func reportMCP(ctx context.Context) bool {
-	_, _ = fmt.Fprintln(os.Stdout, "mcp")
+func (r *report) reportMCP(ctx context.Context) {
+	r.line("mcp      optional - capture works without any of this")
 
 	spoolPath, err := spool.Dir()
 	if err != nil {
-		field("endpoint", "unreadable: "+err.Error())
-		return false
+		r.note("endpoint", "unreadable: %v", err)
+		return
 	}
 	dir := filepath.Dir(spoolPath)
 
 	endpoint, err := mcpconf.URL(dir)
 	switch {
 	case err != nil:
-		field("endpoint", "unreadable: "+err.Error())
-		return false
+		r.note("endpoint", "unreadable: %v", err)
+		return
 	case endpoint == "":
-		field("endpoint", "NOT PUBLISHED - the service has not started since this build, or it could not bind")
-		return false
+		r.note("endpoint", "NOT PUBLISHED - the service has not started since this build, or it could not bind")
+		return
 	}
-	field("endpoint", endpoint)
+	r.field("endpoint", "%s", endpoint)
 
-	ok := true
 	if err := probeMCP(ctx, endpoint); err != nil {
-		field("listening", "NO - "+err.Error())
-		ok = false
+		r.note("listening", "NO - %v", err)
 	} else {
-		field("listening", "yes")
+		r.field("listening", "yes")
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		field("hosts", "unreadable: "+err.Error())
-		return ok
+		r.note("hosts", "unreadable: %v", err)
+		return
 	}
 	for _, h := range []struct{ label, path, marker string }{
 		{"claude code", filepath.Join(home, ".claude.json"), `"engramux":`},
 		{"codex", filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.engramux]"},
 	} {
-		reportHostMCP(h.label, h.path, endpoint, h.marker)
+		r.reportHostMCP(h.label, h.path, endpoint, h.marker)
 	}
-	return ok
 }
 
-// reportHostMCP prints one host's registration against endpoint. It reports
-// nothing back: see [reportMCP] for why these lines do not decide the exit
-// code.
+// reportHostMCP prints one host's registration against endpoint.
 //
 // # marker, and why it is not just "engramux"
 //
@@ -389,19 +695,19 @@ func reportMCP(ctx context.Context) bool {
 // a backslash. Codex's is a TOML table header. A hand-written entry spelled
 // some other way reads as not registered, which is a false negative and is the
 // direction to be wrong in.
-func reportHostMCP(label, path, endpoint, marker string) {
+func (r *report) reportHostMCP(label, path, endpoint, marker string) {
 	text, err := readCapped(path, maxHostConfig)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		field(label, "no configuration file at "+path)
+		r.note(label, "no configuration file at %s", path)
 	case err != nil:
-		field(label, "unreadable: "+err.Error())
+		r.note(label, "unreadable: %v", err)
 	case strings.Contains(text, endpoint):
-		field(label, "points at this endpoint")
+		r.field(label, "points at this endpoint")
 	case strings.Contains(text, marker):
-		field(label, "STALE - it names engramux at another URL; re-run scripts/install-hooks.mjs --apply")
+		r.note(label, "STALE - it names engramux at another URL; re-run `engramux install --apply`")
 	default:
-		field(label, "not registered - run scripts/install-hooks.mjs --apply")
+		r.note(label, "not registered - run `engramux install --apply`")
 	}
 }
 
@@ -499,11 +805,6 @@ func askDoctor() (ipc.DoctorReply, error) {
 		return zero, fmt.Errorf("%w: the service replied %.200q", err, raw)
 	}
 	return reply, nil
-}
-
-// field prints one indented label and value.
-func field(label, value string) {
-	_, _ = fmt.Fprintf(os.Stdout, "  %-22s %s\n", label, value)
 }
 
 func yesNo(b bool, yes, no string) string {

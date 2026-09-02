@@ -97,6 +97,25 @@ func ClaudeCLI() (string, error) {
 // RegisterClaudeMCP runs Claude Code's own CLI to add the endpoint, or to
 // remove it when ep is nil - so install and remove are one path.
 //
+// # The command line itself is an exposure, and it is accepted rather than solved
+//
+// On Windows a process's command line is readable by any process running as the
+// same user, and - which matters more - process-creation logging captures it:
+// Sysmon event 1, Security 4688 with command-line auditing on, and most
+// endpoint tooling, all of which forward it to somewhere off this machine. Spec
+// 5.9 says the token is never logged, never printed by a CLI command and never
+// carried in an error message; it does not mention the process table, and this
+// is that gap written down rather than left implied.
+//
+// It is not avoidable here. Writing Claude Code's configuration directly is
+// refused above for a reason that still holds, and `mcp add-json` puts the same
+// bytes on the same command line. The one candidate is Claude Code's documented
+// ${VAR} expansion in a header value, which would put a literal placeholder on
+// the command line instead - but whether that expands at user scope is
+// **[unverified]**, and it would move the token into a persistent environment
+// variable, which is another plaintext copy and a host-global change. Backlog
+// carries it.
+//
 // # Nothing about a failure may be repeated
 //
 // The command line carries the bearer token (spec 6.1). So the child's output
@@ -114,6 +133,14 @@ func RegisterClaudeMCP(ctx context.Context, bin string, ep *Endpoint) error {
 	} else {
 		if !safeValue(ep.URL) || !safeValue(ep.Token) {
 			return fmt.Errorf("host: the endpoint's url or token will not be passed to claude")
+		}
+		// The url becomes a positional argument, so a value that looks like a
+		// flag is read as one. Measured: a url of `--help` passes safeValue,
+		// claude prints its usage and exits 0, and this reported a
+		// registration that never happened.
+		if !loopbackURL(ep.URL) {
+			return fmt.Errorf("host: the endpoint's url is not a loopback http endpoint " +
+				"and will not be passed to claude as one")
 		}
 		args = []string{
 			"mcp", "add", "--scope", "user", "--transport", "http",

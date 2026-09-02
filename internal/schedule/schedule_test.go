@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"os/user"
+	"strings"
 	"testing"
 	"time"
 )
@@ -186,5 +187,35 @@ func TestQueryingATaskThatWasNeverRegistered(t *testing.T) {
 	_, err := Query(t.Context(), `\Engramux-test-`+rand.Text())
 	if !errors.Is(err, ErrNotRegistered) {
 		t.Errorf("Query = %v, want ErrNotRegistered", err)
+	}
+}
+
+// TestRun covers both ends of Run, and the success end is safe to exercise for
+// the reason [probeExe] already documents: the registered path does not exist,
+// so asking the scheduler to run it starts nothing. That is also what makes the
+// assertion honest - what succeeds here is `schtasks` accepting the request,
+// which is exactly the distinction Run's own comment draws. It is not evidence
+// that anything came up.
+func TestRun(t *testing.T) {
+	for _, name := range []string{"", "no-leading-backslash", `\Engramux "quoted"`} {
+		if err := Run(t.Context(), name); err == nil {
+			t.Errorf("Run(%q) was accepted; checkName is what keeps a task name out of a command line", name)
+		}
+	}
+
+	// A well-formed name that is not registered fails, and the error says
+	// which name - so a typo reads as a typo rather than as a broken install.
+	absent := `\Engramux-test-` + rand.Text()
+	err := Run(t.Context(), absent)
+	if err == nil {
+		t.Fatalf("Run(%q) succeeded against a task that was never registered", absent)
+	}
+	if !strings.Contains(err.Error(), absent) {
+		t.Errorf("the error does not name the task: %v", err)
+	}
+
+	// And a registered one is accepted.
+	if err := Run(t.Context(), probe(t)); err != nil {
+		t.Errorf("Run against a registered task: %v", err)
 	}
 }

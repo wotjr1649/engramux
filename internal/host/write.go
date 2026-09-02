@@ -78,19 +78,46 @@ func PlanMerge(path, label string, events []string, entryFor func(event string) 
 // The backup is taken immediately before its own write rather than for all
 // files up front, so a run that fails on the second file has not left a backup
 // beside a file nothing touched.
-func Commit(plans []*Plan) error {
+// It returns the backups it took, and the caller is expected to report them.
+// That is not tidiness: a backup of a file that already held a bearer token is
+// another copy of that token, under a timestamped name nothing will ever
+// replace, in a directory people are asked to attach to bug reports. The
+// installer this replaces printed every backup path; a review found that this
+// one had stopped.
+func Commit(plans []*Plan) ([]string, error) {
+	var saved []string
 	for _, plan := range plans {
 		if plan == nil {
 			continue
 		}
-		if _, err := backup(plan.Path); err != nil {
-			return err
+		dest, err := backup(plan.Path)
+		if err != nil {
+			return saved, err
 		}
+		saved = append(saved, dest)
 		if err := writeAtomic(plan.Path, plan.Text); err != nil {
-			return err
+			return saved, err
 		}
 	}
-	return nil
+	return saved, nil
+}
+
+// staleTemps removes temporary files an earlier write left beside this
+// destination.
+//
+// Best effort and silent: a file it cannot remove is one this run has no
+// business failing over, and the write about to happen is the caller's actual
+// business. What it is for is the credential case - a temporary copy of a
+// configuration carrying a bearer token, under a random name nothing else will
+// ever replace.
+func staleTemps(path string) {
+	matches, err := filepath.Glob(path + ".engramux-tmp-*")
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
 }
 
 // backup copies a file beside itself under a timestamped name and returns that
@@ -127,16 +154,39 @@ func backup(path string) (string, error) {
 // system temporary directory, because a rename is atomic only within a volume
 // and the two are not reliably on the same one.
 //
+// # This path carries the bearer token, and an earlier version of this comment
+// # said it did not
+//
+// It said mcp.json carries a token and this one replaces a file whose owner is
+// the user. That stopped being true the moment install.go routed the Codex
+// configuration through here, because that file holds
+// `Authorization = "Bearer <token>"`. A review found the comment before anyone
+// found a bug from it, which is the only reason it is worth writing down twice.
+//
+// What follows from it: the temporary file below is a second copy of a
+// credential while it exists, so it is removed on every failure path and named
+// so that a run killed between the write and the rename leaves at most one -
+// [staleTemps] sweeps whatever an earlier kill left. os.CreateTemp opens at
+// 0600, which is Go's default rather than this code's decision and is advisory
+// on Windows anyway (spec 7.1).
+//
 // # Why this is not mcpconf.Write
 //
-// internal/mcpconf writes mcp.json through the same shape, and internal/spool
+// internal/mcpconf writes mcp.json through the same shape and internal/spool
 // writes a record through a third. They are not shared because what differs is
-// not the sequence but the policy around it: mcp.json carries a token, so its
-// temporary file is removed on every failure and its mode is forced to 0600;
-// this one replaces a file whose owner is the user, so it does not impose a
-// mode at all. A helper taking mode, temp-naming and cleanup policy as
-// parameters would be longer than either caller.
+// not the sequence but the policy: mcp.json's writer forces a mode, and this
+// one replaces files whose owner is the user and must not. A helper taking
+// mode, temp-naming and cleanup policy as parameters would be longer than
+// either caller.
 func writeAtomic(path string, text []byte) (err error) {
+	// Whatever an earlier run left when it was killed between the write and
+	// the rename. The installer this replaces used a temporary name carrying
+	// the process id, so a later run overwrote it; os.CreateTemp's random
+	// suffix means every killed run leaves its own file, and one of them can
+	// hold a bearer token. Sweeping first restores the property the naming
+	// gave away.
+	staleTemps(path)
+
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".engramux-tmp-*")
 	if err != nil {
 		return fmt.Errorf("host: create a temporary file beside %s: %w", path, err)

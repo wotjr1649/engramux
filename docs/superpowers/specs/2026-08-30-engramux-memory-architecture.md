@@ -49,7 +49,7 @@ rather than to replace it with a description of it.
 | **M-3** | **Derive search *fields*, never search *answers*.** Rule-based columns beside the payload — touched paths, commands and exit codes, error spans, tool name, success flag, session, timestamp. The payload is not rewritten (I-10) | Decided |
 | **M-4** | **Hook-time injection is built, and ships disabled.** It is turned on per user only after §5's gates pass. This is the row that contradicts rev.4 §2's pull-only decision, and it contradicts it for 1.0-and-after, not for 1.0 | Decided |
 | **M-5** | **Installation moves into the Go binary.** `engramux install` replaces `scripts/install-hooks.mjs`, and the Node dependency goes with it | Decided |
-| **M-6** | **`doctor` judges by stage.** "Not installed yet" and "installed and broken" become different answers with different next commands; MCP becomes optional rather than required for a green result; the eleven hook entries are checked | Decided |
+| **M-6** | **`doctor` judges by stage.** "Not installed yet" and "installed and broken" become different answers with different next commands; MCP becomes optional rather than required for a green result; the eleven hook entries are checked; and the output is masked by default, with `--full` for the real values | Decided |
 
 ### Why there is no summariser (M-1)
 
@@ -249,5 +249,28 @@ and the only major surface `doctor` does not look at.
 
 Two things `doctor` already does that must not regress: it reports the tokenizer as a **verdict**
 rather than as two strings to compare, and it explains a locked destination with the right remedy per
-file. Two it does that should be reconsidered while it is open: it prints a Windows SID and the real
-database path, in the output a user is most likely to paste into a public issue.
+file.
+
+A fourth change, decided 2026-08-30 out of the two things this section previously left open. `doctor`
+printed a Windows SID and the real database path, in the output a user is most likely to paste into a
+public issue. **The default becomes masked and a `--full` flag prints the real values**, and the task
+principal becomes a verdict — this user, or another one — for the same reason the tokenizer is a
+verdict: the question is which user, not which number. Masking is applied to every line rather than
+to a chosen set of fields, so the rule is one call site rather than a judgement repeated per value.
+The real database path stays reachable, which is what §5.9 of the 1.0 spec asks of this command; it
+moves behind the flag rather than out.
+
+`--full` un-masks only what this command masks. A value the service already redacted before writing
+it — a log line through I-10's filter — comes back redacted either way.
+
+The stage judgement is **unanimous**: only a machine with no logon task, neither binary in the
+install directory, and no Engramux hook entry in either host is told to install. Any one sign present
+means the useful answer is what is broken, and a task or a host file that could not be **read** is not
+one that is absent — both fall through to the full report, where each is a finding with its own line.
+The direction matters: a report that said "not installed" to a half-installed machine would hide the
+failure that half-install hit.
+
+MCP being optional has a cost, and it is taken deliberately: an endpoint that is published and not
+answering now exits 0. It is still printed and still loud. This is the same trade the service already
+makes, where a failed endpoint is logged and ingest carries on rather than the service refusing to
+start.

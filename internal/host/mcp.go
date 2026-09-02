@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -23,6 +24,38 @@ var ErrEndpointNotPublished = errors.New("host: no MCP endpoint has been publish
 type Endpoint struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
+}
+
+// String masks the token, so that an Endpoint reaching a %v anywhere - a log
+// line, a wrapped error, an installer's report - cannot spell it out.
+//
+// Structural rather than a rule for callers to remember. A review found that
+// the System seam in install.go returns an error the installer prints verbatim,
+// and any implementation writing fmt.Errorf("register %v", ep) would have put a
+// credential in it. The type now refuses to.
+func (e *Endpoint) String() string {
+	if e == nil {
+		return "<no endpoint>"
+	}
+	return e.URL + " (token withheld)"
+}
+
+// loopbackURL reports whether a url is the shape the service publishes, which
+// is the only shape this product has any business registering.
+//
+// It is narrow on purpose, and the narrowness closes a real defect measured
+// before it existed: a url of `--help` passes safeValue - every character of it
+// is printable ASCII - and lands in the argument vector handed to `claude`,
+// where it is read as a flag rather than as the positional url. Claude Code
+// prints its usage, exits 0, and the installer reports a registration that
+// never happened.
+func loopbackURL(v string) bool {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // safeValue reports whether a value may be written into a TOML basic string.
@@ -75,6 +108,9 @@ func ReadEndpoint(path string) (*Endpoint, error) {
 	if !safeValue(ep.URL) || !safeValue(ep.Token) {
 		return nil, fmt.Errorf("host: %s holds a url or token this will not pass on", path)
 	}
+	if !loopbackURL(ep.URL) {
+		return nil, fmt.Errorf("host: %s holds a url that is not a loopback http endpoint", path)
+	}
 	return &ep, nil
 }
 
@@ -109,6 +145,25 @@ func SpliceCodex(text string, ep *Endpoint) (string, error) {
 		return text, nil
 	}
 
+	// A header inside a multi-line string is an exact line, so the loop below
+	// enters the table there and eats forward to the next bracket - taking
+	// whatever was between with it, and leaving the string unterminated. The
+	// count guard at the end cannot see this one, because nothing it swallowed
+	// was a second header; that was tried and measured.
+	//
+	// What does see it is parity: if an odd number of multi-line delimiters
+	// opens before our header, the header is inside a string. Refusing there
+	// is the honest answer for a splice that reads lines.
+	if i := headerIndex(text); i >= 0 {
+		for _, delim := range []string{`"""`, "'''"} {
+			if strings.Count(text[:i], delim)%2 == 1 {
+				return "", fmt.Errorf("host: %s appears inside a multi-line string in this file, "+
+					"where a line splice cannot tell it from a table header. it needs fixing by hand",
+					codexTableHeader)
+			}
+		}
+	}
+
 	var kept []string
 	inTable := false
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
@@ -137,7 +192,42 @@ func SpliceCodex(text string, ep *Endpoint) (string, error) {
 			`url = "` + ep.URL + `"` + "\n" +
 			`http_headers = { Authorization = "Bearer ` + ep.Token + `" }`
 	}
-	return out + "\n", nil
+	out += "\n"
+
+	// One header, and no more. A header carrying a trailing comment does not
+	// match the exact-line test above, so it survives the removal and the new
+	// table is appended beside it - two tables with the same name, which is a
+	// TOML parse error that takes the whole of Codex's configuration with it.
+	// The same count catches the other shape a line splice cannot read: a
+	// header-looking line inside a multi-line string, where the splice eats
+	// from there to the next bracket and silently loses whatever was between.
+	// Refusing is the answer rather than adding a TOML parser: it turns silent
+	// data loss into a message a person can act on.
+	want := 0
+	if ep != nil {
+		want = 1
+	}
+	if n := strings.Count(out, codexTableHeader); n != want {
+		return "", fmt.Errorf("host: %s appears %d times after the splice, want %d - this file has "+
+			"one somewhere a line splice cannot read, such as a trailing comment on the header or a "+
+			"header-shaped line inside a multi-line string. it needs fixing by hand",
+			codexTableHeader, n, want)
+	}
+	return out, nil
+}
+
+// headerIndex is the byte offset of the first line that is exactly our table
+// header, or -1. It is the same test the splice loop makes, so the parity check
+// above asks about the line the loop would actually act on.
+func headerIndex(text string) int {
+	offset := 0
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) == codexTableHeader {
+			return offset
+		}
+		offset += len(line) + 1
+	}
+	return -1
 }
 
 // codexTableHeader is the one line the splice recognises.

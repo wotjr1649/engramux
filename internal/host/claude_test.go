@@ -159,8 +159,12 @@ func TestClaudeCLIWantsAnExe(t *testing.T) {
 	if !strings.Contains(err.Error(), "claude mcp add") {
 		t.Errorf("the error does not tell the user how to register by hand: %v", err)
 	}
-	if strings.Contains(err.Error(), probeToken) {
-		t.Errorf("the advice carries a token: %v", err)
+	// The advice names the placeholder rather than a value. Asserting the
+	// absence of probeToken here would prove nothing - no token is in scope on
+	// this path - so what is asserted is that the placeholder is what is
+	// printed. A review pointed out the difference.
+	if !strings.Contains(err.Error(), "<token>") {
+		t.Errorf("the advice does not tell the user where the token comes from: %v", err)
 	}
 
 	// An .exe beside it wins, so a machine with both is not refused.

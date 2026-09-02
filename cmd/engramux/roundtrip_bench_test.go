@@ -93,10 +93,10 @@ func benchServer(b *testing.B) *sql.DB {
 	return db
 }
 
-// report sorts the samples and reports the percentiles spec 5.3 quotes. A
+// reportPercentiles sorts the samples and reports the percentiles spec 5.3 quotes. A
 // benchmark's own ns/op is a mean, and a mean is the wrong statistic for a
 // budget: what the budget has to cover is the tail.
-func report(b *testing.B, samples []time.Duration) {
+func reportPercentiles(b *testing.B, samples []time.Duration) {
 	b.Helper()
 	if len(samples) == 0 {
 		b.Fatal("no samples")
@@ -154,7 +154,7 @@ func BenchmarkRelayRoundTrip(b *testing.B) {
 		b.Fatalf("events table holds %d rows after %d iterations: the round trip did not store what it timed", rows, b.N)
 	}
 
-	report(b, samples)
+	reportPercentiles(b, samples)
 }
 
 // BenchmarkRelayDialWhileBusy measures the one dial cost that is not
@@ -195,5 +195,5 @@ func BenchmarkRelayDialWhileBusy(b *testing.B) {
 		cancel()
 	}
 	b.StopTimer()
-	report(b, samples)
+	reportPercentiles(b, samples)
 }

@@ -70,7 +70,7 @@ func TestCommitWritesAndBacksUp(t *testing.T) {
 		t.Error("PlanMerge wrote to the file; planning reads and decides, it does not write")
 	}
 
-	if err := Commit([]*Plan{plan}); err != nil {
+	if _, err := Commit([]*Plan{plan}); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 
@@ -97,40 +97,64 @@ func TestCommitWritesAndBacksUp(t *testing.T) {
 	}
 }
 
-// TestCommitLeavesNothingWhenOneFileCannotBeRead is backlog 25's second half,
-// and the reason planning and writing are two steps.
+// TestCommitStopsAtTheFirstFailureAndSaysWhatItDid holds Commit's own contract,
+// which the test that used to stand here did not: that one never called Commit
+// at all.
 //
-// The previous installer rewrote one host's configuration completely before it
-// had so much as parsed the other, so a syntax error in the second left the
-// first already changed with only a timestamped backup to recover it. Planning
-// both and then writing both cannot make two files atomic - nothing can - but
-// it moves every failure that is about READING to before the first byte is
-// written.
-func TestCommitLeavesNothingWhenOneFileCannotBeRead(t *testing.T) {
+// Plans are written in order and the first failure stops the run - and what was
+// done before it stopped comes back, because a caller told only "it failed"
+// cannot say which files moved.
+func TestCommitStopsAtTheFirstFailureAndSaysWhatItDid(t *testing.T) {
 	dir := t.TempDir()
-	good := filepath.Join(dir, "settings.json")
-	bad := filepath.Join(dir, "hooks.json")
-	const goodBefore = "{\"model\":\"opus\"}\n"
-	seedRaw(t, good, goodBefore)
-	seedRaw(t, bad, "{ this is not JSON")
+	first := filepath.Join(dir, "first.json")
+	second := filepath.Join(dir, "second.json")
+	seedRaw(t, first, "{}\n")
+	// The second destination is a directory, so its backup cannot be read and
+	// Commit stops there.
+	if err := os.Mkdir(second, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 
-	goodPlan := planFor(t, good)
+	plans := []*Plan{
+		{Path: first, Label: "first", Text: []byte(`{"a":1}` + "\n")},
+		{Path: second, Label: "second", Text: []byte(`{"b":2}` + "\n")},
+	}
+	saved, err := Commit(plans)
+	if err == nil {
+		t.Fatal("Commit succeeded against a destination it could not back up")
+	}
+	if len(saved) != 1 {
+		t.Errorf("Commit reported %d backups, want 1 - the one it took before it stopped: %v", len(saved), saved)
+	}
+	if got := read(t, first); got != `{"a":1}`+"\n" {
+		t.Errorf("the first plan was not written before the second failed: %q", got)
+	}
+}
 
-	if _, err := PlanMerge(bad, "test-host", twoEvents, probeEntry); err == nil {
+// TestPlanMergeRefusesAFileThatIsNotJSON is the read half of the two-file
+// property: the failure is at planning time, before Commit is reached at all.
+// The orchestration test is what holds that the OTHER file stays untouched -
+// this one only holds that the refusal happens while reading.
+//
+// An earlier version of this test tried to hold both and held neither: it
+// called PlanMerge on the bad file, discarded the good plan with a blank
+// assignment, and then asserted the good file was unwritten - which no Commit
+// implementation could ever have made false, because Commit was never called.
+// A review found it.
+func TestPlanMergeRefusesAFileThatIsNotJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	seedRaw(t, path, "{ this is not JSON")
+
+	plan, err := PlanMerge(path, "test-host", twoEvents, probeEntry)
+	if err == nil {
 		t.Fatal("PlanMerge accepted a file that is not JSON; the whole point is that it refuses")
 	}
-
-	// The caller stops on the first planning error and never reaches Commit,
-	// which is what leaves the good file untouched. Asserted on the file
-	// rather than on the caller, because that is the property.
-	if got := read(t, good); got != goodBefore {
-		t.Errorf("the readable file was written even though the other could not be read\n got: %q\nwant: %q",
-			got, goodBefore)
+	if plan != nil {
+		t.Error("PlanMerge returned a plan alongside its error")
 	}
-	if backups, _ := filepath.Glob(good + backupInfix + "*"); len(backups) != 0 {
-		t.Errorf("a backup was taken for a write that never happened: %v", backups)
+	if got := read(t, path); got != "{ this is not JSON" {
+		t.Errorf("PlanMerge wrote to the file it could not read: %q", got)
 	}
-	_ = goodPlan
 }
 
 // TestPlanMergeReportsNothingToDo keeps a re-run from rewriting a file it does
@@ -141,7 +165,7 @@ func TestPlanMergeReportsNothingToDo(t *testing.T) {
 	path := filepath.Join(dir, "settings.json")
 	seedRaw(t, path, "{}\n")
 
-	if err := Commit([]*Plan{planFor(t, path)}); err != nil {
+	if _, err := Commit([]*Plan{planFor(t, path)}); err != nil {
 		t.Fatalf("first Commit: %v", err)
 	}
 	installed := read(t, path)
@@ -222,7 +246,7 @@ func TestCommitWritesNothingWhenTheBackupFails(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	if err := Commit([]*Plan{plan}); err == nil {
+	if _, err := Commit([]*Plan{plan}); err == nil {
 		t.Fatal("Commit succeeded against a destination it could not back up")
 	}
 	if l := leftovers(t, dir); len(l) != 0 {

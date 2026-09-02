@@ -44,11 +44,24 @@ notion of a complete installation are the same definition written twice if they 
 It is second rather than last on purpose: every subsequent build is then installed through the new
 path, which is the only way that path gets exercised before a stranger runs it.
 
-Blocked by: Step 1 only in the sense of sharing a queue; it could be reordered before it.
+Blocked by: nothing, and **it is being done first** - session 07 took it during the soak window,
+because the freeze is on rebuilding rather than on writing. The installer half is on
+`step-2-engramux-install`; `doctor` is the rest of it.
+
 Unblocks: publication, which the owner's conditions gate on a decided and verified setup.
 
-Done when: a capture-only installation is green, a fresh machine is told to install rather than shown
-four red sections, and the eleven hook entries are checked against the installed relay.
+Done when: a capture-only installation is green, a fresh machine is told to install rather than
+shown four red sections, and the eleven hook entries are checked against the installed relay. The
+clean-VM verification is **not** part of this - it moved to being a condition of publication on
+2026-08-30, because binding it here would leave the branch unmergeable until a VM exists while main
+kept moving.
+
+**Ordering that the deletion of the Node installer created.** `main` still has
+`scripts/install-hooks.mjs`; this branch does not. So after the soak: close the series, delete the
+sampler task, run `race.sh`, then **build and install Step 1 from `main`**, where the script is still
+a fallback if anything goes wrong - and only then merge this branch and verify the new installer by
+reinstalling with it. Merging first would make the new installer's first real run and a new binary's
+first install the same event, with two candidate causes for anything that broke.
 
 **Step 3 — native memory indexed.** Memory spec **M-2**. First of the memory work because it is the
 smallest, because it is the only capability neither host can have, and because **P4** cannot be

@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/fixtures"
+	"github.com/wotjr1649/engramux/internal/host"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/schedule"
 	"github.com/wotjr1649/engramux/internal/secret"
@@ -77,13 +80,23 @@ func cli(t *testing.T, args ...string) cliResult {
 // answers from the pipe alone and does not care.
 func cliIn(t *testing.T, local string, args ...string) cliResult {
 	t.Helper()
+	return cliInWith(t, local, nil, args...)
+}
+
+// cliInWith is [cliIn] with extra environment, which `doctor` needs and nothing
+// else does: its installation section reads the two host configuration files,
+// and those default to the ones under the developer's own home directory.
+// Without an override this asserts against whatever that machine happens to
+// have installed.
+func cliInWith(t *testing.T, local string, env []string, args ...string) cliResult {
+	t.Helper()
 	// `status` and `doctor` dial the derived name; the CLI inherits this
 	// process's environment, so it reaches the same service start did.
 	useTestPipeName(t)
 	var stdout, stderr bytes.Buffer
 	//nolint:gosec // G204: relayBin is the binary TestMain built, args are the caller's literals
 	cmd := exec.CommandContext(t.Context(), relayBin, args...)
-	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+local)
+	cmd.Env = append(append(os.Environ(), "LOCALAPPDATA="+local), env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -546,6 +559,76 @@ func scheduledProbe(t *testing.T, exe string) string {
 	return name
 }
 
+// installedTree makes local look like a finished installation and returns the
+// environment that points the CLI at it: both binaries where `install` copies
+// them, and both hosts' hook tables holding the eleven entries pointed at that
+// relay.
+//
+// It exists because memory spec M-6 made `doctor` judge by stage. A temporary
+// directory with a service running in it is, correctly, a machine with no
+// installation on it - which is the right answer to that directory and the
+// wrong question for a gate about whether `doctor`'s two halves are readable
+// independently. This is what makes "everything in place" mean what the gate
+// says it means.
+//
+// The binaries are copied rather than stubbed. An installation's are copies of
+// exactly these two, so a fixture that wrote empty files would be asserting
+// against a shape no install produces.
+func installedTree(t *testing.T, local string) []string {
+	t.Helper()
+
+	bin := filepath.Join(local, "engramux", "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatalf("create %s: %v", bin, err)
+	}
+	for _, src := range []string{relayBin, serviceBin} {
+		body, err := os.ReadFile(src) //nolint:gosec // G304: a binary TestMain built.
+		if err != nil {
+			t.Fatalf("read %s: %v", src, err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, filepath.Base(src)), body, 0o700); err != nil { //nolint:gosec // G302: an executable.
+			t.Fatalf("copy %s: %v", src, err)
+		}
+	}
+
+	relay := filepath.Join(bin, host.RelayName)
+	env := make([]string, 0, 2)
+	for _, h := range []struct {
+		key, name string
+		build     func(event, relay string) jsontext.Value
+	}{
+		{"ENGRAMUX_CLAUDE_SETTINGS", "settings.json", host.ClaudeEntry},
+		{"ENGRAMUX_CODEX_HOOKS", "hooks.json", host.CodexEntry},
+	} {
+		merged, err := host.MergeHooks([]byte(`{}`), host.EventNames(),
+			func(event string) jsontext.Value { return h.build(event, relay) })
+		if err != nil {
+			t.Fatalf("merge %s: %v", h.name, err)
+		}
+		path := filepath.Join(local, h.name)
+		if err := os.WriteFile(path, merged, 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		env = append(env, h.key+"="+path)
+	}
+	return env
+}
+
+// principalSID is the SID a task registered by this test runs as. It is what
+// schedule.Register writes, read from the same place, so a mismatch here means
+// the registration really did name another account.
+//
+// It is never printed: the assertions using it report only that a value was or
+// was not there.
+func principalSID(t *testing.T) string {
+	t.Helper()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatalf("current user: %v", err)
+	}
+	return u.Uid
+}
+
 // maskedDatabasePath is the value a status reply carries for a service running
 // out of local: spec 5.6's file, through spec 5.9's mask.
 //
@@ -577,14 +660,18 @@ func maskedDatabasePath(local string) string {
 // real install owns, and `doctor` takes the name for exactly that reason.
 func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 	local := t.TempDir()
+	env := installedTree(t, local)
 	svc := start(t, local)
 	name := scheduledProbe(t, serviceBin)
 
 	// Everything spec 5.5 fixes, spelled as spec 5.5 spells it, plus the
 	// principal: the interactive user's token, not SYSTEM and not elevated.
+	//
+	// serviceBin is not in this list: it is a path under the developer's own
+	// profile, so the masked default rewrites it and only --full prints it
+	// whole. It is asserted below, in both forms.
 	registration := []string{
 		name,
-		serviceBin,
 		"PT0S",
 		"IgnoreNew",
 		"3 times, one every PT1M",
@@ -592,31 +679,63 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 		"LeastPrivilege",
 	}
 
-	up := cliIn(t, local, "doctor", name)
+	up := cliInWith(t, local, env, "doctor", name)
 	if up.exit != 0 {
 		t.Fatalf("engramux doctor exited %d with everything in place, want 0:\n%s\n%s", up.exit, up.stdout, up.stderr)
 	}
-	// The real path, unmasked, and this is the only command that gets it
-	// (spec 5.9): a local diagnostic printing to the terminal of the SID that
-	// owns the file. Every other reply masks it, and
-	// TestStatusReportsWhatIsActuallyThere holds that half.
+	// The eleven entries in both hosts, checked against the installed relay -
+	// memory spec M-6's third change and the one surface a working capture
+	// actually depends on.
 	//
 	// The tokenizer line is asserted as the *comparison* and not as the
 	// tokenizer string. What this command is for here is answering whether
 	// the live index and the migration agree - goose does not checksum a
 	// migration, so nothing else in the product could answer it at all.
+	events := fmt.Sprintf("%d of %d events point at the installed relay", len(host.EventNames()), len(host.EventNames()))
 	for _, want := range append(registration,
-		filepath.Join(local, "engramux", "engramux.db"),
 		"agrees with the migration",
+		events,
+		"this user",
+		secret.MaskString(serviceBin),
 	) {
 		if !strings.Contains(up.stdout, want) {
 			t.Errorf("engramux doctor did not report %q:\n%s", want, up.stdout)
 		}
 	}
+	// The default is masked, and this is the output a person pastes into a
+	// public issue: the real database path is spec 5.9's, handed to this
+	// command and to nothing else, and the principal is a Windows SID.
+	for _, leak := range []string{
+		filepath.Join(local, "engramux", "engramux.db"),
+		principalSID(t),
+	} {
+		if strings.Contains(up.stdout, leak) {
+			t.Errorf("engramux doctor printed a value the default masks:\n%s", up.stdout)
+		}
+	}
+	if !strings.Contains(up.stdout, maskedDatabasePath(local)) {
+		t.Errorf("engramux doctor did not report the masked database path:\n%s", up.stdout)
+	}
+
+	// --full is what gets the real values, and it is the only thing that
+	// does. Nothing here is printed on failure: that is what it is for.
+	full := cliInWith(t, local, env, "doctor", name, "--full")
+	if full.exit != 0 {
+		t.Fatalf("engramux doctor --full exited %d, want 0", full.exit)
+	}
+	if !strings.Contains(full.stdout, filepath.Join(local, "engramux", "engramux.db")) {
+		t.Error("engramux doctor --full did not print the real database path")
+	}
+	if !strings.Contains(full.stdout, principalSID(t)) {
+		t.Error("engramux doctor --full did not print the task principal")
+	}
+	if !strings.Contains(full.stdout, serviceBin) {
+		t.Error("engramux doctor --full did not print the registered command whole")
+	}
 
 	svc.stop(t)
 
-	down := cliIn(t, local, "doctor", name)
+	down := cliInWith(t, local, env, "doctor", name)
 	if down.exit == 0 {
 		t.Errorf("engramux doctor exited 0 with no service running:\n%s", down.stdout)
 	}
@@ -624,7 +743,8 @@ func TestDoctorReadsTheTaskWhetherOrNotTheServiceIsUp(t *testing.T) {
 	// registration, and the local state spec 5.5 added to this command
 	// because a service that is down is when it is run. A command that gave
 	// up at the first failure would print none of it.
-	for _, want := range append(registration, "local", "this binary", "spool", "last log line") {
+	for _, want := range append(registration,
+		secret.MaskString(serviceBin), "local", "this binary", "spool", "last log line") {
 		if !strings.Contains(down.stdout, want) {
 			t.Errorf("engramux doctor stopped reporting %q once the service was down:\n%s", want, down.stdout)
 		}
