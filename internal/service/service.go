@@ -87,7 +87,8 @@ var drainInterval = 30 * time.Second
 // One thing has to be said about that growth rate before the numbers below make
 // sense: §7.2 measured it with wal_autocheckpoint(0), and this DSN does not
 // turn wal_autocheckpoint off. Left at SQLite's default of 1,000 pages, it
-// PASSIVE-checkpoints on its own at about 4.1 MiB and the WAL settles there
+// PASSIVE-checkpoints on its own at about 4.1 MB - 1,000 pages of 4 KiB is
+// 4,096,000 B, which is 3.9 MiB - and the WAL settles there
 // rather than growing - measured, and it is what the live installation's WAL
 // was doing. So the threshold below is not what stops the WAL running away;
 // SQLite already does. What these two numbers buy is the file being *given
@@ -95,7 +96,7 @@ var drainInterval = 30 * time.Second
 // recover.
 //
 //   - Five minutes is 7.5 MiB of writes at that busiest rate, so a checkpoint
-//     costs about 4 ms (§7.4's 0.54 ms/MiB) and reclaims roughly the 4.1 MiB
+//     costs about 4 ms (§7.4's 0.54 ms/MiB) and reclaims roughly the 4.1 MB
 //     the automatic checkpoint would otherwise leave allocated. 288 a day.
 //   - Five seconds is how far past the threshold the WAL can get before
 //     anything notices: 124 KiB at that same rate, 0.2% of the threshold. One

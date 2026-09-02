@@ -87,7 +87,8 @@ func walSize(path string) (int64, error) {
 //
 // Not "the WAL would otherwise grow without bound". Spec 5.4's DSN leaves
 // wal_autocheckpoint at SQLite's default of 1,000 pages, so SQLite
-// PASSIVE-checkpoints on its own and the WAL settles at about 4.1 MiB whatever
+// PASSIVE-checkpoints on its own and the WAL settles at about 4.1 MB (1,000
+// pages of 4 KiB, 4,096,000 B, which is 3.9 MiB) whatever
 // the run length - measured over 800 ingests, and the size the live
 // installation's WAL had reached. What a PASSIVE checkpoint does not do is give
 // the file back: it moves pages into the database and reuses the WAL in place,
