@@ -3,6 +3,7 @@ package memory
 import (
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,6 +57,7 @@ func parseClaudeIndex(s Source, text string) ([]Item, []Warning, error) {
 		items    []Item
 		warns    []Warning
 		preamble []string
+		seen     = map[string]int{}
 	)
 	for _, line := range strings.Split(text, "\n") {
 		m := claudeIndexEntry.FindStringSubmatch(line)
@@ -71,7 +73,7 @@ func parseClaudeIndex(s Source, text string) ([]Item, []Warning, error) {
 			Host:        s.Host,
 			Kind:        KindClaudeIndex + "-entry",
 			SourcePath:  s.Path,
-			EntryKey:    target,
+			EntryKey:    uniqueKey(seen, target),
 			ProjectPath: s.ProjectPath,
 			Title:       title,
 			Body:        strings.TrimSpace(title + "\n" + desc),
@@ -211,6 +213,7 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 		warns []Warning
 		key   string
 		block []string
+		seen  = map[string]int{}
 	)
 	flush := func() {
 		body, mod, cwd, w := codexBlock(s, block)
@@ -222,7 +225,7 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 			Host:           s.Host,
 			Kind:           s.Kind,
 			SourcePath:     s.Path,
-			EntryKey:       key,
+			EntryKey:       uniqueKey(seen, key),
 			ProjectPath:    cwd,
 			Title:          firstLine(body),
 			Body:           body,
@@ -242,6 +245,25 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 		warns = append(warns, Warning{Path: s.Path, Reason: "a Codex artefact with no section heading and no text; nothing was indexed"})
 	}
 	return items, warns, nil
+}
+
+// uniqueKey makes a block key unique within its file, which the key on its own is
+// not: migration 00004 makes (host, source_path, entry_key) unique, and a real
+// Codex artefact repeats a heading. Found by indexing this machine own corpus -
+// the collector failed that constraint on it, where every synthesised fixture
+// had passed.
+//
+// Only a repeat is perturbed, and that is the point of doing it here rather than
+// by always prefixing an ordinal. An id is derived from the key and a caller
+// holds one across a collection tick; prefixing everything would move every id
+// below any block that was ever inserted, where this moves only the duplicates
+// of a heading that was already ambiguous.
+func uniqueKey(seen map[string]int, key string) string {
+	seen[key]++
+	if n := seen[key]; n > 1 {
+		return key + "#" + strconv.Itoa(n)
+	}
+	return key
 }
 
 // codexBlock turns one block's lines into its indexed text, its host timestamp

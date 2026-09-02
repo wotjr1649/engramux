@@ -297,7 +297,52 @@ func TestACodexPathIsNormalisedPastTheExtendedLengthPrefix(t *testing.T) {
 	}
 }
 
-// / TestOnlyAKnownLabelIsStripped is a regression test for two defects the Phase 6
+// // TestARepeatedHeadingGetsItsOwnKey. Migration 00004 makes (host, source_path,
+// entry_key) unique, and a heading is not unique within a file: a real Codex
+// artefact on this machine repeats one, and the collector failed that constraint
+// on it where every synthesised fixture had passed. Found by indexing the real
+// corpus rather than by review.
+//
+// Only the repeat is perturbed. An id is derived from the key and a caller holds
+// one across a tick, so prefixing every key with an ordinal would move every id
+// below any block ever inserted; this moves only the duplicates of a heading
+// that was already ambiguous.
+func TestARepeatedHeadingGetsItsOwnKey(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "raw_memories.md", `## the same heading
+first
+## another
+between
+## the same heading
+second
+## the same heading
+third
+`, Source{Host: HostCodex, Kind: KindCodexRaw})
+
+	items, _, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	seen := map[string]int{}
+	for _, it := range items {
+		seen[it.EntryKey]++
+	}
+	for key, n := range seen {
+		if n != 1 {
+			t.Fatalf("entry key %q is used by %d items, which the schema forbids", key, n)
+		}
+	}
+	if len(items) != 4 {
+		t.Fatalf("items = %d, want 4: three repeats and the one between them", len(items))
+	}
+	// The first keeps the heading, which is what makes an unrepeated key
+	// stable across a tick.
+	if items[0].EntryKey != "the same heading" {
+		t.Fatalf("the first block key is %q, want the heading unchanged", items[0].EntryKey)
+	}
+}
+
+// TestOnlyAKnownLabelIsStripped is a regression test for two defects the Phase 6
 // audit found, and both were the same failure: a credential surviving in the
 // indexed text because the parser had removed the context its rule matches on.
 //
