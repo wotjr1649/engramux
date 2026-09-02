@@ -275,7 +275,19 @@ func guard(srv *mcp.Server, token string) http.Handler {
 	// log is an egress (I-10) and this handler sees a bearer token in every
 	// request header; nothing in this product has read what the SDK would
 	// write.
-	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	//
+	// Stateless, since backlog 30. It is the one field that decides whether
+	// the SDK offers MCP revision 2026-07-28 - the revision spec 5.9's
+	// transport and authorization arguments are about - and measured on a
+	// bare server it changes the offered list in no other way. What it gives
+	// up is nothing this product uses: no session map, so no Mcp-Session-Id
+	// and no server-to-client request, and the four tools are request and
+	// reply. GET and DELETE answer 405, which the spec allows a server that
+	// offers no listening stream. The map was kept through Phase 6 on
+	// purpose, so that the soak's working-set series had it to watch (spec
+	// 8's Phase 6 row); the series is closed and the reason went with it.
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true})
 
 	mux := http.NewServeMux()
 	mux.Handle(endpointPath, h)

@@ -476,13 +476,15 @@ func TestTheServerOffersTheRevisionsItActuallyOffers(t *testing.T) {
 	// a substring rather than parsed: what is under test is the exact list in
 	// the exact order, and unmarshalling into a slice would let a reordering
 	// pass that a client's "highest mutually supported" walk would not.
-	const want = `"supportedVersions":["2025-11-25","2025-06-18","2025-03-26","2024-11-05"]`
+	//
+	// 2026-07-28 heads the list since backlog 30: the handler is stateless,
+	// which is the one field that decides whether the SDK offers the
+	// revision spec 5.9 reasons from. A list without it means the option
+	// was dropped, and spec 5.9's transport and authorization arguments are
+	// once again about a revision this server does not speak.
+	const want = `"supportedVersions":["2026-07-28","2025-11-25","2025-06-18","2025-03-26","2024-11-05"]`
 	if !strings.Contains(string(body), want) {
-		t.Errorf("server/discover did not advertise the measured revision list.\nwant substring: %s\ngot body: %s",
+		t.Errorf("server/discover did not advertise the decided revision list.\nwant substring: %s\ngot body: %s",
 			want, body)
-	}
-	if strings.Contains(string(body), `"2026-07-28"`) {
-		t.Errorf("server/discover now offers 2026-07-28 - StreamableHTTPOptions.Stateless was set, " +
-			"which is the backlog row. Update spec 5.9 and this test together.")
 	}
 }
