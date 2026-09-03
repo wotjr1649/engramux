@@ -86,7 +86,7 @@ func TestSearchSurvivesRawInput(t *testing.T) {
 		{name: "no query at all", text: "   ", wantErr: search.ErrEmptyQuery},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hits, _, err := search.Search(t.Context(), db, tc.text, "", 10)
+			hits, _, err := search.Search(t.Context(), db, tc.text, "", 10, search.MatchAll)
 			if err != nil {
 				assertCleanError(t, tc.text, err, tc.wantErr)
 				return

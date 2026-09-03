@@ -1,5 +1,12 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.12** · 2026-09-04 — rev.12 is rev.11's selector, built. The implicit AND becomes a caller's
+choice: **MCP and the CLI join a query's tokens with OR, the injector keeps the AND**, and gate
+**M3 is pinned for the first time** at **claude-code 0.400 and codex 0.600** — 25 of 50 against
+rev.11's pre-registered bar of 19 and an oracle ceiling of 37, where the AND returned 1. Two gates
+were written and one of them was killed by its own break-it pass before it could be believed. rev.1
+to rev.11 below.
+
 **rev.11** · 2026-09-04 — rev.11 corrects rev.10 and settles what it left open. The same 50 queries
 were re-asked in English: connectivity goes **16 → 47 of 50** and the oracle ceiling **13 → 37**, so
 the class of question rev.10 said verbatim retrieval could not reach **does not exist**, and the
@@ -610,6 +617,77 @@ The selector, and it is now the only thing between this product and a green M3. 
 been implemented** — decisions 1 and 2 are documentation the selector work will make true, and
 decision 3 is the fixture the selector work will be measured against.
 
+*Closed the same day by the next section.*
+
+### What building the selector settled (M-2)
+
+**[verified] 2026-09-04, on `step-7-selector`.** The section above named the selector as the keystone
+and pre-registered **19 of 50** as the bar. This is what replacing it cost and bought.
+
+#### The join is a caller's choice, and the injector does not get the new one
+
+The implicit AND is right for what this index was built for — a literal somebody pastes back, where
+every token is in the document by construction — and wrong for a question. So it stops being a
+property of the builder and becomes a parameter: **MCP and the CLI ask with OR, the injector keeps
+the AND**, and each call site says which.
+
+**A two-phase shape was measured and rejected.** *"AND, and OR only when the AND came back empty"*
+is the smallest change and it is worse: **20 of 50** against the plain OR's 25. Over the 8 questions
+where the AND does match something, it finds **1** answer and the OR finds **6** — so on this fixture
+the AND was not protecting the queries it answered either, and preserving today's behaviour where it
+works costs 5 of 25 rather than nothing.
+
+**The injector's exclusion is structural, not caution.** Its abstention is a threshold on the size of
+the match set, which is what M6's zero-byte claim rests on; an OR there matches most of the corpus
+and moves M5, M6 and M10 in one step, for a feature that ships off and whose gate M7 has not run.
+
+#### Gate M3, pinned
+
+**claude-code 0.400 (10 of 25) and codex 0.600 (15 of 25)**, 25 of 50, over 38 and 265 items and the
+English fixture. Same-script **24 of 42** and cross-script **1 of 8** against the AND's 1 and 0. The
+bar was pre-registered at 19 before the number was known, which is the only order in which a bar
+means anything.
+
+The pin is a floor over a corpus that grows, so a future fall is either a retrieval regression or a
+corpus that gained distractors, and no constant can tell those apart. That was the cost the pinned
+shape was chosen with.
+
+#### The gate that was written first and deleted, which is the part worth keeping
+
+rev.11 decided to pin the Phase 4 ranks before touching the selector, so that a precision loss could
+not hide behind a recall figure that stays at 100%. The instrument chosen was the **fixtures-mode
+rank ceiling** — every answer at rank 1, which is what the five in-repository documents return. It
+was green, and it was **fake**.
+
+The break-it pass is what said so. Reversing the entire `ORDER BY` left every class green: in that
+mode a derived query matches **exactly one document**, and a set of one has no order to get wrong.
+What survives a total inversion of the ranking is not measuring the ranking.
+
+**The corpus cannot be pinned either**, and that is a separate finding. `.capture/` grows whenever
+the owner uses the machine, and the upper medians had already moved from §7.1's recorded
+**3 / 3 / 10 / 9 / 30** to **4 / 4 / 6 / 8 / 30** with no change to the package between. An absolute
+rank is not a stable assertion here in either mode.
+
+What replaced it is **gate M4's shape**: both arms of the same run over one corpus, which is immune
+to corpus drift by construction. Recall is gated and MRR is reported — the two arms do not rank the
+same population, so a lower MRR at equal recall is the shape of the trade rather than a regression.
+
+**Measured over the 901 captures, the OR costs nothing on the literals.** Every one of spec §8's five
+classes returns identical recall@10 and identical MRR under both modes. The two-token class is the
+only one that can tell them apart — the other four derive a single-token query, where the two
+expressions are byte-identical — and there the match set widens **77 → 291** with recall@10 at 0.640
+and MRR at 0.269 under both. bm25 puts the documents matching both terms above the documents matching
+one, which is exactly the property the AND was being kept for. **The gate fails when no class
+distinguishes the two modes**, because a run that compared a mode against itself priced nothing.
+
+#### What the OR costs in time
+
+**Measured 2026-09-04**, 19,503 synthetic events, limit 20, one query of two tokens chosen to be the
+worst case — one term in 1 document in 100, the other in all of them: **MatchAll 3.30 ms over a match
+set of 196, MatchAny 65.2 ms over 19,503**. About **20×**, and it is the match set that decides it,
+which §7.1 already measured from the other direction. Acceptable on an interactive surface and the
+reason the injector — the one path with a 500 ms deadline — keeps the AND.
+
 ### Why derived fields are not a summary (M-3)
 
 The distinction is load-bearing and easy to lose. A derived field exists **to find a document**; a
@@ -1122,7 +1200,7 @@ capabilities, each with a definition that can fail.
 | **P1** | **Exact-span recall** | For a literal that exists in the corpus — an error message, a stack frame, a command line, a path — a natural-language query for it puts a document containing that literal in the top *k*. Reported as recall@k and MRR per class | Those three classes are the ones native declines to store |
 | **P2** | **Zero-cost abstention** | For a prompt with no relevant history, the injector emits **exactly zero bytes**. Required at 100% | Native loads its index every session **regardless of the query**, so its context cost is a constant. A query-dependent zero is structurally ours |
 | **P3** | **Temporal resolution** | A time-qualified query is narrowed by real event timestamps and session boundaries | Native carries a `modified` field, which is when a note was written, not when the fact was true |
-| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory. **Narrowed 2026-09-04 to same-language retrieval, guaranteed on MCP and the CLI and explicitly not on injection.** Within the language it is still `[unverified]` and measured at **1 of 50** for a question against an oracle ceiling of 37 — what is left is the selector, not the language. See *What gate M3 measured on its first human fixture* and *What the English arm settled* | Each host sees half |
+| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory. **Narrowed 2026-09-04 to same-language retrieval, guaranteed on MCP and the CLI and explicitly not on injection.** Within the language it is **measured at 25 of 50** for a question, against an oracle ceiling of 37 and against 1 of 50 before the selector changed the same day. Still `[unverified]` in one respect the fixture cannot remove: the English queries were translated by a model, so the ceiling may be optimistic. See *What gate M3 measured on its first human fixture*, *What the English arm settled* and *What building the selector settled* | Each host sees half |
 | **P5** | **Failure-fix pairs** | Querying with the text of a failure returns the edit or command that resolved it | *"Debugging fixes"* is on native's documented exclusion list |
 
 P2 is the sharpest of the five and the least obvious. *Context Rot* (Chroma Research, 2025-07-14, 18
@@ -1159,7 +1237,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 |---|---|---|
 | **M1** | Native parse fidelity | Over every native memory file present on the machine: no crash, frontmatter fields extracted exactly where they exist, body bytes preserved losslessly. One failure fails the gate |
 | **M2** | Drift canary | An unknown frontmatter key, an unknown file name, a missing index — each **warns and continues**. A silent skip is a failure |
-| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Fixture switched to the English one 2026-09-04 and the gate is still unpinned.** The 2026-09-03 run over the owner's Korean queries returned 0 of 25 on each host, and a floor of zero is a gate that is off. English lifts the reachable ceiling from 13 to 37 of 50 and the recall only to 1 of 50 — the gate reads **claude-code 1 of 25, codex 0 of 25, same-script 1 of 42, cross-script 0 of 8** — so **the pin waits on the selector rather than on another fixture**. Both sections — *What gate M3 measured on its first human fixture* and *What the English arm settled* — carry the walls, the ceilings and the decisions.
+| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Pinned 2026-09-04 at claude-code 0.400 and codex 0.600**, 10 and 15 of 25 over populations of 38 and 265 and the English fixture, same-script 24 of 42 and cross-script 1 of 8. It took three tries to get a number worth pinning: the Korean fixture returned **0 of 25 on each host** and a floor of zero is a gate that is off; the English fixture under the implicit AND returned **1 and 0**; and the selector is what moved it to 25 of 50, against a bar of 19 pre-registered before the number was known and an oracle ceiling of 37. Three sections carry it — *What gate M3 measured on its first human fixture*, *What the English arm settled*, and *What building the selector settled*.
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |

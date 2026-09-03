@@ -40,7 +40,7 @@ func TestSearchReportsTheTotalBeyondTheLimit(t *testing.T) {
 	})
 	db := ingestAll(t, docs)
 
-	hits, total, err := search.Search(t.Context(), db, "borogove", "", 2)
+	hits, total, err := search.Search(t.Context(), db, "borogove", "", 2, search.MatchAll)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestSearchReportsTheTotalBeyondTheLimit(t *testing.T) {
 		t.Errorf("total = %d, want 3 - the count has to be taken before the limit", total)
 	}
 
-	hits, total, err = search.Search(t.Context(), db, "borogove", "", 10)
+	hits, total, err = search.Search(t.Context(), db, "borogove", "", 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSearchReportsTheTotalBeyondTheLimit(t *testing.T) {
 	// The filter is part of the count: a project that holds none of them
 	// matches nothing, and a total that ignored the predicate would still
 	// say 3 here.
-	hits, total, err = search.Search(t.Context(), db, "borogove", "no-such-project", 10)
+	hits, total, err = search.Search(t.Context(), db, "borogove", "no-such-project", 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("Search (scoped): %v", err)
 	}

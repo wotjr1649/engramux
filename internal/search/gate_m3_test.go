@@ -57,9 +57,19 @@ const m3Unpinned = -1
 // in the spec's M3 row - not a number moved to make a red run green. A recall
 // that falls below the floor is a retrieval regression; one that rises above it
 // is a new floor somebody has to choose to take.
+// Pinned 2026-09-04, the run that turned the selector from [search.MatchAll] to
+// [search.MatchAny] (memory spec rev.11). Over the owner's English fixture
+// against a corpus of 38 claude-code and 265 codex items: 10 of 25 and 15 of 25,
+// which is 25 of 50 against a pre-registered bar of 19 and an oracle ceiling of
+// 37. Under MatchAll the same fixture returned 1 and 0.
+//
+// The corpus is live and grows, so a fall below either floor is either a
+// retrieval regression or a corpus that gained distractors, and telling those
+// two apart is the reader's job rather than this constant's. That is the cost
+// the pinned shape was chosen with.
 var m3PinnedRecall = map[string]float64{
-	memory.HostClaude: m3Unpinned,
-	memory.HostCodex:  m3Unpinned,
+	memory.HostClaude: 0.400,
+	memory.HostCodex:  0.600,
 }
 
 // m3Query is one labelled known-item query.
@@ -169,7 +179,7 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 		}
 		armAsked[arm]++
 
-		hits, _, err := search.SearchMemory(t.Context(), db, q.query, nil, 10)
+		hits, _, err := search.SearchMemory(t.Context(), db, q.query, nil, 10, search.MatchAny)
 		if err != nil {
 			t.Errorf("line %d: SearchMemory: %v", q.line, err)
 			continue

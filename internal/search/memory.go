@@ -52,13 +52,13 @@ type MemoryHit struct {
 // The two phases are [Search]'s and for the same reason: the single connection
 // (spec 5.4) is held by an open *sql.Rows, and masking is the expensive part. So
 // the rows are read, the cursor is closed, and only then is anything masked.
-func SearchMemory(ctx context.Context, db *sql.DB, text string, projectKeys []string, limit int) (hits []MemoryHit, total int64, err error) {
+func SearchMemory(ctx context.Context, db *sql.DB, text string, projectKeys []string, limit int, m Match) (hits []MemoryHit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query, args := memoryMatchQuery(tokens, projectKeys, limit)
+	query, args := memoryMatchQuery(tokens, projectKeys, limit, m)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search: match memory: %w", err)
@@ -179,7 +179,7 @@ func GetMemoryItem(ctx context.Context, db *sql.DB, id string, projectKeys []str
 // The unscoped statement is byte-identical to the scoped one without its
 // predicate, on the same rule [matchQuery] follows: an always-true disjunction
 // would put an unmeasured expression in front of every invocation.
-func memoryMatchQuery(tokens []string, projectKeys []string, limit int) (string, []any) {
+func memoryMatchQuery(tokens []string, projectKeys []string, limit int, m Match) (string, []any) {
 	const (
 		head = `
 		SELECT memory_items.id, memory_items.host, memory_items.kind,
@@ -193,9 +193,9 @@ func memoryMatchQuery(tokens []string, projectKeys []string, limit int) (string,
 		LIMIT ?`
 	)
 	if len(projectKeys) == 0 {
-		return head + tail, []any{matchExpression(tokens), limit}
+		return head + tail, []any{matchExpression(tokens, m), limit}
 	}
-	args := []any{matchExpression(tokens)}
+	args := []any{matchExpression(tokens, m)}
 	for _, k := range projectKeys {
 		args = append(args, k)
 	}

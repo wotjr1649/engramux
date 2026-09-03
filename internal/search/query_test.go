@@ -20,23 +20,29 @@ func TestMatchExpression(t *testing.T) {
 		name string
 		text string
 		want string
-		toks []string
+		// wantAny is the [MatchAny] expression. Empty means "the same as
+		// want", which is every single-token row: one token has nothing to
+		// join, so the two modes cannot differ there and spelling it twice
+		// would only invite the two copies to drift.
+		wantAny string
+		toks    []string
 	}{
-		{"a plain word", "budget", `"budget"*`, []string{"budget"}},
-		{"a hyphenated identifier", "run-time", `"run-time"*`, []string{"run-time"}},
+		{"a plain word", "budget", `"budget"*`, "", []string{"budget"}},
+		{"a hyphenated identifier", "run-time", `"run-time"*`, "", []string{"run-time"}},
 		// Bare, this answers `no such column: C` (spec 5.7). Quoted, FTS5
 		// hands the whole string to the tokenizer and it becomes a phrase.
-		{"a Windows path", `C:\Users\fixture\main_test.go`, `"C:\Users\fixture\main_test.go"*`, []string{`C:\Users\fixture\main_test.go`}},
-		{"a bare AND", "AND", `"AND"*`, []string{"AND"}},
-		{"a lone double quote", `"`, `""""*`, []string{`"`}},
+		{"a Windows path", `C:\Users\fixture\main_test.go`, `"C:\Users\fixture\main_test.go"*`, "", []string{`C:\Users\fixture\main_test.go`}},
+		{"a bare AND", "AND", `"AND"*`, "", []string{"AND"}},
+		{"a lone double quote", `"`, `""""*`, "", []string{`"`}},
 		// One of the corpus's own two-token derivations, cut to one token.
-		{"an embedded double quote", `CD="C:/Temp";`, `"CD=""C:/Temp"";"*`, []string{`CD="C:/Temp";`}},
-		{"a Korean word", "파일", `"파일"*`, []string{"파일"}},
-		{"two tokens", "읽기 파일", `"읽기"* "파일"*`, []string{"읽기", "파일"}},
+		{"an embedded double quote", `CD="C:/Temp";`, `"CD=""C:/Temp"";"*`, "", []string{`CD="C:/Temp";`}},
+		{"a Korean word", "파일", `"파일"*`, "", []string{"파일"}},
+		{"two tokens", "읽기 파일", `"읽기"* "파일"*`, `"읽기"* OR "파일"*`, []string{"읽기", "파일"}},
 		// A token unicode61 tokenizes to nothing is legal input and is not
-		// special-cased: FTS5 drops it from the AND rather than zeroing it.
-		{"a token that tokenizes to nothing", "--- 파일", `"---"* "파일"*`, []string{"---", "파일"}},
-		{"surrounding and repeated whitespace", "  foo\t\n bar  ", `"foo"* "bar"*`, []string{"foo", "bar"}},
+		// special-cased: FTS5 drops it from the AND rather than zeroing it,
+		// and from the OR rather than widening it to everything.
+		{"a token that tokenizes to nothing", "--- 파일", `"---"* "파일"*`, `"---"* OR "파일"*`, []string{"---", "파일"}},
+		{"surrounding and repeated whitespace", "  foo\t\n bar  ", `"foo"* "bar"*`, `"foo"* OR "bar"*`, []string{"foo", "bar"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			toks, err := queryTokens(tc.text)
@@ -46,8 +52,15 @@ func TestMatchExpression(t *testing.T) {
 			if !slices.Equal(toks, tc.toks) {
 				t.Errorf("queryTokens(%q) = %q, want %q", tc.text, toks, tc.toks)
 			}
-			if got := matchExpression(toks); got != tc.want {
-				t.Errorf("matchExpression(%q) = %q, want %q", toks, got, tc.want)
+			if got := matchExpression(toks, MatchAll); got != tc.want {
+				t.Errorf("matchExpression(%q, MatchAll) = %q, want %q", toks, got, tc.want)
+			}
+			wantAny := tc.wantAny
+			if wantAny == "" {
+				wantAny = tc.want
+			}
+			if got := matchExpression(toks, MatchAny); got != wantAny {
+				t.Errorf("matchExpression(%q, MatchAny) = %q, want %q", toks, got, wantAny)
 			}
 		})
 	}

@@ -99,8 +99,8 @@ type Hit struct {
 // second query, so it counts exactly the rows the hits were ranked from, and
 // it costs nothing the ORDER BY was not already paying: ranking needs every
 // matching row in hand before the first one can be returned.
-func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) (hits []Hit, total int64, err error) {
-	return searchWith(ctx, db, text, projectID, limit, true)
+func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match) (hits []Hit, total int64, err error) {
+	return searchWith(ctx, db, text, projectID, limit, true, m)
 }
 
 // searchWith is [Search] with the derived-field boost made explicit, so that
@@ -113,13 +113,13 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int) 
 // a variable two parallel tests fight over, and because "the production path is
 // the one with the constant written into it" is a property worth having at the
 // call site rather than in a comment.
-func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool) (hits []Hit, total int64, err error) {
+func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool, m Match) (hits []Hit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query, args := matchQuery(tokens, projectID, limit, boost)
+	query, args := matchQuery(tokens, projectID, limit, boost, m)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search: match: %w", err)
@@ -188,7 +188,7 @@ func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit i
 // happens to be true. A disjunction like `(? = ” OR project_id = ?)` would read
 // as tidier and would put an unmeasured expression in front of every existing
 // invocation for the sake of one fewer string.
-func matchQuery(tokens []string, projectID string, limit int, boost bool) (string, []any) {
+func matchQuery(tokens []string, projectID string, limit int, boost bool, m Match) (string, []any) {
 	const head = `
 		SELECT events.id, events.host, events.event_name, events.received_at, events.payload,
 		       count(*) OVER ()
@@ -196,7 +196,7 @@ func matchQuery(tokens []string, projectID string, limit int, boost bool) (strin
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?`
 
-	args := []any{matchExpression(tokens)}
+	args := []any{matchExpression(tokens, m)}
 	stmt := head
 	if projectID != "" {
 		stmt += `

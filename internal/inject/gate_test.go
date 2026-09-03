@@ -175,11 +175,11 @@ func TestGateM6ZeroByteAbstention(t *testing.T) {
 			continue
 		}
 		query := strings.Join(terms, " ")
-		hits, _, err := search.Search(t.Context(), db, query, "", 1)
+		hits, _, err := search.Search(t.Context(), db, query, "", 1, search.MatchAll)
 		if err != nil {
 			continue // a query internal/search refuses is not this arm's subject
 		}
-		mem, _, err := search.SearchMemory(t.Context(), db, query, nil, 1)
+		mem, _, err := search.SearchMemory(t.Context(), db, query, nil, 1, search.MatchAll)
 		if err != nil {
 			continue
 		}

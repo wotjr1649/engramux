@@ -615,7 +615,12 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 		// rev.2, M-2 decision 8).
 		projectKeys = memory.ProjectKeys(p.Root)
 	}
-	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit)
+	// [search.MatchAny] and not MatchAll (memory spec rev.11). This is the
+	// surface a question arrives on - MCP's caller is a model and the CLI's is
+	// a person - and an AND answers a sentence with nothing: measured over the
+	// owner's 50 English questions, it returns an empty match set for 42 of
+	// them. The injector keeps MatchAll and the reason is on [search.Match].
+	hits, total, err := search.Search(ctx, db, req.Query, projectID, limit, search.MatchAny)
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}
@@ -643,7 +648,7 @@ func searchEvents(ctx context.Context, db *sql.DB, req ipc.SearchRequest) (ipc.S
 	// A failure here fails the whole reply rather than answering half of it,
 	// on the rule [status] is under: a caller cannot tell an empty list that
 	// was read from one that was never filled in.
-	mem, memTotal, err := search.SearchMemory(ctx, db, req.Query, projectKeys, limit)
+	mem, memTotal, err := search.SearchMemory(ctx, db, req.Query, projectKeys, limit, search.MatchAny)
 	if err != nil {
 		return ipc.SearchReply{}, err
 	}

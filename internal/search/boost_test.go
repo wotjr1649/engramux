@@ -60,10 +60,10 @@ func TestTheDerivedBoostLiftsAFieldMatchOverAProseMention(t *testing.T) {
 			})
 
 			boosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-				return search.Search(t.Context(), db, tc.query, "", limit)
+				return search.Search(t.Context(), db, tc.query, "", limit, search.MatchAll)
 			})
 			unboosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-				return search.SearchUnboosted(t.Context(), db, tc.query, "", limit)
+				return search.SearchUnboosted(t.Context(), db, tc.query, "", limit, search.MatchAll)
 			})
 
 			// Both arms must find both documents. A case where the
@@ -103,10 +103,10 @@ func TestTheDerivedBoostChangesNoResultSet(t *testing.T) {
 
 	for _, query := range []string{"go", "test", "query.go", "go test", "packages", "unrelated"} {
 		boosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-			return search.Search(t.Context(), db, query, "", limit)
+			return search.Search(t.Context(), db, query, "", limit, search.MatchAll)
 		})
 		unboosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-			return search.SearchUnboosted(t.Context(), db, query, "", limit)
+			return search.SearchUnboosted(t.Context(), db, query, "", limit, search.MatchAll)
 		})
 		// Sorted, because what is compared is the set and not the order
 		// - the order is the whole point of the boost and is asserted
@@ -176,10 +176,10 @@ func TestTheDerivedBoostTreatsAWildcardInAQueryAsText(t *testing.T) {
 			})
 
 			boosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-				return search.Search(t.Context(), db, tc.query, "", limit)
+				return search.Search(t.Context(), db, tc.query, "", limit, search.MatchAll)
 			})
 			unboosted := rankOrder(t, name, func(limit int) ([]search.Hit, int64, error) {
-				return search.SearchUnboosted(t.Context(), db, tc.query, "", limit)
+				return search.SearchUnboosted(t.Context(), db, tc.query, "", limit, search.MatchAll)
 			})
 			if len(boosted) != 2 || len(unboosted) != 2 {
 				t.Fatalf("both arms must return both documents; boosted %d, unboosted %d",

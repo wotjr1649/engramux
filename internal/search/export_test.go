@@ -37,6 +37,6 @@ var (
 // the exported surface: nothing a caller of this package can do turns the boost
 // off, so no reply anybody receives was ranked by a path the gate did not
 // measure.
-func SearchUnboosted(ctx context.Context, db *sql.DB, text, projectID string, limit int) ([]Hit, int64, error) {
-	return searchWith(ctx, db, text, projectID, limit, false)
+func SearchUnboosted(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match) ([]Hit, int64, error) {
+	return searchWith(ctx, db, text, projectID, limit, false, m)
 }

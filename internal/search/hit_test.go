@@ -36,7 +36,7 @@ func TestSearchCarriesWhatAHitNeeds(t *testing.T) {
 	docs := []doc{{name: "t6.json", payload: json.RawMessage(t6Payload)}}
 	db := ingestAll(t, docs)
 
-	hits, _, err := search.Search(t.Context(), db, "borogove", "", 10)
+	hits, _, err := search.Search(t.Context(), db, "borogove", "", 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
