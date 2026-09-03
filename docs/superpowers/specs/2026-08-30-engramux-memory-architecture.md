@@ -1,5 +1,11 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.7** · 2026-09-03 — rev.7 reverses one of rev.5's decisions on the owner's word: the
+false-positive submission is **not** adopted, because the objection is who does it and when it
+answers rather than whether it is worth doing. §8's fourth publication condition is unmoved — it is
+an outcome with a documentation half — but that half is now the whole of it, which puts a named
+requirement on condition 3. rev.1 to rev.6 below.
+
 **rev.6** · 2026-09-03 — rev.6 records what building **M-3** settled: two of its seven fields have
 nothing in the corpus to read, its error spans are prose rather than a field, gate **M4** passes
 small, and the boost's weight is a measured plateau rather than a taste. rev.1 to rev.5 below.
@@ -685,12 +691,29 @@ project must **already be released in the form to be signed**, and it must build
 system**. Both are exactly what the release decision above creates. So signing is not rejected, it is
 **sequenced**, and what unblocks it is a release process rather than a purchase.
 
-**The false-positive submission is a line in the release checklist rather than a reaction.** Every
-release is submitted to Microsoft: it is free, it fixes the detection for everyone rather than for
-one machine, and §8's own reading says the alternative does not hold — without a signature there is
-no publisher identity for reputation to accumulate against, so every new binary is a new unknown.
-Waiting for a report makes the first user the reporter, and a first user who meets a behavioural
-detection on an unsigned binary mostly does not report it.
+**The false-positive submission is not adopted, and §8's fourth condition is carried by documentation
+instead.** This clause said the opposite when it was written hours earlier — every release submitted,
+on the argument that it is free and fixes the detection for everyone rather than for one machine. The
+owner declined on **2026-09-03**, and the objection is on a different axis from the argument: not
+whether it is worth doing but **who does it and when it answers.** The submission is an authenticated
+web form, so it is a human's hands every release with no route an agent or a workflow can take; and
+the same reading that recommended it says why it does not compound — without a signature there is no
+publisher identity for anything to attach to, so each release is a fresh submission and a fresh wait
+rather than a reputation being built. "Free" was true and "quick" was never established.
+
+**What this does not do is weaken §8's fourth condition**, and that is worth stating because it is the
+first thing a reader will assume. That condition is an outcome and it already reads *"a stranger's
+first run works, **or** the documentation tells them exactly what will happen and what to do"*. With
+the submission off the table the second half is the whole of it, which turns a vague intention into a
+concrete requirement on publication condition 3: **the `README` has to name the detection by the
+string a user will actually see, say that it fires on the CLI and not on the service, and give the
+exclusion steps for the two directories.** A reader who meets `Behavior:Win32/Execution.A!ml` with no
+warning has been failed by this project; a reader who was told in advance has not.
+
+**What would reopen it.** A release process exists after Step 6, and a submission that a workflow can
+make without a person is a different decision from this one. So is a signed release: with SignPath
+there *is* a publisher identity, submissions start compounding, and the argument that was made here
+becomes true rather than merely appealing.
 
 **`doctor` compares three versions, because there are three and they fail differently.** The
 installed binary, the service actually running, and the newest version present in the plugin cache.
@@ -913,7 +936,12 @@ of living in a session brief.
    `internal/pipe`'s listener already uses. The two host files are not this product's to narrow, and
    `doctor` reports their permissions as a finding rather than changing them.
 3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
-   nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0.
+   nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0. **It gained a
+   named requirement on 2026-09-03** when the false-positive submission was declined (M-7): condition
+   4 below is an outcome with two halves, and with the submission off the table this document is the
+   whole of the second one. So the `README` has to name the detection by the string a user will see,
+   say that it fires on the CLI and not on the service, and give the exclusion steps — which makes
+   this condition partly a dependency of condition 4 rather than only a courtesy.
 4. **A first run that survives the machine's own antivirus, and is documented.** Written as an
    outcome rather than as a mechanism, which the other three are too, and deliberately: signing is
    not a pass. **[verified] 2026-09-03**, on the owner's machine, mid-session: Windows Defender
