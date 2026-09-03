@@ -260,7 +260,7 @@ func m4Measure(t *testing.T, db *sql.DB, sampled []m4Candidate, boost bool) m4Re
 	var found int
 	var reciprocal float64
 	for _, c := range sampled {
-		hits, _, err := run(t.Context(), db, c.query, "", m4K)
+		hits, _, err := run(t.Context(), db, c.query, "", m4K, search.MatchAll)
 		if err != nil {
 			// A refusal is not a miss. queryTokens bounds what a
 			// query may be, and a derived query that trips one of

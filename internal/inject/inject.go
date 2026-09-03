@@ -209,11 +209,16 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	hits, total, err := search.Search(ctx, db, query, projectID, candidates)
+	// [search.MatchAll] and not MatchAny, deliberately (memory spec rev.11).
+	// The abstention below is a threshold on `total`, so it is calibrated
+	// against the size of the match set an AND produces; an OR here matches
+	// most of the corpus and moves M5, M6 and M10 in one step, for a feature
+	// that ships off and whose activation gate has not run.
+	hits, total, err := search.Search(ctx, db, query, projectID, candidates, search.MatchAll)
 	if err != nil {
 		return abstain(ctx, err, start)
 	}
-	mem, memTotal, err := search.SearchMemory(ctx, db, query, projectKeys, candidates)
+	mem, memTotal, err := search.SearchMemory(ctx, db, query, projectKeys, candidates, search.MatchAll)
 	if err != nil {
 		return abstain(ctx, err, start)
 	}

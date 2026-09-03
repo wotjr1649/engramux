@@ -234,7 +234,7 @@ func sweepClass(t *testing.T, db *sql.DB, table string, cands []candidate) class
 				cd.query, cd.name, err))
 			continue
 		}
-		if reaches(t, db, table, search.MatchExpression(tokens), cd.id) {
+		if reaches(t, db, table, search.MatchExpression(tokens, search.MatchAll), cd.id) {
 			r.found++
 			continue
 		}

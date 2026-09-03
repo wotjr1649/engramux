@@ -68,7 +68,7 @@ func TestAMemorySearchFindsTheBlockAndNotItsNeighbour(t *testing.T) {
 		"## the pipe race\nthe second instance loses and exits\n",
 		"## the covering index\nnine refusals in one hundred and forty-seven samples\n",
 	)
-	hits, total, err := search.SearchMemory(t.Context(), db, "refusals", nil, 10)
+	hits, total, err := search.SearchMemory(t.Context(), db, "refusals", nil, 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestAMemorySearchFindsTheBlockAndNotItsNeighbour(t *testing.T) {
 // body carries. Naming fields would have the same hole in a different place.
 func TestAMemoryHitCarriesNoUserPath(t *testing.T) {
 	db := memoryDB(t, "## a section\nthe error came from C:\\Users\\someone\\project\\main.go\n")
-	hits, _, err := search.SearchMemory(t.Context(), db, "error", nil, 10)
+	hits, _, err := search.SearchMemory(t.Context(), db, "error", nil, 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestAScopedMemorySearchAsksAboutBothFormsOfAProject(t *testing.T) {
 		"## theirs\ncwd: D:\\work\\other\nthe answer is elsewhere\n",
 	)
 	keys := memory.ProjectKeys(`D:\work\engramux`)
-	hits, total, err := search.SearchMemory(t.Context(), db, "answer", keys, 10)
+	hits, total, err := search.SearchMemory(t.Context(), db, "answer", keys, 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestAScopedMemorySearchAsksAboutBothFormsOfAProject(t *testing.T) {
 		t.Fatalf("excerpt = %q, want the scoped project's block", hits[0].Excerpt)
 	}
 
-	all, allTotal, err := search.SearchMemory(t.Context(), db, "answer", nil, 10)
+	all, allTotal, err := search.SearchMemory(t.Context(), db, "answer", nil, 10, search.MatchAll)
 	if err != nil {
 		t.Fatalf("unscoped SearchMemory: %v", err)
 	}
@@ -161,10 +161,10 @@ func TestAScopedMemorySearchAsksAboutBothFormsOfAProject(t *testing.T) {
 // other - otherwise the bound depends on which index a caller happened to hit.
 func TestAMemorySearchRefusesTheSameQueriesEventSearchDoes(t *testing.T) {
 	db := memoryDB(t, "## a\nsomething\n")
-	if _, _, err := search.SearchMemory(t.Context(), db, "   ", nil, 10); err == nil {
+	if _, _, err := search.SearchMemory(t.Context(), db, "   ", nil, 10, search.MatchAll); err == nil {
 		t.Fatal("an empty query was accepted")
 	}
-	if _, _, err := search.SearchMemory(t.Context(), db, strings.Repeat("x", 1<<12), nil, 10); err == nil {
+	if _, _, err := search.SearchMemory(t.Context(), db, strings.Repeat("x", 1<<12), nil, 10, search.MatchAll); err == nil {
 		t.Fatal("an over-long token was accepted")
 	}
 }
@@ -178,7 +178,7 @@ func TestAMemorySearchReportsTheTotalBeyondItsLimit(t *testing.T) {
 		sections = append(sections, "## s"+string(rune('a'+i))+"\na recurring word\n")
 	}
 	db := memoryDB(t, sections...)
-	hits, total, err := search.SearchMemory(t.Context(), db, "recurring", nil, 2)
+	hits, total, err := search.SearchMemory(t.Context(), db, "recurring", nil, 2, search.MatchAll)
 	if err != nil {
 		t.Fatalf("SearchMemory: %v", err)
 	}
