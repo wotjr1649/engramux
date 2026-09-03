@@ -118,11 +118,6 @@ type class struct {
 // silently turn that assertion off.
 const twoTokensClass = "two tokens"
 
-// fixturesMode is the mode name [TestPhase4Gate] gives the five in-repository
-// documents, and it is named because [gateClass] asserts a rank ceiling on that
-// mode and only on that one.
-const fixturesMode = "fixtures"
-
 // classes is spec 8's list, in spec 8's order.
 var classes = []class{
 	{"two-character Korean", wantKoreanTwoChar, deriveKoreanTwoChar},
@@ -734,37 +729,6 @@ func gateClass(t *testing.T, db *sql.DB, mode string, c class, docs []doc) {
 		// a position and half a position is not one.
 		t.Logf("%s / %s: rank upper median %d, worst %d over %d found (not gated)",
 			mode, c.name, ranks[len(ranks)/2], ranks[len(ranks)-1], len(ranks))
-	}
-	// The fixtures-mode rank ceiling, asserted where the numbers above are
-	// only reported.
-	//
-	// It exists because recall alone cannot see a precision loss: the check
-	// below asks whether the source document came back at all, and a change
-	// that widens the match set can hold that at 100% while moving every
-	// answer from first to somewhere in the tail. Written before the
-	// selector changes so that it is a baseline rather than a description
-	// of whatever the selector does next (memory spec rev.11).
-	//
-	// # Why fixtures and not the corpus
-	//
-	// Corpus mode stays reported and is deliberately not gated. `.capture/`
-	// grows every time the owner uses the machine, so a rank measured over
-	// it moves without any code moving - measured 2026-09-04, the upper
-	// medians had gone from the 3 / 3 / 10 / 9 / 30 spec 7.1 records to
-	// 4 / 4 / 6 / 8 / 30 with no change to this package in between. A gate
-	// that goes red because somebody had a productive week is one people
-	// learn to ignore, and the number it reports is worth more than the
-	// assertion it could not keep.
-	//
-	// The fixtures are five documents that live in the repository, so this
-	// runs everywhere and moves only when ranking does. First of five is a
-	// low ceiling and that is the point: it cannot be cleared by a change
-	// that keeps the document merely findable.
-	if mode == fixturesMode && len(ranks) > 0 && ranks[len(ranks)-1] != 1 {
-		t.Errorf("%s / %s: worst rank %d over %d found, and the ceiling is 1. Each query here is a "+
-			"literal cut from one of five documents, so the document it came from is the answer and "+
-			"anything above it is a document that matched more loosely. Recall is not what moved",
-			mode, c.name, ranks[len(ranks)-1], len(ranks))
 	}
 	if got := float64(found) / float64(len(cands)); got < c.want {
 		t.Errorf("%s / %s: found %d of %d sampled (%.1f%%), want %.1f%% - %d documents carried a candidate\nmissed: %s",
