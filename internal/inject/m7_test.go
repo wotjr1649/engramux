@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/wotjr1649/engramux/internal/inject"
+	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/search"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/store"
@@ -102,6 +103,16 @@ type m7Prompt struct {
 	cwd     string
 	script  string // hangul, latin or mixed - computed, never labelled
 	wanted  string // the human's answer to pass 1, "" before it is written
+
+	// project is the project_id the event was stored under, which is not
+	// the one the injector will resolve: it re-derives req.Project against
+	// the live filesystem every time. The two are compared and the
+	// disagreements counted, because a worktree that has moved since the
+	// prompt was typed silently changes the scope a replay searches - and
+	// an abstention caused by that is indistinguishable, in the reason
+	// string, from one caused by the language wall this fixture is
+	// stratified for.
+	project string
 }
 
 // m7Block is one excerpt block inside an injection, with the bytes it spent.
@@ -195,6 +206,7 @@ func TestWriteM7Blocks(t *testing.T) {
 		emitted   int
 		abstained int
 		byReason  = map[string]int{}
+		byStratum = map[string]map[string]int{}
 		bytes     []int
 		elapsed   []time.Duration
 		fenced    int
@@ -203,6 +215,10 @@ func TestWriteM7Blocks(t *testing.T) {
 	for _, p := range prompts {
 		res := m7Build(t, db, p)
 		elapsed = append(elapsed, res.Elapsed)
+		if byStratum[p.script] == nil {
+			byStratum[p.script] = map[string]int{}
+		}
+		byStratum[p.script][res.Reason]++
 		if res.Text == "" {
 			abstained++
 			byReason[res.Reason]++
@@ -224,6 +240,7 @@ func TestWriteM7Blocks(t *testing.T) {
 	}
 
 	m7Report(t, prompts, emitted, abstained, byReason, bytes, elapsed, fenced, carrying, len(rows))
+	m7Strata(t, prompts, byStratum)
 
 	if _, err := os.Stat(m7BlocksPath()); err == nil {
 		t.Skipf("%s exists; not overwriting a file that may carry labels", m7BlocksPath())
@@ -606,6 +623,110 @@ func m7Report(t *testing.T, prompts []m7Prompt, emitted, abstained int, byReason
 	t.Logf("%d blocks over %d injecting prompts", blocks, emitted)
 }
 
+// m7Strata reports the abstention figures per script stratum, which is the form
+// the memory spec registered every one of them in: *"every abstention figure
+// this fixture produces is reported per stratum. An aggregate that does not say
+// which stratum it came from cannot tell the capability from the defect."*
+// [m7Report] prints the aggregate the spec says is not enough, so this is the
+// registration being met rather than a figure being added to it.
+//
+// # Four columns beside the rate, and each is there because the rate alone lies
+//
+// **Sessions.** The sample is systematic over received_at, so adjacent prompts
+// share a session. 40 hangul prompts drawn from six sessions are not 40
+// independent observations, and a difference between strata cannot be read
+// without knowing how many there really are.
+//
+// **Projects.** Abstention is decided inside a project's scope, so a stratum
+// concentrated in a project with few events reports corpus size rather than
+// language.
+//
+// **Drift.** The injector resolves the request's cwd against the live
+// filesystem, so a worktree that has moved, been deleted, or gained or lost a
+// .git since the prompt was typed resolves to a different project - and
+// therefore a different scope - even against a frozen database. This counts the
+// prompts where the project the injector resolved is not the one the event was
+// stored under. It is the one column that says how much of the figure beside it
+// is replay artefact, and the memory spec already names carrying the stored
+// project_id as the fix; that is a change to the treatment, so it is not made
+// while the fixture is being labelled.
+//
+// **Median prompt length in runes.** A Hangul prompt is shorter in runes for the
+// same content, and the query reduction has a byte floor, so length is the most
+// obvious way a stratum could differ for a reason that is not the language wall.
+//
+// # It prints counts and never a value
+//
+// No prompt, no derived query, no cwd, no project name, no session id. Every
+// verb below takes %d, %.3f or one of the three stratum constants and the
+// Reason constants, which are literals in inject.go. AGENTS.md's row about
+// TestPhase4Gate leaking one path in a wall of counts is what that rule is for,
+// and the value at risk here is worse than a path: queryFor cuts its terms
+// straight out of the prompt, and nothing masks a log line.
+func m7Strata(t *testing.T, prompts []m7Prompt, byStratum map[string]map[string]int) {
+	t.Helper()
+
+	type stratum struct {
+		prompts  int
+		sessions map[string]bool
+		projects map[string]bool
+		drifted  int
+		runes    []int
+	}
+	seen := map[string]*stratum{}
+	for _, p := range prompts {
+		s := seen[p.script]
+		if s == nil {
+			s = &stratum{sessions: map[string]bool{}, projects: map[string]bool{}}
+			seen[p.script] = s
+		}
+		s.prompts++
+		s.sessions[p.session] = true
+		s.projects[p.project] = true
+		s.runes = append(s.runes, len([]rune(p.prompt)))
+		if m7Drifted(p) {
+			s.drifted++
+		}
+	}
+
+	for _, name := range []string{m7Hangul, m7Mixed, m7Latin} {
+		s := seen[name]
+		if s == nil {
+			continue
+		}
+		abstained := s.prompts - byStratum[name][inject.ReasonInjecting]
+		sort.Ints(s.runes)
+		t.Logf("stratum %-6s %3d prompts, %3d abstained (%.3f), %2d sessions, %2d projects, "+
+			"%2d resolving to another project today, median %d runes",
+			name, s.prompts, abstained, m7Ratio(abstained, s.prompts),
+			len(s.sessions), len(s.projects), s.drifted, m7Median(s.runes))
+		for _, r := range m7SortedReasons(byStratum[name]) {
+			if r == inject.ReasonInjecting {
+				continue
+			}
+			t.Logf("  stratum %-6s %3d x %q", name, byStratum[name][r], r)
+		}
+	}
+}
+
+// m7Drifted reports whether the injector would scope this prompt to a project
+// other than the one its event was stored under.
+//
+// It reproduces build's own branch rather than approximating it: an empty
+// Project means every project, and a cwd project.FromArgument refuses is
+// scoped to every project too rather than failing the prompt. Either of those
+// against a stored project id is a different scope.
+func m7Drifted(p m7Prompt) bool {
+	if p.cwd == "" {
+		return p.project != ""
+	}
+	resolved, err := project.FromArgument(p.cwd)
+	if err != nil {
+		return p.project != ""
+	}
+	return resolved.ID != p.project
+}
+
 func m7SortedReasons(m map[string]int) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -677,7 +798,7 @@ func m7Open(t *testing.T) *sql.DB {
 func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 	t.Helper()
 	rows, err := db.QueryContext(t.Context(),
-		`SELECT id, session_id, payload FROM events WHERE event_name = 'UserPromptSubmit' ORDER BY received_at`)
+		`SELECT id, session_id, coalesce(project_id, ''), payload FROM events WHERE event_name = 'UserPromptSubmit' ORDER BY received_at`)
 	if err != nil {
 		t.Fatalf("read the prompts: %v", err)
 	}
@@ -685,8 +806,8 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 
 	var all []m7Prompt
 	for rows.Next() {
-		var id, session, payload string
-		if err := rows.Scan(&id, &session, &payload); err != nil {
+		var id, session, project, payload string
+		if err := rows.Scan(&id, &session, &project, &payload); err != nil {
 			t.Fatalf("scan a prompt: %v", err)
 		}
 		var p struct {
@@ -697,7 +818,8 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 			continue
 		}
 		all = append(all, m7Prompt{
-			id: id, session: session, prompt: p.Prompt, cwd: p.Cwd, script: m7Script(p.Prompt),
+			id: id, session: session, project: project,
+			prompt: p.Prompt, cwd: p.Cwd, script: m7Script(p.Prompt),
 		})
 	}
 	if err := rows.Err(); err != nil {

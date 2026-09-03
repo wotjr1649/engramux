@@ -1122,6 +1122,67 @@ bytes long.
 August prompt searches a corpus containing September. At hook time only the past exists, so the real
 abstention rate is **higher** than 83% rather than lower, and the finding is conservative.
 
+#### The second reading, over 150 prompts and per stratum (M-4)
+
+**Measured 2026-09-04** over the same frozen snapshot, all 150 sampled prompts through the injector,
+with the per-stratum breakdown the section below registers and this document had not yet produced.
+The labels were throwaway - pass 2 and this report never read `wanted_context`, and every figure
+below is the injector's own behaviour rather than anybody's judgement of it.
+
+| | over the snapshot, 30 prompts | over the snapshot, 150 prompts |
+|---|---|---|
+| injected / abstained | 5 of 30, 25 abstained | **28 of 150, 122 abstained** |
+| the selectivity ceiling | **fired 0 times** | **fires 5 times** |
+| no usable term | not reported | 2 |
+| M10 worst / median | 42.05 ms / 15.72 ms | **254.03 ms / 10.78 ms**, against 500 ms |
+| M5 largest / median | 4,744 B | **4,944 B / 1,918 B**, cap 5,000 B |
+| M9 | 5 of 5 fenced, 0 carrying | **28 of 28 fenced, 0 carrying** |
+
+**Three of those rows correct a figure this document recorded**, and one of them corrects a claim
+rather than a number. The ceiling that "never fired once" fires five times at five times the sample.
+The worst injection is **six times** the earlier worst and still inside half the budget. And the
+largest injection is 56 bytes under a 5,000 B cap, where the earlier reading sat 256 under it - M5
+holds, and it holds with less room than either earlier reading suggested.
+
+**The per-stratum table, and it does not say what this section was built expecting.**
+
+| stratum | prompts | abstained | rate | sessions | projects | resolving elsewhere | median runes |
+|---|---|---|---|---|---|---|---|
+| hangul | 40 | 31 | 0.775 | 21 | 4 | **0** | 65 |
+| mixed | 29 | 20 | 0.690 | 10 | 4 | **0** | 87 |
+| latin | 81 | 71 | **0.877** | 30 | 4 | **0** | 394 |
+
+**Latin abstains most.** The stratification was registered because this corpus is 74% English and
+injection carries no translator, so a Hangul prompt receiving zero bytes is capability P2 rather than
+a miss. That reasoning is untouched - it is about how to *read* an abstention, not a prediction of
+rates - but the figure it was supposed to make legible does not separate in the direction it was
+built for. The script the corpus is written in is the script that abstains most, and any sentence
+attributing this fixture's abstention rate to the language wall is unsupported by its own numbers.
+
+**A confound is visible in the same table and is the first thing to rule out.** A Latin prompt here
+is **394 runes at the median against Hangul's 65**, six times longer, and the reduction to three
+terms joined by AND gets narrower as the prompt gets longer, not wider. Whether the stratum figure is
+measuring script or length is not settled by this table, and it is not settled by adding rows to it:
+it needs the two varied independently, which this fixture cannot do because it is the corpus rather
+than a design. **Recorded as an open question rather than resolved**, and it is a stronger reason to
+distrust an aggregate than the one originally written down.
+
+**Two things it does settle.** The replay-fidelity limit this section calls *not conservative* -
+the injector re-resolving `cwd` against a live filesystem, so a moved worktree silently changes
+scope - **does not bite on this fixture: 0 of 150 prompts resolve to a project other than the one
+their event was stored under**. Carrying the stored `project_id` is still the right fix and is still
+not made, but nothing measured here rests on it. And the effective sample is smaller than the
+prompt counts: **21, 10 and 30 distinct sessions** behind 40, 29 and 81 prompts, over 4 distinct
+projects in each stratum. A difference between two strata at these counts is not a difference many
+independent observations support.
+
+**What is still not reported, and why it cannot be from here.** The registration below asks whether
+each of the two indexes hit its own ceiling separately. `Result` carries neither total, so the
+figure is unreachable outside the injector - and `ReasonTooBroad` is returned when *either* index
+exceeded the ceiling, including runs where the event side was emptied by the exclusion instead.
+Those five ceiling firings are therefore an upper bound on ceiling firings rather than a count of
+them. Backlog 46 owns it.
+
 ### What M7 will measure, pre-registered before a label exists (M-4)
 
 **Registered 2026-09-04, before the harness had run and before one prompt had been labelled.** M3's

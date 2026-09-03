@@ -25,10 +25,18 @@ import (
 // ipc.Version, is a const. Nothing in this repository can catch a flag that
 // silently did nothing: there is no CI, and a test cannot see release ldflags.
 //
-// What does catch it is the binary itself. `go version -m` prints the ldflags a
-// build actually used, and it prints them through `-s -w` because build info is
-// not a symbol table. Verify a release build with that rather than with the
-// command line you meant to type.
+// What does catch it is the binary itself, and it is not `go version -m`.
+// That does print the ldflags a build used, through `-s -w`, because build
+// information is not a symbol table - but **measured 2026-09-04, `-trimpath`
+// removes the `-ldflags` line from the recorded settings entirely.** Two builds
+// of the same package, one with `-trimpath` and one without: the second records
+// its `-X` and the first records `-trimpath=true` and no ldflags at all. The
+// release line carries `-trimpath`, because that is what makes an artefact
+// attributable to a commit, so that is the one build where this diagnostic is
+// blind. What survives it is the vcs stamping [Product] falls back to.
+//
+// So: run the binary. `engramux doctor` prints this value, and reading it is
+// the only check that cannot be satisfied by the command line you meant to type.
 var linked string
 
 // devPrefix is what a build with no release version calls itself. Semantic
