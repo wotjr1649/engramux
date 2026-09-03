@@ -139,6 +139,15 @@ type Result struct {
 	// Reason names why an abstention was one. It is for the log and for the
 	// gates; nothing branches on it.
 	Reason string
+	// Elapsed is how long this call took by its own clock, which is the
+	// clock the deadline below is enforced against.
+	//
+	// It exists because a caller measuring from outside cannot assert
+	// gate M10 without a race: it would be comparing its own wall clock
+	// against a decision made a few hundred nanoseconds earlier, inside.
+	// Reporting the number the decision was made on removes the gap
+	// instead of budgeting for it, and the service logs it.
+	Elapsed time.Duration
 }
 
 // The abstention reasons. Each is a different question a reader of the log has.
@@ -173,9 +182,12 @@ func Build(ctx context.Context, db *sql.DB, req Request) (Result, error) {
 // thing - that the deadline is enforced mid-flight rather than only checked
 // before the work starts.
 func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (Result, error) {
+	start := time.Now()
+	deadline := start.Add(budget)
+
 	terms := queryFor(req.Prompt)
 	if len(terms) == 0 {
-		return Result{Reason: ReasonNoTerms}, nil
+		return Result{Reason: ReasonNoTerms, Elapsed: time.Since(start)}, nil
 	}
 	query := strings.Join(terms, " ")
 
@@ -199,33 +211,12 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 
 	hits, total, err := search.Search(ctx, db, query, projectID, candidates)
 	if err != nil {
-		return abstain(ctx, err)
+		return abstain(ctx, err, start)
 	}
 	mem, memTotal, err := search.SearchMemory(ctx, db, query, projectKeys, candidates)
 	if err != nil {
-		return abstain(ctx, err)
+		return abstain(ctx, err, start)
 	}
-	// The deadline again, after the reads rather than only inside them.
-	//
-	// **No test owns this line and one cannot be written today**, which is
-	// worth saying rather than leaving for the next break-it pass to find:
-	// measured 2026-09-03 against modernc.org/sqlite v1.57.0, a search that
-	// takes 13 ms under a 1 ms budget returns `context deadline exceeded`
-	// rather than its rows, so the two reads above already fail and
-	// [abstain] is what answers. Deleting this line changes no result, and a
-	// mutation against it is discarded rather than counted as killed.
-	//
-	// It stays because what makes it dead is a dependency's behaviour and
-	// not this package's own arithmetic - the redundant cap check that used
-	// to sit below was the second kind, and was deleted for it. A driver
-	// that stopped cancelling a running statement would put an injection
-	// past its deadline onto the user's critical path, and this is one
-	// comparison. Re-verify on a driver upgrade, which is the rule AGENTS.md
-	// applies to every row naming a pinned version.
-	if ctx.Err() != nil {
-		return Result{Reason: ReasonDeadline}, nil
-	}
-
 	broad := total > maxMatches
 	if broad {
 		hits = nil
@@ -237,13 +228,13 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 
 	hits, err = keepable(ctx, db, hits, req.ExcludeID)
 	if err != nil {
-		return abstain(ctx, err)
+		return abstain(ctx, err, start)
 	}
 	if len(hits) == 0 && len(mem) == 0 {
 		if broad {
-			return Result{Reason: ReasonTooBroad}, nil
+			return Result{Reason: ReasonTooBroad, Elapsed: time.Since(start)}, nil
 		}
-		return Result{Reason: ReasonNoHits}, nil
+		return Result{Reason: ReasonNoHits, Elapsed: time.Since(start)}, nil
 	}
 
 	// The overhead is measured rather than computed: the fence's own
@@ -257,17 +248,43 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	// branch no input reaches, and a break-it pass says so.
 	probe, err := Fence("")
 	if err != nil {
-		return Result{Reason: ReasonNoFence}, nil
+		return Result{Reason: ReasonNoFence, Elapsed: time.Since(start)}, nil
 	}
 	body, events, memories := assemble(hits, mem, MaxBytes-len(probe))
 	if body == "" {
-		return Result{Reason: ReasonNoRoom}, nil
+		return Result{Reason: ReasonNoRoom, Elapsed: time.Since(start)}, nil
 	}
 	text, err := Fence(body)
 	if err != nil {
-		return Result{Reason: ReasonNoFence}, nil
+		return Result{Reason: ReasonNoFence, Elapsed: time.Since(start)}, nil
 	}
-	return Result{Text: text, Events: events, Memory: memories, Reason: ReasonInjecting}, nil
+
+	// The deadline, checked once and at the last possible moment.
+	//
+	// It sits here rather than after the two reads because this is where it
+	// covers the whole window: the reads carry the context and fail
+	// themselves when it expires - measured 2026-09-03 against
+	// modernc.org/sqlite v1.57.0, a search taking 13 ms under a 1 ms budget
+	// returns `context deadline exceeded` rather than its rows - but the
+	// masking, the assembly and the fence after them carry no context at
+	// all, and a check before them would leave that stretch unguarded.
+	//
+	// What M10 asserts is that no injection exceeds its budget, and the
+	// clock that decides it is the relay's rather than the search's. So the
+	// last thing this function does before handing back bytes is ask whether
+	// it still has permission to.
+	//
+	// The wall clock and not only ctx.Err(): a context deadline is a Go
+	// timer, Windows resolves one at about half a millisecond, and a timer
+	// that has not fired yet leaves ctx.Err() nil past the instant it names.
+	// Measured 2026-09-03 - a call took 1.1445 ms under a 1 ms budget and
+	// ctx.Err() was still nil. Comparing the instant is what makes the
+	// assertion true rather than usually true.
+	elapsed := time.Since(start)
+	if time.Now().After(deadline) || ctx.Err() != nil {
+		return Result{Reason: ReasonDeadline, Elapsed: elapsed}, nil
+	}
+	return Result{Text: text, Events: events, Memory: memories, Reason: ReasonInjecting, Elapsed: elapsed}, nil
 }
 
 // abstain turns a failed read into an abstention when the budget is what ended
@@ -276,16 +293,16 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 // The distinction is the whole of M10's failure mode: a deadline miss is
 // designed behaviour and emits zero bytes down M6's own path, while a database
 // that will not answer is a broken service and has to be visible as one.
-func abstain(ctx context.Context, err error) (Result, error) {
+func abstain(ctx context.Context, err error, start time.Time) (Result, error) {
 	if ctx.Err() != nil {
-		return Result{Reason: ReasonDeadline}, nil
+		return Result{Reason: ReasonDeadline, Elapsed: time.Since(start)}, nil
 	}
 	// The three query refusals are not failures either: they are what a
 	// prompt that reduces to nothing usable looks like from inside
 	// internal/search.
 	switch {
 	case isQueryRefusal(err):
-		return Result{Reason: ReasonNoTerms}, nil
+		return Result{Reason: ReasonNoTerms, Elapsed: time.Since(start)}, nil
 	default:
 		return Result{}, fmt.Errorf("inject: %w", err)
 	}

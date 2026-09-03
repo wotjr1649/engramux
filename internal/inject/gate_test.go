@@ -66,12 +66,13 @@ func TestGateInjectionOverTheCorpus(t *testing.T) {
 		fromBoth  int
 	)
 	for i, p := range prompts {
-		start := time.Now()
 		res, err := inject.Build(t.Context(), db, inject.Request{Prompt: p})
-		took := time.Since(start)
 		if err != nil {
 			t.Fatalf("prompt %d: Build: %v", i, err)
 		}
+		// The injector's own clock, which is the one the deadline is
+		// enforced against - see [inject.Result].
+		took := res.Elapsed
 		elapsed = append(elapsed, took)
 
 		// M10, asserted. The budget is a ceiling on the whole call and
@@ -230,19 +231,56 @@ func TestGateM10TheDeadlineIsEnforced(t *testing.T) {
 	}
 	t.Logf("M10: the control prompt injected %d bytes at the full budget", len(warm.Text))
 
-	for _, budget := range []time.Duration{time.Microsecond, 100 * time.Microsecond} {
+	// A budget already behind the clock: cancelled at construction, so this
+	// arm is the deterministic one and asserts 100%.
+	for i, p := range prompts {
+		res, err := inject.BuildWithBudget(t.Context(), db, inject.Request{Prompt: p}, -time.Second)
+		if err != nil {
+			t.Fatalf("prompt %d: Build: %v", i, err)
+		}
+		if res.Text != "" {
+			t.Errorf("M10: prompt %d injected %d bytes under a budget behind the clock",
+				i, len(res.Text))
+		}
+	}
+	t.Logf("M10: %d prompts under a budget behind the clock, all zero bytes", len(prompts))
+
+	// The mid-flight arm, and the assertion is M10's own words rather than
+	// "a small budget injects nothing".
+	//
+	// A tiny positive budget does not reliably expire before the work
+	// finishes: a context deadline is a Go timer, Windows resolves one at
+	// about half a millisecond, and a prompt whose search returns one row
+	// costs less than that - which is how this arm went red once with 640
+	// bytes injected under a microsecond. Asserting "no injection exceeded
+	// its budget" instead is the property the spec names, it is measured
+	// against this run's own clock, and it cannot be answered by timer
+	// resolution.
+	//
+	// The count below is what keeps it from being vacuous: an arm where
+	// nothing ever ran over the budget would assert nothing at all.
+	over := 0
+	for _, budget := range []time.Duration{time.Microsecond, time.Millisecond} {
 		for i, p := range prompts {
 			res, err := inject.BuildWithBudget(t.Context(), db, inject.Request{Prompt: p}, budget)
 			if err != nil {
 				t.Fatalf("prompt %d at %s: Build: %v", i, budget, err)
 			}
+			took := res.Elapsed
+			if took <= budget {
+				continue
+			}
+			over++
 			if res.Text != "" {
-				t.Errorf("M10: prompt %d injected %d bytes under a %s budget",
-					i, len(res.Text), budget)
+				t.Errorf("M10: prompt %d took %s under a %s budget and injected %d bytes",
+					i, took, budget, len(res.Text))
 			}
 		}
 	}
-	t.Logf("M10: %d prompts under budgets of 1µs and 100µs, all zero bytes", len(prompts))
+	if over == 0 {
+		t.Errorf("M10: no run exceeded its budget, so this arm asserted nothing")
+	}
+	t.Logf("M10: %d runs exceeded their budget, all zero bytes", over)
 }
 
 // InvokesEngramux over the corpus, which is the measurement backlog 41's
