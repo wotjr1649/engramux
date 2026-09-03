@@ -27,6 +27,11 @@ const (
 	// rev.2, M-2 decision 9). It is the fifth tool and the first request
 	// type added since Step 1 withdrew Drain.
 	GetMemory RequestType = "GetMemory"
+	// Inject asks for the hook-time injection payload for one prompt
+	// (memory spec rev.8, M-4). It is the push path, and it is a type of its
+	// own rather than a flag on Search - see [InjectRequest] for why, and
+	// for why that is what makes an old service fail closed.
+	Inject RequestType = "Inject"
 )
 
 // Envelope is the JSON document a frame's payload holds. Payload is kept as

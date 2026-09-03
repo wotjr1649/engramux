@@ -31,9 +31,14 @@
 //     process outright, exit code and all. The only goroutine here is the one
 //     reading stdin, and it carries its own recover.
 //
-// The relay writes nothing on stdout, on any event (spec 4.5). Empty stdout is
-// accepted by all 11 events on both hosts, and 1.0 is pull-only, so there is
-// nothing to say. Failures go to stderr.
+// The relay writes on stdout for exactly one event, and only when the user has
+// turned injection on. Empty stdout is accepted by all 11 events on both hosts,
+// and the 1.0 spec §4.5 says the relay writes nothing on any of them - but that
+// section's own reasoning is "since 1.0 is pull-only", and the memory spec
+// rev.8's M-4 is the row that changes for after 1.0. So: UserPromptSubmit, with
+// injection enabled, writes one hookSpecificOutput document and nothing else
+// does. See [injectContext]. Failures go to stderr on every path including that
+// one.
 package main
 
 import (
@@ -124,6 +129,18 @@ func relay() {
 	ev.id = id.String()
 
 	ev.err = deliver(start, ev.id, ev.payload)
+
+	// Injection, and it is deliberately last and deliberately separate from
+	// ev.err: capture is the invariant, injection is the feature, and a
+	// feature that failed must not make the relay spool an event the
+	// service already committed. It ships disabled (memory spec rev.8,
+	// M-4), so on an installation nobody has configured this is one failed
+	// os.ReadFile and a return.
+	//
+	// It sits inside relay rather than after it, so that [event.settle]'s
+	// recover covers it: a panic here exits 0 like every other panic on
+	// this path (I-03).
+	injectContext(start, ev.payload, ev.id)
 }
 
 // trimFraming strips leading and trailing JSON whitespace from the bytes read

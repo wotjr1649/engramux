@@ -201,8 +201,41 @@ ships off.
 Blocked by: Step 4, because **M7** is unlikely to clear without it. Unblocks: nothing; it is the end
 of this plan.
 
-Done when: **M5**, **M6** and **M9** pass and **M8** is reported. Enabling it for a user is a
+Done when: **M5**, **M6**, **M9** and **M10** pass and **M8** is reported. Enabling it for a user is a
 separate act from shipping it, and **M7** is what licenses that act.
+
+**Done 2026-09-03**, on `step-5-injection`, and it ships **off**. Memory spec **rev.9** carries all of
+it; nothing here repeats a figure from it.
+
+**The decision rev.8 did not name is the one that decided the feature.** rev.8 settled the hook, the
+hosts, the two budgets and the exclusion, and left "how does a prompt become a query" unstated — and
+`internal/search` ANDs its tokens, so that question is the difference between a feature that fires and
+one that cannot. The answer is three terms, identifiers before length, plus a selectivity ceiling that
+measures the corpus's answer rather than guessing at the prompt. rev.9's M-4 section owns it.
+
+**M10 earned its place on its first run.** The deadline was written as `ctx.Err()`, which is what
+every other read path here uses, and the gate caught an injection handed back **1.1445 ms into a 1 ms
+budget** with the context still unexpired — a Go timer is not a clock, and Windows resolves one at
+about half a millisecond. No other gate could have seen it: M5, M6 and M9 measure bytes, abstention
+and the fence. This is the second time in this plan that a gate written to be falsifiable falsified
+something (Step 4's M4 was the first, in the other direction).
+
+**Two findings the run hands over rather than hides.** Native memory contributed to **0 of 16**
+injections, so the push path does not reach **P4** on this corpus even though the pull path does. And
+16 of 16 prompts injected with no abstention, so **P2**'s zero-cost abstention is measured here only
+against inputs built to have no history. Both are M7's to answer and neither is a reason to hold the
+step: the feature ships off.
+
+**M8 is not reported and the step does not claim it.** M8 needs labelled questions for P1 and P5, and
+P5's fixture does not exist. What the gate reports instead is under its own name.
+
+**Verified**: the suite 18 packages at exit 0; the pinned linter `0 issues.` at exit 0 with both
+values read; `./scripts/race.sh` at exit 0. Fourteen deliberate mutations across the commits, every
+one asserted present before its suite ran; twelve killed, one discarded for not compiling, and one
+recorded as surviving with the reason — it guards a race, so a run whose timer fired on time is
+answered by the other half of the same condition. `scripts/breakit.sh` is that pass made repeatable,
+and it refuses a dirty tree because `git checkout -- <file>` restores HEAD rather than the working
+tree.
 
 **Step 6 — the update path.** Memory spec **M-7**. `engramux update` as its own command: the two
 binaries and the service lifecycle, never host configuration, with `--from` as an escape hatch rather

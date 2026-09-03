@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/host"
+	"github.com/wotjr1649/engramux/internal/inject"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/mcpconf"
 	"github.com/wotjr1649/engramux/internal/schedule"
@@ -428,6 +429,22 @@ func (r *report) reportLocal() {
 	}
 	dir := filepath.Dir(spoolPath)
 	r.field("data directory", "%s", dir)
+
+	// Reported and never counted, on either answer. Off is the shipped
+	// state (memory spec rev.8, M-4) and on is a thing the user chose, so
+	// neither is a fault - what the line is for is the other half of §6's
+	// fifth mitigation: a switch you can see. Without it, "why is nothing
+	// being injected" and "why is something being injected" are both
+	// questions with no command that answers them.
+	//
+	// The path is printed on the off answer because that is where a person
+	// has to write the file, and the file is the whole of the interface.
+	if inject.Enabled() {
+		r.field("injection", "on - hook-time context is being added to UserPromptSubmit")
+	} else {
+		r.field("injection", "off - write {\"enabled\":true} to %s to turn it on",
+			filepath.Join(dir, inject.ConfigName))
+	}
 
 	if depth, err := spool.Depth(spoolPath); err != nil {
 		r.fail("spool", "unreadable: %v", err)

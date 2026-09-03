@@ -29,6 +29,7 @@ go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Ph
 go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
 go test -p 1 -count=1 -run TestPhase4GateM4 -v ./internal/search/   # memory spec §5's M4, and its own delete condition
+go test -p 1 -count=1 -run 'TestGate(InjectionOverTheCorpus|M6|M10)' -v ./internal/inject/  # memory spec §5's M5, M6, M9 and M10
 go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # spec §8's Phase 6 gate,
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
@@ -55,6 +56,13 @@ three classes, recall@10 and MRR — and by its own terms, no improvement in any
 skips when `.capture/` is absent, like `TestPhase4Gate`'s corpus mode. Unlike that mode its output
 is safe to paste: it logs counts and figures and never a derived query, which matters more here than
 there, because every query it derives is a command line or a touched path.
+
+The injection gates are three commands and one corpus. `TestGateInjectionOverTheCorpus` measures M5,
+M6, M9 and M10 in one pass, because building the corpus four times would measure four corpora;
+`TestGateM6ZeroByteAbstention` and `TestGateM10TheDeadlineIsEnforced` are the arms that need inputs
+or budgets the first one does not use. All three skip without `.capture/fixtures-raw`, and their
+output is safe to paste — measured, **0 of the 20 `-v` lines** carry a prompt, an excerpt or a path,
+which unlike `TestPhase4Gate`'s corpus mode was a design condition rather than an accident.
 
 The Phase 6 gate is two commands because it is two modes and neither alone is the audit: the
 `internal/service` half loads one event with a generated sample of every shape and sweeps every
@@ -155,6 +163,7 @@ row on its own, delete the row — the test is the better owner.
 | `go test ./...` or `golangci-lint run` fails on a tree with no packages | Not a config bug. `go test` exits 1 with *"no packages to test"* and golangci-lint exits 5 with *"no go files to analyze"*. Both need at least one package to be meaningful |
 | `golangci-lint` prints `0 issues.` and exits **7** | It typechecked nothing. A linter built with Go 1.26 cannot read Go 1.27's `math/rand/v2` (`method must have no type parameters`), so any package importing `crypto/rand` — `github.com/google/uuid` does, for UUIDv7 — fails to load while still printing a clean summary. **Check the exit code, never the summary line.** The pinned `go run` invocation in Commands avoids it by building the linter with the local toolchain |
 | An unchecked `fmt.Fprintln` is not flagged, and you conclude errcheck is off | errcheck's own `DefaultExcludedSymbols` is a **separate** mechanism from golangci-lint's exclusion presets — declining the `std-error-handling` preset does not disable it. Measured boundary: writes to literal `os.Stdout`/`os.Stderr` and to `*bytes.Buffer` are excluded; `fmt.Fprintln` to any other `*os.File` or `io.Writer`, plus bare `w.Write` and `f.Close`, are all caught. The exclusions cover exactly the targets whose error is not actionable — do not "fix" it |
+| A deadline passes and `ctx.Err()` is still nil, so work that should have stopped hands back a result | A context deadline is a **Go timer**, and Windows resolves one at about half a millisecond — so between the instant a deadline names and the instant its timer fires, the context is not expired and every check of it says the work may continue. Measured 2026-09-03 in `internal/inject`: one call returned **1.1445 ms into a 1 ms budget** with `ctx.Err()` nil, and another injected 640 B under a one-microsecond budget. It matters wherever a deadline is a *promise to somebody else* rather than a way to stop waiting: compare the instant as well as the context. It also means a test that drives a tiny budget and asserts "nothing came back" is asserting something timer resolution can answer — assert that nothing came back **late** instead, and count the runs that actually ran over so the arm cannot pass by being vacuous. `database/sql` is unaffected in the other direction: modernc.org/sqlite v1.57.0 does cancel a running statement, measured at 13 ms under a 1 ms budget |
 | A concurrency test passes and proves nothing | `testing/synctest` does not report data races — two goroutines doing `x++` inside a bubble pass silently. It also cannot see syscalls or real I/O, so it is useless for pipe tests. Use it for timeouts, backoff, and drain logic only |
 | `-race` will not run | It requires `CGO_ENABLED=1` *and* a C compiler, and there is no CGO-free route on windows/amd64. `scripts/race.sh` finds a compiler and checks it is new enough; it prints what to do when it cannot. Verify the claim yourself with `CGO_ENABLED=0 go test -race` — if that ever succeeds, delete this row |
 | The race detector is green and you are not sure it is looking | It is not enough that `-race` links. Write a deliberate unsynchronised `x++` across goroutines and confirm it fails, then confirm the mutex-guarded version stays quiet. A detector that reports nothing and a detector that is not running look identical |

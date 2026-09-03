@@ -1,5 +1,12 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.9** · 2026-09-03 — rev.9 records what building **M-4** settled. The decision rev.8 did not
+name turned out to be the one that decides what the feature is: a prompt is not a query, and how it
+becomes one is written here now. Gates **M5**, **M6**, **M9** and **M10** have their first numbers,
+one of them found a defect that no other gate could have — a Go timer is not a clock — and the run
+hands over two findings the design did not predict. Backlog **41** is closed by a test. rev.1 to
+rev.8 below.
+
 **rev.8** · 2026-09-03 — rev.8 settles what **M-4**'s one-line row never said: which hook, which
 hosts, what injection may cost, and what it may not select. It adds gate **M10**, because M5, M6 and
 M9 between them measure bytes, abstention and the fence and not one of them measures time — and
@@ -592,6 +599,135 @@ and M-3's derived columns are all written already, and a hook-time path needs no
 §6's fifth mitigation also asks for a switch and a way to see what was injected; both are
 configuration and a log, neither is schema.
 
+### What building it settled (M-4)
+
+**Built 2026-09-03**, on `step-5-injection`, and shipped **off**. Everything below is a decision the
+section above does not make or a measurement it does not have.
+
+**A prompt is not a query, and the reduction is what the feature is.** This is the decision rev.8
+left out and it turned out to be the load-bearing one. `internal/search` joins its tokens with an
+implicit AND and caps them at 32, so a real prompt handed over whole is either refused outright or
+is an intersection of forty prefix phrases that matches nothing. Three terms, then — and *which*
+three is not a length ranking. Length picks the prose over `M3` and over `00005`, which is backwards
+for this corpus: the shortest tokens in it are the most distinctive, because they are identifiers.
+So a token carrying a non-letter or written in capitals sorts first whatever its length — that is
+P1's classes spelled as a rule — and only the remainder is ranked by length. Words under four bytes
+are dropped and identifiers are not, because `M3` is two bytes and `WAL` is three and they are the
+whole of what a person is asking about.
+
+**Selectivity replaces guessing at the prompt with measuring the answer.** "How do I fix this"
+reduces to one common word, and what says so is not the word's length but that the word is in a
+large share of the corpus. A query matching more than **200** documents is refused rather than
+ranked, applied to each of the two indexes separately because they are separate populations. The
+number is absolute and therefore does not scale with the corpus — on a hundred events it never fires
+and on a million it fires late — and the upgrade path is a fraction of each index's own population,
+which costs one count per injection. **M7 is the gate that would price a better one.**
+
+**The fence is a nonce minted after the body exists and checked against it.** A fixed delimiter is a
+string an attacker can write into a page the agent fetched three weeks ago; the captured bytes then
+arrive inside the fence carrying their own closing marker, and everything after it reads as though it
+came from outside. A nonce minted per injection cannot be in bytes captured before it existed, so the
+close marker is unforgeable by anything already in the corpus — a structural property rather than a
+heuristic, which is why §6 ranks it above the other four mitigations. `crypto/rand.Text` and not a
+UUID, because a UUIDv7's leading bytes are the clock. A body that would collide is **refused**, not
+escaped: there is no third answer. The lead line telling the model this is data sits **outside** the
+fence, because inside it would be indistinguishable from an instruction the corpus carried.
+
+**The switch is a file whose absence is off, and it is the relay that reads it.** `inject.json` in
+the data directory, one key. The installer writes nothing, so a first install has no switch to find —
+which is stronger than a default in code, because a user who has never heard of the feature cannot
+have it on and a user who wants it makes one file whose existence is the record of their consent.
+Every unreadable shape is off too. It is relay-side rather than service-side for two reasons: a
+service-side switch needs a restart, since the service is a logon task; and a relay that never dials
+is a shorter path to zero bytes than one that dials and is told no. `doctor` reports it either way
+and prints the path on the off answer, which is the visible half of §6's fifth mitigation. The other
+half is the service log: one line per injection with the masked ids and the byte count, one line per
+abstention with the reason, and **never** the prompt or an excerpt.
+
+**`Inject` is a request type of its own rather than a flag on `Search`, and that is what makes an old
+service fail closed.** It answers an unknown type with a rejected ACK, the reply's `Verify` refuses
+it, and the relay injects nothing; a boolean an old service ignored would have injected the whole
+unfiltered result. It also keeps the field off the MCP tool surface, which is the pull path.
+
+**The 1.0 spec §4.5 moves, and only for this event.** That section says the relay writes nothing on
+stdout on any of the eleven events, and its own reasoning is *"since 1.0 is pull-only"* — which is
+the row M-4 changes for after 1.0. So: `UserPromptSubmit`, with injection enabled, writes one
+`hookSpecificOutput` document, and the other ten events still write nothing. §5.8's *"SessionStart
+emits nothing"* is untouched.
+
+**Capture is the invariant and injection is the feature.** Injection runs after delivery and never
+touches the event's own error, so a failed injection cannot make the relay spool an event the service
+already committed. Its budget is the 500 ms clamped by what is left of the relay's own second, so a
+slow delivery costs injection time rather than pushing the process past its ceiling. The cost of that
+order is that the prompt's own event is already a row whose text is the query, which is why the
+request carries the id to exclude — exactly, rather than by resemblance.
+
+#### A Go timer is not a clock, and only M10 could have found it
+
+The deadline was first written as `ctx.Err()`, which is what every other read path in this product
+uses. It is wrong here and the gate is what said so. **Measured 2026-09-03**: a call took **1.1445 ms
+under a 1 ms budget** with `ctx.Err()` still nil, and a second run injected **640 B under a
+one-microsecond budget**. A context deadline is a Go timer, Windows resolves one at about half a
+millisecond, and a timer that has not fired yet leaves the context unexpired past the instant it
+names — so an injection could be handed to the host after its budget with nothing having noticed.
+
+The check now compares the instant as well as the context, and it sits **after the fence** rather
+than after the reads: the two searches carry the context and fail themselves when it expires
+(**[verified]** against `modernc.org/sqlite` v1.57.0 — a search taking 13 ms under a 1 ms budget
+returns `context deadline exceeded` rather than its rows), but the masking, the assembly and the
+fence after them carry no context at all, and a check before them leaves that stretch unguarded.
+
+Two things follow for anyone reading the gate. The result carries **the elapsed time the injector
+measured itself**, because a caller timing from outside cannot assert this without racing a decision
+made a few hundred nanoseconds earlier inside. And the mid-flight arm asserts M10's own words — *no
+injection exceeds its budget* — rather than "a small budget injects nothing", which timer resolution
+can answer on its own; it counts the runs that did exceed, so an arm where nothing ran over cannot
+pass by asserting nothing.
+
+#### The gates, first numbers
+
+**Measured 2026-09-03** over `.capture/fixtures-raw` — 902 captures, **16 distinct prompts**, with
+this machine's **303** native memory items indexed beside them. Every reading is warm and this corpus
+is not the installed 227 MB one, which no test may open (I-07).
+
+| Gate | Asserted | Reported |
+|---|---|---|
+| **M5** | 16 of 16 injections inside the 5,000 B cap | largest **4,842 B**, median **750 B**. The cap is approached, so it gates something |
+| **M6** | 25 synthetic prompts and every corpus prompt whose query matches nothing: **zero bytes, 100%** | **0** corpus prompts had a query this corpus does not answer, so that arm tested nothing and the synthetic one carried it |
+| **M9** | 16 of 16 fenced, **0** bodies carrying their own nonce | — |
+| **M10** | no injection over budget, on the injector's own clock; **32** runs across two shortened budgets did exceed and all emitted zero bytes; 16 of 16 zero bytes under a budget behind the clock | worst **29.19 ms**, p95 **29.19 ms**, median **3.11 ms** against **500 ms**; **0 of 16** abstained on time |
+
+**M8 is not reported and nothing here should be read as it.** M8 is native memory's coverage of P1
+and P5 against verbatim retrieval's, and it needs the labelled questions of both — P5's fixture does
+not exist at all. What the run reports instead, under its own name, is where an injection's content
+came from.
+
+**The one over-budget reading that exists is the race run's, and it is the abstention path working.**
+`./scripts/race.sh` puts the same gate over the same corpus at a median of **124.13 ms** against
+3.11 ms without it, a worst of **523.01 ms**, and **1 of 16 abstained on time**. The race detector is
+not a user's machine, but it is the only condition anyone has yet measured this feature under where
+the deadline is reachable at all — every other reading is warm, unloaded and three orders of
+magnitude inside the budget. What it says is that the abstention fires when the budget is genuinely
+exceeded rather than only under a shortened one, and that the overshoot past 500 ms is the check's
+own granularity: the two searches carry the deadline and the assembly after them does not. It also
+corrected the gate, which had been asserting on the duration rather than on the injection and so
+called a correct abstention a failure.
+
+#### Two findings the design did not predict
+
+**Native memory contributed to 0 of 16 injections.** The pull path reaches it — gate M3's own corpus
+mode ranks memory items for targeted queries — but the three-term AND a prompt reduces to returns
+nothing over 303 items. So **the push path does not reach P4 on this corpus**, and the alternation
+that was built to stop events from eating the whole budget had nothing to alternate with. This is not
+a defect of the alternation and it is not obviously one of the reduction either: it is the same
+narrowness that makes M6 easy. What would settle it is M7.
+
+**16 of 16 prompts injected and none abstained.** On a 902-document corpus the queries are already
+narrow enough that the selectivity ceiling never fires — the largest matched 29 documents. So this
+run says nothing about how often injection *should* stay silent on a real corpus, and P2's zero-cost
+abstention is measured here only against inputs constructed to have no history. **M10 over the
+installed database and M7 over a labelled fixture are the two instruments that would.**
+
 ### Replacing an installed build is its own command (M-7)
 
 **Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
@@ -827,6 +963,12 @@ not a saving, it is the feature.
 
 M-4 does not turn on for anyone until M5, M6, M9 and M10 pass and M7 clears its threshold. M1–M4 and
 M8 are conditions on the work that precedes it.
+
+**M5, M6, M9 and M10 pass as of 2026-09-03**, over `.capture/fixtures-raw` with this machine's native
+memory beside it — `TestGateInjectionOverTheCorpus`, `TestGateM6ZeroByteAbstention` and
+`TestGateM10TheDeadlineIsEnforced` in `internal/inject`. The figures, what each arm actually asserted,
+and the two things the run says nothing about are in M-4's own section; none of them is repeated here.
+**M7 is un-run**, so nothing below licenses turning the feature on.
 
 | | Gate | What it asserts |
 |---|---|---|
