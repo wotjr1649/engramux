@@ -1,5 +1,15 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.11** · 2026-09-04 — rev.11 corrects rev.10 and settles what it left open. The same 50 queries
+were re-asked in English: connectivity goes **16 → 47 of 50** and the oracle ceiling **13 → 37**, so
+the class of question rev.10 said verbatim retrieval could not reach **does not exist**, and the
+summariser stays closed. What is left is the **selector** — full-query recall is **1 of 50** in
+English against that ceiling of 37 — and it is now the only thing between this product and a green
+M3. Four decisions follow: language independence is guaranteed on **MCP and the CLI** and explicitly
+not on injection; new memory is written in English **for token cost and predictability, not for
+search**; M3's fixture becomes the English one; and the model-authored translation is carried as an
+`[unverified]` flaw rather than resolved. rev.1 to rev.10 below.
+
 **rev.10** · 2026-09-03 — rev.10 records the first time a person asked this product a question.
 Gate **M3** ran against the owner's own 50 queries and returned **0 of 25 on each host**, and the
 zero is not about ranking: the queries are Korean and the documents are English, and 34 of 50 share
@@ -484,21 +494,121 @@ not, and on this machine they usually do not — the owner asks in Korean and bo
 notes in English. P4's claim is unchanged for a literal; it is `[unverified]` and currently measured
 at zero for a question.
 
-**It is the condition M-1 named for reopening the summariser, arriving by a route M-1 did not
-predict.** M-1 says to reopen *"if §5's M8 shows a class of question that verbatim retrieval cannot
-reach at all"*, and expects the class to be *"why did we choose X"* — scattered, with no literal span
-to match. The class that turned up instead is **any question asked in the reader's own language about
-a document written in another**, which is not an abstraction problem and would not be fixed by a
-summariser writing in the same language the source already uses. M-1's own next move — **M-2 first,
-read a summary someone else already paid for** — has been made: these 303 items *are* both hosts'
-own summaries, and the gap is over them.
+**It is *not* the condition M-1 named for reopening the summariser. Corrected 2026-09-04 — rev.10
+wrote this and rev.10 was wrong.** M-1 says to reopen *"if §5's M8 shows a class of question that
+verbatim retrieval cannot reach at all"*, and rev.10 read the zero above as that condition arriving
+by a route M-1 did not predict. The English arm in the next section falsifies it: asked in the
+language the corpus is written in, **47 of the same 50 questions reach their answer** at some rank.
+There is no class of question verbatim retrieval cannot reach here. There is a query in one language
+against an index in another, and behind that a selector that discards most of what does connect —
+neither of which a summariser fixes, because a summariser writing in the language the source already
+uses changes nothing about either. **The summariser stays closed.** M-1's own next move — **M-2
+first, read a summary someone else already paid for** — was already made and still holds: these 303
+items *are* both hosts' own summaries.
 
-**The options are not this document's to choose and none of them is small.** Translating the query,
+**Four options were named here and the next section chooses among them.** Translating the query,
 translating the index, a multilingual embedding beside the FTS index, or narrowing P4 to same-language
 retrieval and saying so. §7 rejected a vector index on the `CGO_ENABLED=0` boundary and noted that
 `modernc.org/sqlite` v1.57.0 vendors sqlite-vec CGO-free, so half of that objection has already
 lapsed; what has not is that an embedding needs inference, which is the sidecar or the API key §2
-rejected. **This is the largest open question in the product and it is older than injection.**
+rejected. **The next section takes the fourth and none of the other three**, and what made that cheap
+is that the wall is smaller than rev.10 measured it to be.
+
+### What the English arm settled, and the four decisions it forced (M-2)
+
+**Measured 2026-09-04.** rev.10 left the wall unmeasured in one direction. It knew the queries were
+Korean and the documents were not; it did not know what those same questions would do asked in the
+language the corpus is written in. The owner's 50 queries were translated to English — column 2
+only, the answer column copied and never read — and re-run against the same corpus.
+
+| Same 50 questions, same corpus | Korean | English |
+|---|---|---|
+| Connectivity — any word of the query reaches the answer at any rank | 16 of 50 | **47 of 50** |
+| Oracle selector recall@10 — handed exactly the tokens that connect | 13 of 50 | **37 of 50** |
+| Full-query recall@10 — what a person actually gets | 0 of 50 | **1 of 50** |
+| Longest-three recall@10 — the reduction M-4's injector makes | 0 of 50 | **2 of 50** |
+
+**Language was nearly all of the first row and none of the last.** The corpus holds the answers and
+Korean words could not touch them: 16 → 47. But an English question does not reach them either. **The
+selector discards 35 of the 37 answers that removing the language wall makes reachable.** That is the
+same defect M-4 found in the injector — a three-term AND is too narrow — and this is the first time
+it has a size. **The selector is the keystone: M3 cannot go green in any language until it moves.**
+
+**The gate's own reading agrees, and adds one thing the probe does not.** Run over the English
+fixture on 2026-09-04: **claude-code 1 of 25, codex 0 of 25** — the same 1 of 50 — and the script
+split inverts, **same-script 1 of 42 against the Korean fixture's 8, cross-script 0 of 8 against its
+42**. So **8 of the 50 targets are themselves Korean documents**: translating the query moved 42
+lines out of the language wall and moved 8 into it. The wall is a property of the pair, not of the
+query, and no single-language convention removes all of it.
+
+*Measured through the same throwaway probe as the section above, deleted with the run, and
+re-run first-hand on 2026-09-04 before being written here. What survives in the tree is the gate.*
+
+#### Storage is already English, which reverses the obvious remedy
+
+**Measured 2026-09-04** over the same 303 native items:
+
+| | mostly Korean (≥50% Hangul) | mixed | mostly Latin (<20%) | median Hangul share |
+|---|---|---|---|---|
+| claude-code, 38 items | 11 | 6 | **21** | 1% |
+| codex, 265 items | 9 | 52 | **204** | 0% |
+
+**74% of native memory is already English.** So "write the memory in English" moves 7% of the corpus,
+and that 7% is the only part currently working — **12 of the 13 mostly-Korean targets connect and 4
+of the 37 mostly-Latin ones do**. Unifying storage on English deletes what works and leaves what
+fails untouched. **The retrieval gap is entirely on the query side.**
+
+#### The four decisions
+
+**1 — "Ask in any language" is guaranteed on MCP and on the CLI, and explicitly not on injection.**
+The three surfaces differ by whether a translator is already present. **MCP**'s caller is a model, so
+one line of tool description — this corpus is mostly English, search in English — buys the
+translation for nothing, and it is the best value per line available in this product today. **The
+CLI**'s caller is a person and a README line is all there is. **Injection** has neither: it sees a raw
+prompt at hook time with no translator, and giving it one opens **M-1** (no LLM) and **§2** (no
+sidecar, no API key) for a feature that ships **off** and whose activation gate **M7 has not run**.
+That is out of proportion. A Korean prompt receiving zero bytes from the injector is **P2 working**,
+and it is documented as such rather than repaired.
+
+One blocker that follows from the implicit AND and belongs to the selector: **a bilingual query is
+not expressible today.** One Korean term added to an English query takes the result to zero, because
+the terms are ANDed. "Search both languages" needs OR — more evidence for the keystone.
+
+**2 — New memory is written in English, going forward only, and not for search.** The two reasons
+that survive the measurement above are **token cost** — M5 already converts Korean at a conservative
+2 bytes per token — and **predictability**, a rule that is true beating one that is true 74% of the
+time. *"For better retrieval"* **is not one of them and must not be recorded as one**: during the
+transition Korean queries get worse, because the 7% that works is what shrinks.
+
+**The 20 existing Korean items are not rewritten.** They are the hosts' own data — the Codex memory
+directory is itself a git repository — which is precisely why **M-2 is read-only**. The hosts' own
+consolidation replaces them in time, and the recall gained by hand-editing 20 items is smaller than
+the risk of writing into a host's store.
+
+**This is not a product change and no agent performs it.** Engramux does not write native memory
+(M-2), and `AGENTS.md` forbids an agent editing `~/.claude` or `~/.codex`. It is a line in the
+owner's own `CLAUDE.md` / `AGENTS.md`, by the owner's own hand.
+
+**3 — M3's fixture is the English one; the Korean original is kept as evidence, not as a gate arm.**
+M3's definition is *cross-host* and language is not in it, so the Korean fixture mixes two failures
+into one number. Under decision 1 the documented usage is English, and a gate should measure the
+documented usage. With decision 1 taken, a Korean arm is **permanently zero** — and a permanent zero
+is either a gate that is red forever or a pin that asserts nothing. The ceiling moves with the
+fixture, **13 → 37**, which is what makes a selector target meaningful.
+
+**4 — The translation is the model's, and that is recorded as a flaw rather than resolved.** The
+assistant translated the queries, from column 2 alone, with the answer column never read — so M3's
+circularity guard (a query written from memory, not cut from the answer beside it) survives. What
+does not survive untouched is **register**: a model translating into the same register the documents
+are written in may have made **47 of 50 optimistic**. **`[unverified]`.** Accepted because the gate's
+purpose is regression detection, which a slightly optimistic absolute still serves, and because the
+alternative spends the owner's time before the selector work can start.
+
+#### What this leaves open
+
+The selector, and it is now the only thing between this product and a green M3. **Nothing here has
+been implemented** — decisions 1 and 2 are documentation the selector work will make true, and
+decision 3 is the fixture the selector work will be measured against.
 
 ### Why derived fields are not a summary (M-3)
 
@@ -1012,7 +1122,7 @@ capabilities, each with a definition that can fail.
 | **P1** | **Exact-span recall** | For a literal that exists in the corpus — an error message, a stack frame, a command line, a path — a natural-language query for it puts a document containing that literal in the top *k*. Reported as recall@k and MRR per class | Those three classes are the ones native declines to store |
 | **P2** | **Zero-cost abstention** | For a prompt with no relevant history, the injector emits **exactly zero bytes**. Required at 100% | Native loads its index every session **regardless of the query**, so its context cost is a constant. A query-dependent zero is structurally ours |
 | **P3** | **Temporal resolution** | A time-qualified query is narrowed by real event timestamps and session boundaries | Native carries a `modified` field, which is when a note was written, not when the fact was true |
-| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory. **Measured 2026-09-03 and true only for a literal**: a natural-language question in the reader's own language about a document written in another reaches nothing, and on this machine that is the usual case — see *What gate M3 measured on its first human fixture* | Each host sees half |
+| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory. **Narrowed 2026-09-04 to same-language retrieval, guaranteed on MCP and the CLI and explicitly not on injection.** Within the language it is still `[unverified]` and measured at **1 of 50** for a question against an oracle ceiling of 37 — what is left is the selector, not the language. See *What gate M3 measured on its first human fixture* and *What the English arm settled* | Each host sees half |
 | **P5** | **Failure-fix pairs** | Querying with the text of a failure returns the edit or command that resolved it | *"Debugging fixes"* is on native's documented exclusion list |
 
 P2 is the sharpest of the five and the least obvious. *Context Rot* (Chroma Research, 2025-07-14, 18
@@ -1049,7 +1159,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 |---|---|---|
 | **M1** | Native parse fidelity | Over every native memory file present on the machine: no crash, frontmatter fields extracted exactly where they exist, body bytes preserved losslessly. One failure fails the gate |
 | **M2** | Drift canary | An unknown frontmatter key, an unknown file name, a missing index — each **warns and continues**. A silent skip is a failure |
-| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Run 2026-09-03 against the owner's own 50 queries: 0 of 25 on each host, and left unpinned** — a floor of zero is a gate that is off. What the zero is about is not ranking; the section *What gate M3 measured on its first human fixture* carries the two walls, the cross-tabulation and the 26% ceiling, and what has to be decided before this row can have a number.
+| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Fixture switched to the English one 2026-09-04 and the gate is still unpinned.** The 2026-09-03 run over the owner's Korean queries returned 0 of 25 on each host, and a floor of zero is a gate that is off. English lifts the reachable ceiling from 13 to 37 of 50 and the recall only to 1 of 50 — the gate reads **claude-code 1 of 25, codex 0 of 25, same-script 1 of 42, cross-script 0 of 8** — so **the pin waits on the selector rather than on another fixture**. Both sections — *What gate M3 measured on its first human fixture* and *What the English arm settled* — carry the walls, the ceilings and the decisions.
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |

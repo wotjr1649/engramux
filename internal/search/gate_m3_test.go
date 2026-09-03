@@ -30,7 +30,15 @@ import (
 // corpus - the same place corpusDir looks. A bare ".capture" here would resolve
 // to internal/search/.capture, a directory nothing else uses and which a reader
 // would put a fixture into exactly once before wondering why nothing ran.
-var m3FixturePath = filepath.Join("..", "..", ".capture", "m3", "queries.tsv")
+//
+// It is the *English* fixture, decided 2026-09-04 (memory spec rev.11, decision
+// 3). M3's definition is cross-host and language is not in it, so the owner's
+// Korean original mixed two failures into one number; the documented usage is
+// to search in English (decision 1), and a gate measures the documented usage.
+// The Korean file stays beside this one as evidence and is not an arm here: with
+// decision 1 taken it is permanently zero, and a permanent zero is either a gate
+// that is red forever or a pin that asserts nothing.
+var m3FixturePath = filepath.Join("..", "..", ".capture", "m3", "queries.en.tsv")
 
 // m3Unpinned is what [m3PinnedRecall] holds for a host whose recall has not
 // been measured yet, and it is a distinct value rather than 0 on purpose: 0 is a
@@ -117,7 +125,7 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 	if len(queries) == 0 {
 		t.Skipf("no M3 fixture at %s; it is the owner's own labelling and lives outside the repository "+
 			"(memory spec rev.2, M-2 decision 4). Format: host<TAB>query<TAB>answer, one per line.",
-			filepath.Join(".capture", "m3", "queries.tsv"))
+			filepath.Join(".capture", "m3", "queries.en.tsv"))
 	}
 
 	db := m3Corpus(t)

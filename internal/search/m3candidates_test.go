@@ -118,7 +118,10 @@ func TestWriteM3Candidates(t *testing.T) {
 	w := bufio.NewWriter(f)
 	header := []string{
 		"# Gate M3 candidates. Replace TODO-WRITE-THE-QUERY with what you would actually type",
-		"# to find the item, then save the lines you kept as .capture/m3/queries.tsv.",
+		"# to find the item, then save the lines you kept as .capture/m3/queries.en.tsv.",
+		"#",
+		"# Write the query in English. The corpus is 74% English and the gate measures the",
+		"# documented usage, which is to search in English (memory spec rev.11, decisions 1 and 3).",
 		"#",
 		"# The answer column is already verified the way the gate verifies it: it is in the",
 		"# masked body of at least one item of that host and in none of the other host's.",
