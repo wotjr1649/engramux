@@ -23,6 +23,7 @@ import (
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
 	"github.com/wotjr1649/engramux/internal/version"
+	"github.com/wotjr1649/engramux/internal/winacl"
 )
 
 // taskBudget bounds one schtasks invocation. It is not the pipe's budget: this
@@ -188,6 +189,46 @@ func (r *report) fail(label, format string, args ...any) {
 // site rather than inferred from the absence of a [report.fail].
 func (r *report) note(label, format string, args ...any) {
 	r.field(label, format, args...)
+}
+
+// permissions reports what one file's DACL admits, for the three files a bearer
+// token ends up in. It is memory spec §8's second publication condition, whose
+// two halves are `mcp.json` narrowed and the host files reported rather than
+// changed - the second half being the whole reason this is a report and not a
+// fix. Those two files belong to the hosts, and narrowing another product's
+// configuration is not this one's to do.
+//
+// # A verdict, not an ACE list
+//
+// Every line this command writes goes through [report.mask], and an ACE list is
+// account names, machine names and SIDs - the shape that mask exists to keep out
+// of a diagnostic somebody pastes into an issue. So this counts and classifies
+// and never names a principal. `--full` does not widen it either: there is
+// nothing here for it to unmask.
+//
+// # It is a note and never a fail
+//
+// The exit code answers "is this installation working", and an inherited DACL is
+// working. Backlog 28 is a publication condition rather than a defect on the
+// owner's machine, and spec 5.9 accepts the exposure there; making `doctor`
+// exit 1 on it would make every currently correct installation report broken.
+func (r *report) permissions(label, path string) {
+	acc, err := winacl.Describe(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// The caller has already said the file is absent, and saying it
+		// twice in different words reads like two findings.
+	case err != nil:
+		r.note(label, "permissions unreadable: %v", err)
+	case acc.Narrowed():
+		r.field(label, "narrowed to SYSTEM, Administrators and this user")
+	case acc.Others > 0:
+		r.note(label, "inherited DACL - %d principals beyond SYSTEM, Administrators "+
+			"and this user reach a file holding the bearer token (backlog 28)", acc.Others)
+	default:
+		r.note(label, "inherited DACL - nothing beyond SYSTEM, Administrators and this "+
+			"user reaches it today, but the parent directory decides that (backlog 28)")
+	}
 }
 
 // installedNames is what an installation puts in its bin directory.
@@ -731,6 +772,7 @@ func (r *report) reportMCP(ctx context.Context, claudeMCP, codexConfig string) {
 		return
 	}
 	r.field("endpoint", "%s", endpoint)
+	r.permissions("mcp.json", mcpconf.Path(dir))
 
 	if err := probeMCP(ctx, endpoint); err != nil {
 		r.note("listening", "NO - %v", err)
@@ -774,8 +816,10 @@ func (r *report) reportHostMCP(label, path, endpoint, marker string) {
 		r.note(label, "unreadable: %v", err)
 	case strings.Contains(text, endpoint):
 		r.field(label, "points at this endpoint")
+		r.permissions(label+" file", path)
 	case strings.Contains(text, marker):
 		r.note(label, "STALE - it names engramux at another URL; re-run `engramux install --apply`")
+		r.permissions(label+" file", path)
 	default:
 		r.note(label, "not registered - run `engramux install --apply`")
 	}

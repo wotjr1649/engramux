@@ -1738,11 +1738,49 @@ of living in a session brief.
    one the installer was given — so that instance found the real data directory and the real pipe,
    lost the pipe race to the running service (I-09), and wrote its `stopped` line into the real log.
    `AGENTS.md` carries the row; the 1.0 spec §7.1's soak row carries the line.
-2. **Backlog 28, the bearer token's file permissions.** The 1.0 spec §5.9 accepts the inherited DACLs
-   on the owner's machine; on a stranger's machine it is not the owner's to accept. What is the
-   product's to fix is `mcp.json`, written with a security descriptor of its own on the pattern
-   `internal/pipe`'s listener already uses. The two host files are not this product's to narrow, and
-   `doctor` reports their permissions as a finding rather than changing them.
+2. **Backlog 28, the bearer token's file permissions. [verified] 2026-09-04, and this condition is
+   closed.** The 1.0 spec §5.9 accepts the inherited DACLs on the owner's machine; on a stranger's
+   machine it is not the owner's to accept. Both halves are now built. `mcp.json` is written with a
+   protected DACL of its own, granting SYSTEM, BUILTIN\Administrators and the user this process runs
+   as, and nothing else - set on the temporary file before one byte of the token reaches it, so the
+   token never sits on disk under an ACL the product has not replaced. The two host files are not
+   this product's to narrow, and `doctor` reports their permissions as a finding rather than changing
+   them: a verdict and a count, never a principal, in both the masked mode and `--full`.
+
+   **Three things the build settled that the condition assumed, and two of them reverse it.**
+
+   **Administrators is on the list, where `internal/pipe`'s DACL has only SYSTEM and the owner.** The
+   condition said "on the pattern `internal/pipe`'s listener already uses" and the pattern does not
+   transfer whole. A pipe's DACL dies with the process; this one outlives it, and this file is §5.9's
+   only documented way to rotate the token - delete it, restart, re-run the installer. A user SID
+   changes on a profile migration or a recreated domain account, and a DACL admitting only SYSTEM and
+   a principal that no longer exists has removed the remedy along with the exposure. The ACE costs
+   nothing: an administrator holds SeTakeOwnershipPrivilege and reaches the file either way.
+
+   **The mask is FILE_ALL_ACCESS and not GENERIC_ALL, and the reason is not the one the arithmetic
+   suggests.** They share no bit - 0x001F01FF against 0x10000000 - so copying the pipe's mask looks
+   like it would store a number no file request can use. **Measured 2026-09-04: it would not.**
+   `ACLFromEntries` wraps SetEntriesInAcl, which maps a generic mask to the object type's specific
+   rights before the ACE exists; an entry written with GENERIC_READ reads back as 0x00120089 and one
+   written with GENERIC_ALL is indistinguishable from FILE_ALL_ACCESS. The mask is spelled out
+   because the mapping belongs to that call and not to the ACE, so a caller that builds an ACL by
+   hand or writes SDDL gets no mapping and no error - just a file its owner cannot open.
+
+   **The DACL survives `os.Rename`, and that is load-bearing rather than incidental.** The narrowing
+   is applied to the temporary file and what a host reads is the renamed one. Go's `os.Rename` is
+   `MoveFileEx` without MOVEFILE_COPY_ALLOWED and not `ReplaceFile` - which would have preserved the
+   *destination's* DACL and inverted the whole design - and the temporary file is created in the
+   destination's own directory, so the move is same-volume and carries the security descriptor with
+   it. `TestWriteNarrowsTheFileItPublishes` asserts it on the published file rather than the
+   temporary one, which is what makes it a check rather than a restatement.
+
+   **What it removed, measured on this machine**: the inherited ACL on a fresh file under the user's
+   own directory is four ACEs, one of which names a principal beyond SYSTEM, Administrators and this
+   user. Spec 7.1 recorded the same shape.
+
+   **What it does not close** is carried rather than implied: `mcpconf`'s temporary file holds a raw
+   token and has no equivalent of `internal/host`'s `staleTemps` sweep, and `internal/host`'s own
+   backup copies accumulate under timestamped names with no retention policy. Both are backlog rows.
 3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
    nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0. **It gained a
    named requirement on 2026-09-03** when the false-positive submission was declined (M-7): condition

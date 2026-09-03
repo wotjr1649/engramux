@@ -174,10 +174,17 @@ func backup(path string) (string, error) {
 //
 // internal/mcpconf writes mcp.json through the same shape and internal/spool
 // writes a record through a third. They are not shared because what differs is
-// not the sequence but the policy: mcp.json's writer forces a mode, and this
-// one replaces files whose owner is the user and must not. A helper taking
-// mode, temp-naming and cleanup policy as parameters would be longer than
-// either caller.
+// not the sequence but the policy, and 2026-09-04 widened the gap rather than
+// closing it: mcp.json's writer now narrows its file to an explicit DACL
+// (backlog 28), and this one must not - these are the hosts' own configuration
+// files, and re-permissioning another product's file is not this product's to
+// do. `doctor` reports them instead. A helper taking DACL, temp-naming and
+// cleanup policy as parameters would be longer than either caller.
+//
+// The asymmetry runs the other way too, and that half is a finding rather than
+// a design: [staleTemps] lives here and mcpconf has no equivalent, while the
+// temporary file that holds a *raw* token is mcpconf's. A run killed between
+// its write and its rename leaves a copy that nothing sweeps.
 func writeAtomic(path string, text []byte) (err error) {
 	// Whatever an earlier run left when it was killed between the write and
 	// the rename. The installer this replaces used a temporary name carrying
