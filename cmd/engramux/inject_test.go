@@ -61,7 +61,7 @@ func enableInjection(t *testing.T) string {
 	t.Helper()
 	local := t.TempDir()
 	dir := filepath.Join(local, "engramux")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("make the data directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, inject.ConfigName), []byte(`{"enabled":true}`), 0o600); err != nil {

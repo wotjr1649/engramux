@@ -37,7 +37,7 @@ func TestInjectionIsOffUntilAFileSaysOtherwise(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ConfigPath: %v", err)
 			}
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 				t.Fatalf("make the data directory: %v", err)
 			}
 			if tc.write != "" {

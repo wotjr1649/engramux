@@ -432,6 +432,11 @@ func keepable(ctx context.Context, db *sql.DB, hits []search.Hit, excludeID stri
 	// derived_cmd rather than the payload: it is migration 00005's column
 	// and it holds tool_input.command and nothing else, so a document that
 	// merely talks about a command line has nothing in it.
+	// The only thing concatenated in is a run of `?`, one per id, and every
+	// id travels as a bound argument below. gosec cannot tell a generated
+	// placeholder list from a generated value, and internal/search's memory
+	// query builds the same shape for the same reason.
+	//nolint:gosec // G202: the concatenation is placeholders, never a value
 	q := `SELECT id, coalesce(derived_cmd, '') FROM events WHERE id IN (?` +
 		strings.Repeat(",?", len(ids)-1) + `)`
 	rows, err := db.QueryContext(ctx, q, ids...)
