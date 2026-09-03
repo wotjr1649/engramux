@@ -1,5 +1,9 @@
 # Execution order after Phase 6
 
+**rev.4** · 2026-09-04 — rev.4 adds **Step 7**, the selector, which rev.3 could not have ordered:
+it exists because gate M3's first human fixture returned zero and the diagnosis found a query builder
+rather than a corpus. It is done in the same revision.
+
 **rev.3** · 2026-09-03 — rev.2 was 2026-09-02. This revision records that Step 6's one open
 question, the delivery channel, was decided before the step rather than inside it, and that the
 release process it needs is part of that step rather than a new one.
@@ -275,6 +279,18 @@ this step rather than during it.
 Done when: `update` replaces a running installation and restarts what was there when a copy fails,
 `doctor` reports all three versions rev.5 names, a release exists that the channel can serve, and
 `scripts/reinstall.sh` is the one-line wrapper rev.5 decided it becomes.
+
+**Step 7 — the selector.** Memory spec **rev.11** and **rev.12**. Not in rev.3's order because it did
+not exist then: gate M3's first human fixture returned zero, and what the diagnosis found was a query
+builder, not a corpus. Independent of Step 6 and of everything above it — the change is one parameter
+on two exported functions and the two gates that price it.
+
+Done: **2026-09-04**, on `step-7-selector`, merged `--no-ff`. MCP and the CLI join a query's tokens
+with OR and the injector keeps the AND; **M3 is pinned for the first time**, at claude-code 0.400 and
+codex 0.600. Suite green over every package, the pinned linter at `0 issues.` and exit 0. The
+figures, the two-phase shape that was measured and rejected, the rank ceiling that was written first
+and killed by its own break-it pass, and what the OR costs in time are all in the spec's *What
+building the selector settled*.
 
 ## Not ordered here
 
