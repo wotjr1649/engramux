@@ -347,3 +347,33 @@ publication conditions — a first install on a clean profile, backlog **28**, a
 memory spec §8's, and they are not ordered here because none of Steps 1–5 waits on them. **28** is
 there rather than in a step since 2026-09-02: the 1.0 spec §5.9 accepts the exposure on the owner's
 machine, and a stranger's machine is where it stops being the owner's to accept.
+
+**Done 2026-09-04**, two of the four, and one of them does not close itself.
+
+**Condition 2 is closed**, on `backlog-28-mcp-json-dacl`, merged `--no-ff`. `mcp.json` carries a
+protected DACL of its own — SYSTEM, `BUILTIN\Administrators` and the user the service runs as — set
+on the temporary file before one byte of the token reaches it, and `doctor` reports the two host
+files that hold a copy of the same token as a finding without changing them. The build reversed two
+things the condition assumed and the memory spec §8 carries both: Administrators is on the DACL
+where `internal/pipe`'s pattern has only SYSTEM and the owner, because this file is §5.9's only
+documented way to rotate the token and a DACL naming a SID that no longer exists removes the remedy
+with the exposure; and the GENERIC_ALL/FILE_ALL_ACCESS distinction does not bite through
+`ACLFromEntries`, measured, so the mutation swapping them is equivalent rather than uncaught.
+Backlog row **28** is deleted by that file's own rule, four tests own it, and each assertion was
+watched failing under a mutation that changes the answer rather than removing a reference.
+
+**Condition 3 has a `README` and stays open.** The file exists and says what §8 asks it to say —
+both Defender detections by the string a user sees, which artefact each fired on, that a source
+build is worse against them rather than better, the bearer token's three files, the machine-wide
+trust boundary, the database's own inherited permissions, and the Codex inequality in the future
+tense. What it does not give is the exclusion steps, because `Add-MpPreference` was refused and
+nobody has walked the Windows Security UI route; the condition asks for those steps, so it is not
+closed by having a `README`. An adversarial pass over the first draft found eleven claims the
+repository did not support, five of them falsified by this session's own condition-2 work landing
+twenty-six minutes after the draft.
+
+**Conditions 1 and 4 are untouched** and neither is an agent's: a clean-profile install needs a
+second local account, and a first run surviving antivirus needs that install.
+
+Evidence for both: suite green over 20 packages, the pinned linter at `0 issues.` and **exit 0**,
+and `scripts/race.sh` green with no data race — run in that order and not concurrently.
