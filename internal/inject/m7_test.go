@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/wotjr1649/engramux/internal/inject"
 	"github.com/wotjr1649/engramux/internal/search"
@@ -99,7 +100,8 @@ type m7Prompt struct {
 	session string
 	prompt  string
 	cwd     string
-	should  string // the human's should_inject label, "" before pass 1 is answered
+	script  string // hangul, latin or mixed - computed, never labelled
+	wanted  string // the human's answer to pass 1, "" before it is written
 }
 
 // m7Block is one excerpt block inside an injection, with the bytes it spent.
@@ -130,7 +132,12 @@ func TestWriteM7Prompts(t *testing.T) {
 	for _, p := range prompts {
 		sessions[p.session] = true
 	}
+	byScript := map[string]int{}
+	for _, p := range prompts {
+		byScript[p.script]++
+	}
 	t.Logf("sampled %d prompts across %d distinct sessions", len(prompts), len(sessions))
+	t.Logf("script strata: %d hangul, %d mixed, %d latin", byScript[m7Hangul], byScript[m7Mixed], byScript[m7Latin])
 
 	if _, err := os.Stat(m7PromptsPath()); err == nil {
 		t.Skipf("%s exists; not overwriting a file that may carry labels", m7PromptsPath())
@@ -141,21 +148,34 @@ func TestWriteM7Prompts(t *testing.T) {
 	header := []string{
 		"# Gate M7, pass 1. Replace TODO with yes or no, then run pass 2.",
 		"#",
-		"# yes: given only this prompt, earlier sessions on this machine plausibly hold",
-		"#      something worth putting in front of the model.",
-		"# no:  they do not, and the right answer is zero bytes.",
+		"# The question is: WOULD YOU HAVE WANTED earlier context here?",
+		"#",
+		"# yes: you were asking something where being reminded of earlier work on this",
+		"#      machine would have helped.",
+		"# no:  you were not - the prompt stands on its own, and zero bytes is right.",
+		"#",
+		"# This is NOT the question 'does relevant history exist'. Nobody can answer that",
+		"# from a prompt, and gate M6's claim is about existence rather than about wanting.",
+		"# What this label supports is the false-positive half - bytes spent on a prompt",
+		"# that wanted none - and coverage. The other half needs a different instrument,",
+		"# and the memory spec says which.",
 		"#",
 		"# Answer from the prompt alone. Pass 2 is what shows you the injector's output,",
 		"# and it is deliberately after this - a label written with the answer visible",
 		"# measures the answer (memory spec, What M7 will measure).",
 		"#",
-		"# columns: prompt_id, should_inject, prompt",
+		"# columns: prompt_id, script, wanted_context, prompt",
+		"# script is computed, not labelled: over half this corpus's own memory is English",
+		"# and injection deliberately does not translate, so a Hangul prompt receiving zero",
+		"# bytes is capability P2 rather than a miss (memory spec rev.11, decision 1).",
 		"# This file is under .capture/ and is never committed.",
 		"",
 	}
 	rows := make([]string, 0, len(prompts))
 	for _, p := range prompts {
-		rows = append(rows, strings.Join([]string{p.id, m7Todo, m7Line(secret.MaskString(p.prompt))}, "\t"))
+		rows = append(rows, strings.Join([]string{
+			p.id, p.script, m7Todo, m7Line(secret.MaskString(p.prompt)),
+		}, "\t"))
 	}
 	m7Write(t, m7PromptsPath(), header, rows)
 	t.Logf("wrote %d rows to the prompt file", len(rows))
@@ -256,17 +276,17 @@ func TestGateM7PrecisionAtBudget(t *testing.T) {
 	)
 	for _, p := range prompts {
 		res := m7Build(t, db, p)
-		if p.should == m7Yes {
+		if p.wanted == m7Yes {
 			wantInject++
 		}
 		if res.Text == "" {
-			if p.should == m7Yes {
+			if p.wanted == m7Yes {
 				falseNeg++
 			}
 			continue
 		}
 		emitted++
-		if p.should == m7No {
+		if p.wanted == m7No {
 			falsePos++
 		}
 		s := scored{prompt: p, blocks: m7SplitBlocks(t, p.id, res)}
@@ -280,7 +300,7 @@ func TestGateM7PrecisionAtBudget(t *testing.T) {
 				unlabelled = append(unlabelled, b.promptID+" "+b.id)
 			}
 		}
-		if s.relBytes > 0 && p.should == m7Yes {
+		if s.relBytes > 0 && p.wanted == m7Yes {
 			coverage++
 		}
 		runs = append(runs, s)
@@ -360,7 +380,7 @@ func m7NonVacuity(t *testing.T, db *sql.DB, prompts []m7Prompt, labels map[strin
 		}
 		for _, b := range m7SplitBlocks(t, p.id, res) {
 			allBytes += b.bytes
-			if p.should == m7No {
+			if p.wanted == m7No {
 				falseBytes += b.bytes
 			}
 		}
@@ -676,7 +696,9 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 		if err := json.Unmarshal([]byte(payload), &p); err != nil || p.Prompt == "" {
 			continue
 		}
-		all = append(all, m7Prompt{id: id, session: session, prompt: p.Prompt, cwd: p.Cwd})
+		all = append(all, m7Prompt{
+			id: id, session: session, prompt: p.Prompt, cwd: p.Cwd, script: m7Script(p.Prompt),
+		})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read the prompts: %v", err)
@@ -703,8 +725,8 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 func m7LabelledPrompts(t *testing.T, db *sql.DB) []m7Prompt {
 	t.Helper()
 	labels := map[string]string{}
-	for _, f := range m7Read(t, m7PromptsPath(), 3) {
-		labels[f[0]] = m7Answer(t, m7PromptsPath(), f[1])
+	for _, f := range m7Read(t, m7PromptsPath(), 4) {
+		labels[f[0]] = m7Answer(t, m7PromptsPath(), f[2])
 	}
 	out := m7Sample(t, db)
 	for i := range out {
@@ -713,7 +735,7 @@ func m7LabelledPrompts(t *testing.T, db *sql.DB) []m7Prompt {
 			t.Fatalf("%s has no row for a sampled prompt - it was written against a different "+
 				"snapshot. Re-run pass 1 into a fresh file", m7PromptsPath())
 		}
-		out[i].should = v
+		out[i].wanted = v
 	}
 	return out
 }
@@ -800,6 +822,45 @@ func m7Write(t *testing.T, path string, header, rows []string) {
 	}
 	if err := w.Flush(); err != nil {
 		t.Fatalf("flush %s: %v", path, err)
+	}
+}
+
+// The three script strata. They are computed and never labelled, and they exist
+// because the corpus is 74% English while the prompts asking it are not: rev.11
+// measured a Korean query's connectivity to this corpus at 16 of 50 against an
+// English one's 47, and rev.12's decision 1 says injection does not translate,
+// so a Hangul prompt receiving zero bytes is P2 rather than a miss. An
+// abstention figure that does not say which stratum it came from cannot tell
+// those apart.
+const (
+	m7Hangul = "hangul"
+	m7Mixed  = "mixed"
+	m7Latin  = "latin"
+)
+
+// m7Script classifies one prompt by the share of its letters that are Hangul,
+// on the same boundaries rev.11's own table uses: half or more is Hangul, under
+// a fifth is Latin, and the rest is mixed.
+func m7Script(s string) string {
+	var letters, hangul int
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		letters++
+		if unicode.Is(unicode.Hangul, r) {
+			hangul++
+		}
+	}
+	switch {
+	case letters == 0:
+		return m7Latin
+	case hangul*2 >= letters:
+		return m7Hangul
+	case hangul*5 < letters:
+		return m7Latin
+	default:
+		return m7Mixed
 	}
 }
 

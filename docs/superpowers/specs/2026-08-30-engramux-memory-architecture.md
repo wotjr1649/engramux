@@ -1,5 +1,17 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.15** - 2026-09-04 - rev.15 is three corrections and one closure, all from an adversarial review
+of rev.14 taken before any label was written. **The three-term AND does not match nothing**: measured
+over 150 prompts, the event index returns exactly one document in 115 of the 120 abstentions that had
+a query at all, and that document is the prompt's own event, which the exclusion then removes - so the
+abstention reason's own words were misread. **Nearly half the fixture is not English**: 40 mostly
+Hangul and 29 mixed of 150, against a corpus rev.11 measured at 74% English and an injector that
+deliberately carries no translator, so an unstratified abstention figure cannot tell capability P2
+from a defect. **The first label was asking the wrong question**, and is reworded from "does history
+plausibly exist" - which nobody can answer from a prompt - to "did you want context", with what that
+does and does not support written into the table. And **gate M4's second measurement closes its own
+delete condition**: improved in all three classes, regressed in none. rev.1 to rev.14 below.
+
 **rev.14** - 2026-09-04 - rev.14 registers what gate **M7** will measure, before its harness ran and
 before one prompt was labelled. Three findings forced a redesign of the obvious shape. The installed
 corpus **grew from 20,075 to 20,993 events inside one session**, so a number pinned against it is not
@@ -1070,10 +1082,32 @@ that a figure taken over one that does not can be correct and useless at once.
 | M9 | 16 of 16 fenced, 0 carrying | **5 of 5 fenced, 0 carrying** |
 
 **The open question above is answered, and the answer is the opposite of the shape it was asked in.**
-Abstention is not rare on a real corpus, it is the common case: **83% of prompts receive zero bytes**.
-And the reason is not the selectivity ceiling this design built for - that never fired once. It is
-that the three-term AND matches **nothing at all**, which is the same narrowness that put native
-memory at 0 of 16.
+Abstention is not rare on a real corpus, it is the common case: **83% of prompts receive zero bytes**,
+and the selectivity ceiling this design built for never fired once.
+
+**Why, corrected 2026-09-04 the same day, after an adversarial review caught the first reading.**
+This section first said the three-term AND "matches nothing at all". That was read off the abstention
+reason `ReasonNoHits`, whose text is *nothing in the corpus matched* - and the code returns it in two
+different situations, because `keepable` runs between the search and the check. Measured through a
+throwaway probe over 150 prompts of the same snapshot, deleted with the run: **122 abstained**, 2 of
+them for having no usable term at all, and of the remaining 120 the event index returned **zero
+matches in 0 of them, exactly one match in 115, and more than one in 5.** The memory index returned
+nothing for any. **Both indexes were empty for none.**
+
+So the AND does not match nothing. **It matches exactly one document, and that document is the
+prompt's own event** - already ingested by the time the injector runs, matched by a query cut from
+its own text, and then removed by the exclusion the request carries. What is left is empty, and the
+reason string calls that "nothing matched".
+
+**The corrected reading is a stronger statement about narrowness, not a weaker one.** On a corpus of
+twenty-one thousand documents, the intersection of three words taken from a prompt is a fingerprint
+of that prompt and reaches nothing else. That is the same narrowness that put native memory at 0 of
+16, and it is now measured rather than inferred.
+
+**One product defect falls out of it.** `ReasonNoHits` is written into the service log, where a
+reader is meant to be able to tell recall from silence (§6's fifth mitigation), and it says "nothing
+in the corpus matched" for a search that matched and was then filtered. The two cases want different
+words. This is recorded rather than fixed here; it changes a log line, not a decision.
 
 **Whether that is P2 working or the reduction being too narrow is what M7's `should_inject` labels
 decide**, and they are the owner's to write. The two readings are not the same claim: a prompt with
@@ -1147,17 +1181,69 @@ small because most prompts emit nothing at all.
 
 #### Two labels, and the first is written before the output is seen
 
-`should_inject` is judged from the prompt alone, with nothing from the injector visible. Only then
+The first label is judged from the prompt alone, with nothing from the injector visible. Only then
 are the emitted blocks shown and judged one by one. That order is what makes an abstention scoreable
-instead of undefined, and it joins M6 and M7 into one instrument:
+instead of undefined.
+
+**The first label was reworded on 2026-09-04, before one was written, and the rewording matters more
+than it looks.** It first asked whether earlier sessions *plausibly hold* something worth injecting -
+which reads like M6's condition and is not it. **M6 and P2 are about whether relevant history
+exists**; a person reading their own prompt is answering whether they *wanted* context, and nobody
+can answer the first from a prompt alone. Conflating them would have let a coverage miss be read as
+an M6 failure and the other way round. So the column is `wanted_context`, and this is what it
+supports and what it does not:
 
 | | injector emitted | injector abstained |
 |---|---|---|
-| **should_inject = true** | scored for precision | false negative |
-| **should_inject = false** | false positive | M6's true negative |
+| **wanted_context = yes** | scored for precision | **coverage miss** - not an M6 failure, because nobody has said the history exists |
+| **wanted_context = no** | **false positive** - bytes spent where none were wanted | correct silence |
 
-Dropping abstentions from the average instead - which is the obvious shortcut - would leave a gate
-passable by abstaining harder, which is the failure M6 exists to catch from the other side.
+**What is left unmeasured, named rather than hidden.** M6's own claim - *prompts with no relevant
+history emit zero bytes* - needs the existence half, and the only instrument that reaches it is
+relevance-labelling the candidate pool a prompt would have drawn from. That is a larger fixture than
+this one and it is not built. M6 therefore continues to rest on its synthetic arm, which is what the
+spec has said since the first reading.
+
+Dropping abstentions from the average instead - the obvious shortcut - would leave a gate passable by
+abstaining harder, which is the failure M6 exists to catch from the other side.
+
+#### The sample is stratified by script, and that is not a detail
+
+**Measured 2026-09-04 over the 150 sampled prompts: 40 are mostly Hangul, 29 are mixed, and 81 are
+mostly Latin.** Nearly half the fixture asks in a language the corpus is not written in - rev.11
+measured this corpus at **74% English** and a Korean query's connectivity to it at **16 of 50**
+against an English query's **47** - and rev.12's decision 1 says injection deliberately carries no
+translator, so **a Hangul prompt receiving zero bytes is capability P2 rather than a miss**.
+
+So every abstention figure this fixture produces is reported **per stratum**. An aggregate that does
+not say which stratum it came from cannot tell the capability from the defect, and the aggregate is
+what the first reading of this corpus reported.
+
+The stratum is computed from the prompt's letters and never labelled: half or more Hangul is
+`hangul`, under a fifth is `latin`, the rest is `mixed` - the same boundaries rev.11's own table
+uses.
+
+#### Two fidelity limits, and only one of them runs in the safe direction
+
+**The snapshot freezes the database and not the clock.** An August prompt searches a corpus holding
+September, where at hook time only the past existed. That one is conservative: the real abstention
+rate is higher, not lower.
+
+**It does not freeze project identity either, and that one is not conservative.** The injector
+resolves the request's `cwd` against the **live filesystem** every time, so a worktree that has been
+moved, deleted, or has gained or lost a `.git` since the prompt was typed resolves to a different
+project - and therefore a different scope - even against a frozen database. A replay is faithful only
+for prompts whose worktree still resolves as it did. **Recorded rather than fixed here**; fixing it
+means carrying the prompt's stored `project_id` instead of re-deriving it, which is a change to the
+harness and not to the product.
+
+#### What M7 cannot license, beyond what it does not measure
+
+**Every prompt in the snapshot is Claude Code's.** 376 of them, and Codex contributes none, which is
+what the corpus holds rather than a sampling choice. The switch is one boolean with no host in it, so
+turning injection on turns it on for both. **M7 as built therefore says nothing about Codex**, and a
+pilot taken on its number is a Claude Code pilot whatever the file says. Splitting the switch by host,
+or building a Codex fixture, is what would change that.
 
 #### The gate is the relevant-byte share, strictly above 0.50
 
@@ -1491,6 +1577,9 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M2** | Drift canary | An unknown frontmatter key, an unknown file name, a missing index — each **warns and continues**. A silent skip is a failure |
 | **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Pinned 2026-09-04 at claude-code 0.400 and codex 0.600**, 10 and 15 of 25 over populations of 38 and 265 and the English fixture, same-script 24 of 42 and cross-script 1 of 8. It took three tries to get a number worth pinning: the Korean fixture returned **0 of 25 on each host** and a floor of zero is a gate that is off; the English fixture under the implicit AND returned **1 and 0**; and the selector is what moved it to 25 of 50, against a bar of 19 pre-registered before the number was known and an oracle ceiling of 37. Three sections carry it — *What gate M3 measured on its first human fixture*, *What the English arm settled*, and *What building the selector settled*.
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
+
+**M4's second measurement, 2026-09-04.** The gate's own delete condition asks for one, and this is it: **improved in all three classes and regressed in none**. Recall@10 moves in one class, 0.480 to 0.520 on `a touched path`; MRR moves in all three, 0.242 to 0.262, 0.134 to 0.170 and 0.555 to 0.613. The delete condition does not fire, migration `00005`, `store.Derive` and the ORDER BY term stay, and the 18.4 MB is paid for.
+
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
