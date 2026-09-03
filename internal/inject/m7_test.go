@@ -77,7 +77,7 @@ func m7BlocksPath() string  { return filepath.Join(m7FixtureDir, "blocks.tsv") }
 // m7Want is how many prompts the fixture holds, and m7Bar is the pre-registered
 // gate: the relevant-byte share, strictly above it. Both are the spec's.
 const (
-	m7Want = 30
+	m7Want = 150
 	m7Bar  = 0.50
 )
 
@@ -681,12 +681,16 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 		t.Skipf("the snapshot holds %d usable prompts, fewer than the %d the fixture wants", len(all), m7Want)
 	}
 
-	step := len(all) / m7Want
+	// k*N/want rather than a fixed stride. An integer stride leaves the tail
+	// of the window unsampled whenever want does not divide N - at 150 of 376
+	// it would stop at index 298 and never look at the last fifth - and the
+	// tail is the most recent work, which is the part a prompt is most likely
+	// to have history for.
 	out := make([]m7Prompt, 0, m7Want)
-	for i := 0; len(out) < m7Want && i < len(all); i += step {
-		out = append(out, all[i])
+	for k := range m7Want {
+		out = append(out, all[k*len(all)/m7Want])
 	}
-	t.Logf("%d prompts in the snapshot, taking every %dth for %d", len(all), step, len(out))
+	t.Logf("%d prompts in the snapshot, taking %d spread evenly across the window", len(all), len(out))
 	return out
 }
 

@@ -1052,6 +1052,42 @@ run says nothing about how often injection *should* stay silent on a real corpus
 abstention is measured here only against inputs constructed to have no history. **M10 over the
 installed database and M7 over a labelled fixture are the two instruments that would.**
 
+*Both instruments ran on 2026-09-04, and the next section is what they said.*
+
+#### What the first reading over a real corpus said (M-4)
+
+**Measured 2026-09-04** over the frozen snapshot M7's harness is built against - about 21,000 events,
+376 of them prompts - with 30 of those prompts put through the injector. It is the first time any of
+these four figures has been read over a corpus that resembles the machine, and rev.13's finding is
+that a figure taken over one that does not can be correct and useless at once.
+
+| | over `.capture/fixtures-raw` | over the snapshot |
+|---|---|---|
+| injected / abstained | **16 of 16, none abstained** | **5 of 30, 25 abstained** |
+| why it abstained | not reached | **24 of 25 matched nothing**; the selectivity ceiling fired **0 times** |
+| M10 worst / median | 29.19 ms / 3.11 ms | **42.05 ms / 15.72 ms**, against 500 ms |
+| M5 largest | 4,842 B | **4,744 B**, cap 5,000 B |
+| M9 | 16 of 16 fenced, 0 carrying | **5 of 5 fenced, 0 carrying** |
+
+**The open question above is answered, and the answer is the opposite of the shape it was asked in.**
+Abstention is not rare on a real corpus, it is the common case: **83% of prompts receive zero bytes**.
+And the reason is not the selectivity ceiling this design built for - that never fired once. It is
+that the three-term AND matches **nothing at all**, which is the same narrowness that put native
+memory at 0 of 16.
+
+**Whether that is P2 working or the reduction being too narrow is what M7's `should_inject` labels
+decide**, and they are the owner's to write. The two readings are not the same claim: a prompt with
+no history receiving zero bytes is the capability, and a prompt with history receiving zero bytes is
+a miss this instrument would otherwise never see.
+
+**The budget holds, and that is the half rev.13 demanded.** 42.05 ms against 500 ms over a corpus
+whose documents are the machine's own, where every earlier M10 reading was over documents a few dozen
+bytes long.
+
+**One fidelity limit, and it runs in the safe direction.** The snapshot is the whole history, so an
+August prompt searches a corpus containing September. At hook time only the past exists, so the real
+abstention rate is **higher** than 83% rather than lower, and the finding is conservative.
+
 ### What M7 will measure, pre-registered before a label exists (M-4)
 
 **Registered 2026-09-04, before the harness had run and before one prompt had been labelled.** M3's
@@ -1092,13 +1128,22 @@ cannot hold the answers. Prompts drawn from inside the snapshot carry their own 
 exclusion the relay makes is exact rather than empty, and their `cwd` is the one the relay actually
 sent. Two of the 16 are also 30,945 B and 52,135 B pastes rather than typed questions.
 
-**30 prompts, sampled systematically over time and with no random seed at all**: order every
-`UserPromptSubmit` event in the snapshot by the instant it was received and take every *floor(N/30)*-th.
-Deterministic, so anyone with the snapshot re-derives the same 30 without being handed a seed, and
-spread across the whole window rather than over one afternoon. A round-robin across sessions was the
-first shape and is worse here - with more sessions than prompts wanted it can only ever take each
-session's *first* prompt, and an opening prompt is not a typical one. **How many distinct sessions the
-30 land in is reported** rather than assumed.
+**150 prompts, sampled systematically over time and with no random seed at all**: order every
+`UserPromptSubmit` event in the snapshot by the instant it was received and take the *k*N/150*-th for
+each *k*. Deterministic, so anyone with the snapshot re-derives the same 150 without being handed a
+seed, and spread across the whole window rather than over one afternoon. A round-robin across sessions
+was the first shape and is worse here - with more sessions than prompts wanted it can only ever take
+each session's *first* prompt, and an opening prompt is not a typical one. A fixed integer stride was
+the second and is worse for a different reason: it leaves the tail of the window unsampled whenever
+the count does not divide, and the tail is the most recent work. **How many distinct sessions the 150
+land in is reported** rather than assumed.
+
+**150 and not 30, and the number came from a measurement rather than a preference.** The first draft
+registered 30. Running the harness over the snapshot then measured what no reading before it had:
+**5 of 30 prompts inject and 25 abstain**, so a fixture of 30 would score precision over five prompts.
+At that rate 150 puts roughly 25 prompts through the part of the gate that needs them, and it costs
+one extra blind yes-or-no per prompt rather than one extra excerpt to read - the block pass stays
+small because most prompts emit nothing at all.
 
 #### Two labels, and the first is written before the output is seen
 
