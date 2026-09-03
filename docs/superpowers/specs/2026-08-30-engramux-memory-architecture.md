@@ -1079,8 +1079,9 @@ synthetic prompts.
 
 #### The prompts come from inside the snapshot, and the captured ones cannot be used
 
-**Measured 2026-09-04.** The snapshot holds **374 `UserPromptSubmit` events, every one of them
-claude-code; codex contributes none.** `.capture/` holds 19 unique prompt captures carrying **16
+**Measured 2026-09-04.** The snapshot holds **376 `UserPromptSubmit` events, every one of them
+claude-code; codex contributes none** - 374 when the count was taken off `status` a few minutes
+before the copy, which is the corpus moving even at that scale. `.capture/` holds 19 unique prompt captures carrying **16
 distinct texts** - not the 21 a file count suggests, because two of them are byte-identical copies of
 captures already in the fixtures.
 
@@ -1144,12 +1145,44 @@ memory total against 200 separately and **injects anyway when one side is suppre
 still has hits**, and nothing in the reply says so. An arm that did not record it would fold a
 half-suppressed injection into the average as though it were an ordinary one.
 
-#### Three non-vacuity arms, and the gate fails when any of them passes
+#### The non-vacuity arms, and the two that were dropped for passing by construction
 
-Shuffled prompt-to-block assignment, a reversed ranking, and the `MatchAny` selector. **This
-repository has already written a gate that survived a total inversion of the ranking**, believed it,
-and deleted it - rev.12 records that, and both its commit and its revert are on `main` on purpose.
-The arms are what stop that happening a second time.
+**This registration was corrected while the harness was being written and before one label
+existed**, which is the only window in which correcting it is not tuning. The first draft named three
+arms - a shuffled prompt-to-block assignment, a reversed ranking and the `MatchAny` selector - and
+writing them is what showed that the first is vacuous and the other two can be.
+
+**The shuffle always scores zero and is dropped.** A label is keyed by prompt *and* block, and a
+block belongs to one prompt, so crediting prompt *i*'s blocks to prompt *i+1* misses every lookup
+whatever the labels say. It would have passed on a fixture where a labeller marked every row
+relevant, which is the one thing it was put there to catch.
+
+**What replaces it has no such hole**: on the prompts the owner labelled `should_inject = no`, every
+byte the injector emitted is a byte spent wrongly, and the share of all emitted bytes that went to
+those prompts is gated at the same 0.50. It reads pass 1's labels, which are written before any
+output is visible, so nothing about it can be answered by the injector's own choices - and it catches
+what the precision figure structurally cannot, because that figure is scored only over prompts that
+were injected into.
+
+**The reversed and broadened arms stay, with an honesty condition.** Only what the shipped injector
+emitted was ever judged, so an arm retrieving something else scores its blocks unjudged, and unjudged
+is irrelevant - which makes a low score the pool talking rather than the ranking. Each arm therefore
+reports **how much of what it emitted carried a label**, and below 20% it is recorded as
+**inconclusive rather than passed**. It still fails the gate if it scores *above* the bar, because
+that would be a real result.
+
+**What would make them conclusive is labelling the whole candidate pool** - roughly `candidates`
+blocks per prompt rather than the handful that fit the byte cap - and that is a larger fixture than
+this one. It is named here so nobody reads more into a quiet arm than it carries.
+
+**The reason any of this is here**: this repository has already written a gate that survived a total
+inversion of the ranking, believed it, and deleted it. rev.12 records it, and both its commit and its
+revert are on `main` on purpose.
+
+**An unjudged block counts as irrelevant.** That is the null hypothesis - a block no one called
+relevant is not evidence of relevance - and it is the convention pooled relevance judgements have
+used since TREC. It is also what makes the overlap condition above necessary rather than fussy: the
+pool was filled by one system, so the system that filled it scores best by construction.
 
 #### What the number licenses, and what it does not
 
