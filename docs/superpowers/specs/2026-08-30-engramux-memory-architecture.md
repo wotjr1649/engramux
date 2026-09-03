@@ -1,5 +1,14 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.13** · 2026-09-04 — rev.13 records what installing rev.12 found. Search was reading a payload
+for **every matching document to return twenty of them**, because `count(*) OVER ()` materialises the
+whole result set and the payload sat in the same SELECT list. On the synthetic corpus §7.1 measures
+it at 24.2 ms; on the owner's real 227 MB database it takes **4 s** and hits the service's read
+deadline, and **5 of 10 ordinary questions came back as `context deadline exceeded`**. The defect
+predates the selector — one common token triggers it — and the selector is what made an ordinary
+question reach it. Fixed by joining the payload after the LIMIT, and gated by a ratio rather than a
+duration. rev.1 to rev.12 below.
+
 **rev.12** · 2026-09-04 — rev.12 is rev.11's selector, built. The implicit AND becomes a caller's
 choice: **MCP and the CLI join a query's tokens with OR, the injector keeps the AND**, and gate
 **M3 is pinned for the first time** at **claude-code 0.400 and codex 0.600** — 25 of 50 against
@@ -687,6 +696,42 @@ worst case — one term in 1 document in 100, the other in all of them: **MatchA
 set of 196, MatchAny 65.2 ms over 19,503**. About **20×**, and it is the match set that decides it,
 which §7.1 already measured from the other direction. Acceptable on an interactive surface and the
 reason the injector — the one path with a 500 ms deadline — keeps the AND.
+
+**And that measurement was wrong about the real machine by two orders of magnitude**, which the next
+section is about. It was not wrong about the ratio; it was taken over a corpus whose documents are
+tiny, and what it could not see is that the cost scaled with the size of documents the query never
+returns.
+
+### What installing it found (M-2)
+
+**[verified] 2026-09-04, on `step-8-window-cost`.** Step 7 was installed and its main surface half
+stopped answering. **5 of 10** ordinary questions came back as `context deadline exceeded` against
+the service's 4 s read deadline, and the successes took **1.3 s to 3.5 s**.
+
+**The selector was not the cause.** A *single* token was enough — `bash` and `the` both timed out,
+`engramux` took 3.6 s over 15,397 matches, and `deadline` took 424 ms over 838. A one-token query
+builds a byte-identical expression under both modes, so **the defect predates the selector entirely**.
+What the selector changed is how often an ordinary question reaches it: under the implicit AND a
+sentence matched almost nothing, which is what made the search useless and is the whole reason
+`MatchAny` exists.
+
+**The cause is a window function sharing a SELECT list with a large column.** `count(*) OVER ()` is
+computed over the whole result set, so SQLite materialises every matching row before returning the
+first — and `events.payload` was in that list. A query matching 15,000 documents read 15,000 payloads
+to return 20.
+
+**Measured over two corpora identical but for payload size**, 20,000 events, one term in all of them,
+limit 20: **64 B documents 45.2 ms, 8,192 B documents 1.178 s — a ratio of 22.26**. With the payload
+joined after the LIMIT instead: **45.2 ms and 91.8 ms, a ratio of 2.03**. Some scaling is real and is
+not the defect — the twenty rows that *are* returned get masked and excerpted — which is why the gate
+is a ceiling of 3 rather than 1.
+
+**Why nothing caught it, and what that says about the synthetic corpus.** §7.1 measured this exact
+shape at **24.2 ms** over 19,503 synthetic events. The number is correct and the corpus is not the
+machine's: its documents are a few dozen bytes where the real ones average about 11.5 KB. **A
+performance measurement over a corpus that does not resemble the real one can be right and useless at
+the same time**, and the gate written here is a ratio rather than a duration for that reason — two
+corpora in one run, where the machine, the cache and the load cancel.
 
 ### Why derived fields are not a summary (M-3)
 
