@@ -1,5 +1,15 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.14** - 2026-09-04 - rev.14 registers what gate **M7** will measure, before its harness ran and
+before one prompt was labelled. Three findings forced a redesign of the obvious shape. The installed
+corpus **grew from 20,075 to 20,993 events inside one session**, so a number pinned against it is not
+re-derivable and the fixture becomes a frozen snapshot of the `.db` and `.db-wal` pair. The 16
+distinct prompts `.capture/` holds **predate the corpus by 34 hours**, so their own working context
+cannot be in it, and the 374 prompts inside the snapshot replace them. And the statistic is the
+**relevant-byte share** rather than a count, because the budget being spent is bytes. The gate is
+pre-registered at **strictly above 0.50**, with three non-vacuity arms that must fail, and M7's row
+is narrowed in writing to what it actually measures. rev.1 to rev.13 below.
+
 **rev.13** · 2026-09-04 — rev.13 records what installing rev.12 found. Search was reading a payload
 for **every matching document to return twenty of them**, because `count(*) OVER ()` materialises the
 whole result set and the payload sat in the same SELECT list. On the synthetic corpus §7.1 measures
@@ -1042,6 +1052,119 @@ run says nothing about how often injection *should* stay silent on a real corpus
 abstention is measured here only against inputs constructed to have no history. **M10 over the
 installed database and M7 over a labelled fixture are the two instruments that would.**
 
+### What M7 will measure, pre-registered before a label exists (M-4)
+
+**Registered 2026-09-04, before the harness had run and before one prompt had been labelled.** M3's
+bar was pre-registered at 19 of 50 before the number was known, which is the only order in which a
+bar means anything. This is that order for M7, and it lives here rather than in the harness so that
+moving it is a spec revision somebody has to write down.
+
+#### The corpus is a frozen snapshot, and that is what makes a pin re-derivable
+
+**Measured 2026-09-04: the installed database went from 20,075 events to 20,993 inside one session**,
+because the machine that would run M7 is the machine that generates the corpus - running the harness
+changes what the harness measures. rev.12 already recorded that an absolute rank cannot be pinned
+against a growing corpus; a precision number cannot either.
+
+**I-07 is not in the way, and the snapshot is the pair.** I-07 forbids a second process opening the
+service's database; a copy at another path is a different file, and the service does not hold it.
+`AGENTS.md` already records that a snapshot taken after stopping the service is the `.db` and its
+`.db-wal` together, because a hard-killed service never checkpoints. So: stop the service, copy the
+pair, restart it in the same turn - which is `AGENTS.md`'s first carve-out, exactly as written.
+
+Measuring offline also returns what the wire does not. The injector's own result carries the ids it
+selected and the elapsed time it measured on its own clock, so **M9 and M10 become claimable over
+this corpus instead of disclaimed**, and M6's asserted arm can run rather than being carried by
+synthetic prompts.
+
+#### The prompts come from inside the snapshot, and the captured ones cannot be used
+
+**Measured 2026-09-04.** The snapshot holds **374 `UserPromptSubmit` events, every one of them
+claude-code; codex contributes none.** `.capture/` holds 19 unique prompt captures carrying **16
+distinct texts** - not the 21 a file count suggests, because two of them are byte-identical copies of
+captures already in the fixtures.
+
+Those 16 cannot be the fixture. **The capture window closed 2026-08-26 and the corpus's first event
+is 2026-08-28**, so the strongest relevance class there is - the work the prompt was typed during -
+is structurally absent, and a fixture drawn from them would measure precision against a corpus that
+cannot hold the answers. Prompts drawn from inside the snapshot carry their own event id, so the
+exclusion the relay makes is exact rather than empty, and their `cwd` is the one the relay actually
+sent. Two of the 16 are also 30,945 B and 52,135 B pastes rather than typed questions.
+
+**30 prompts, sampled systematically over time and with no random seed at all**: order every
+`UserPromptSubmit` event in the snapshot by the instant it was received and take every *floor(N/30)*-th.
+Deterministic, so anyone with the snapshot re-derives the same 30 without being handed a seed, and
+spread across the whole window rather than over one afternoon. A round-robin across sessions was the
+first shape and is worse here - with more sessions than prompts wanted it can only ever take each
+session's *first* prompt, and an opening prompt is not a typical one. **How many distinct sessions the
+30 land in is reported** rather than assumed.
+
+#### Two labels, and the first is written before the output is seen
+
+`should_inject` is judged from the prompt alone, with nothing from the injector visible. Only then
+are the emitted blocks shown and judged one by one. That order is what makes an abstention scoreable
+instead of undefined, and it joins M6 and M7 into one instrument:
+
+| | injector emitted | injector abstained |
+|---|---|---|
+| **should_inject = true** | scored for precision | false negative |
+| **should_inject = false** | false positive | M6's true negative |
+
+Dropping abstentions from the average instead - which is the obvious shortcut - would leave a gate
+passable by abstaining harder, which is the failure M6 exists to catch from the other side.
+
+#### The gate is the relevant-byte share, strictly above 0.50
+
+**The budget is bytes, so the statistic is bytes.** A short relevant block beside a long irrelevant
+one is 0.50 by block count while most of what the model actually received is distractor. Excerpts run
+to 240 runes and blocks are assembled until 5,000 B is gone, so block counts and byte shares come
+apart by design.
+
+Strictly above, not at or above, because a tie is not evidence.
+
+**The denominator is the assembled body, and the fence is outside it.** What the injector chooses is
+which blocks to spend `MaxBytes` minus the fence on; the fence itself is fixed overhead that carries
+no relevance in either direction, and putting it in the denominator would let a bigger fence improve
+the score. So: relevant block bytes over all block bytes, both measured on the body `assemble`
+returned.
+
+*Both of the two paragraphs above were tightened on 2026-09-04 after the first draft of this section
+and still before any prompt was labelled or the harness was run - which is what pre-registration
+requires. The bar itself did not move.*
+
+**Reported beside it and deliberately not gated**: pooled block precision, coverage - the share of
+`should_inject = true` prompts that received at least one relevant block - the false-positive rate,
+the abstention rate, whether each of the two indexes hit its own selectivity ceiling, and **M5, M6,
+M9 and M10 over this corpus**. Those four have never been read over a corpus that resembles this
+machine, and rev.13's whole finding is that a figure taken over one that does not can be correct and
+useless at once.
+
+The per-index ceiling matters more than it looks. The injector compares the event total and the
+memory total against 200 separately and **injects anyway when one side is suppressed and the other
+still has hits**, and nothing in the reply says so. An arm that did not record it would fold a
+half-suppressed injection into the average as though it were an ordinary one.
+
+#### Three non-vacuity arms, and the gate fails when any of them passes
+
+Shuffled prompt-to-block assignment, a reversed ranking, and the `MatchAny` selector. **This
+repository has already written a gate that survived a total inversion of the ranking**, believed it,
+and deleted it - rev.12 records that, and both its commit and its revert are on `main` on purpose.
+The arms are what stop that happening a second time.
+
+#### What the number licenses, and what it does not
+
+M7 as registered here measures **the precision of what the injector emitted**. It cannot see relevant
+history that was never emitted, and that narrowing is recorded rather than hidden: **native memory
+contributing to 0 of 16 injections would draw no penalty from this instrument at all.** So the number
+licenses exactly one claim - that on this fixture the emitted bytes were mostly relevant - and it
+licenses neither *"the necessary memory was recalled"* nor *"more precise than native"* nor anything
+about task outcomes. Section 3 already puts the last of those out of reach for a one-developer corpus.
+
+**And it licenses an owner pilot rather than a release default.** 30 prompts from one owner on one
+machine over about one week is enough to let that owner turn injection on for themselves knowingly.
+It is not enough to turn it on for a stranger, and any sentence saying M7 is what licenses that -
+including the one session 13 wrote - is wrong by this section.
+
 ### Replacing an installed build is its own command (M-7)
 
 **Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
@@ -1292,7 +1415,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |
-| **M7** | Precision at budget | A human-labelled fixture of real prompts and what should have been injected, pinned once and then a regression test. Below threshold, the feature does not ship enabled |
+| **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
 | **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
