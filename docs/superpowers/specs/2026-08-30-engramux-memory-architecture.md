@@ -733,6 +733,12 @@ performance measurement over a corpus that does not resemble the real one can be
 the same time**, and the gate written here is a ratio rather than a duration for that reason — two
 corpora in one run, where the machine, the cache and the load cancel.
 
+**Verified against the machine that failed.** The same ten questions, re-run on the installed build
+after the fix, plus the two single tokens that had timed out: **0 of 12 exceeded the deadline**,
+where 5 of 10 had. `bash` and `the` answer in **512 ms and 598 ms** against a timeout, and `claude
+code hook event` — which matches 20,010 documents, essentially the whole corpus — answers in
+**1.8 s**. The slowest of the twelve is 2.9 s and it is the first of the run.
+
 ### Why derived fields are not a summary (M-3)
 
 The distinction is load-bearing and easy to lose. A derived field exists **to find a document**; a

@@ -1,18 +1,22 @@
-# Session 14 — Engramux: after the selector, the two gates that are still nobody's
+# Session 14 — Engramux: after the selector and what installing it found
 
 Session 13 opened blocked on the same thing the two before it were — fifty queries only the owner
 could write — and it stopped being blocked mid-session. The queries landed, gate **M3** returned
 **zero**, and the rest of the session was spent finding out why. The answer was two walls, one of
 which turned out to be the query builder, and **Step 7** is what came of it.
 
-So this session opens with something none of the last four did: **no gate is red, and nothing is
-waiting on the owner.**
+Installing it then found a second thing, and **Step 8** is what came of that: search was reading a
+payload for every matching document to return twenty of them, and on the real database half of an
+ordinary question set was timing out. It is fixed, gated and installed.
+
+So this session opens with something none of the last four did: **no gate is red, nothing is waiting
+on the owner, and the installation is the tree.**
 
 `CLAUDE.md` imports `AGENTS.md`, so the standing rules are already in your context — including the
 two carve-outs about the service and about `install --apply`.
 
-Read, in this order: `docs/superpowers/specs/2026-08-30-engramux-memory-architecture.md` **rev.12**,
-and in it the three sections that run consecutively — *What gate M3 measured on its first human
+Read, in this order: `docs/superpowers/specs/2026-08-30-engramux-memory-architecture.md` **rev.13**,
+and in it the four sections that run consecutively — *What gate M3 measured on its first human
 fixture*, *What the English arm settled*, and *What building the selector settled*. They are one
 argument in three parts and the last one is the only one that changed code. Then **§5**'s **M3** and
 **M7** rows, and `docs/superpowers/plans/2026-08-30-after-phase-6.md` rev.4's **Step 6** and
@@ -26,8 +30,8 @@ argument in three parts and the last one is the only one that changed code. Then
 
 | | |
 |---|---|
-| `main` | Carries Step 7 merged `--no-ff`, spec rev.11 and rev.12, plan rev.4. Several commits ahead of `origin/main`. **The owner was not asked to push.** `git status -sb` is the answer |
-| Installed | Still **Step 5**'s build. Step 7 changes what MCP and the CLI return and **has not been installed** — the tree and the installation are no longer the same build |
+| `main` | Carries Step 7 and Step 8, both merged `--no-ff`, spec rev.11 to rev.13, plan rev.5. Pushed to `origin` on 2026-09-04 with the owner's word. `git status -sb` is the answer |
+| Installed | **Step 8**'s build, which is the tree. `doctor` green at exit 0 on every section, both hosts pointing at the endpoint, spool 0 |
 | Gates | **M1**, **M2**, **M4** pass. **M5**, **M6**, **M9**, **M10** pass. **M3 is pinned and green for the first time** — claude-code 0.400, codex 0.600. **M7 is un-run and un-built** and is now the only one |
 | Injection | Built, **off**, and still on `MatchAll` by design (spec rev.12) |
 | Suite | Green over every package. Pinned linter `0 issues.` at exit 0 |
@@ -37,13 +41,7 @@ argument in three parts and the last one is the only one that changed code. Then
 
 ## 2. What to do, in order
 
-**T1 — Install Step 7, or decide not to.** The tree and the installation have diverged for the first
-time since Step 5, and what diverged is the thing a person actually notices: a search that used to
-return nothing now returns something. `scripts/reinstall.sh` is the whole cycle, and the `--apply`
-carve-out's precondition — `doctor` reporting both hosts already pointing at the endpoint — is what
-decides whether an agent may run it.
-
-**T2 — Build M7's harness and run the gate.** Unchanged from session 13's brief and now the only
+**T1 — Build M7's harness and run the gate.** Unchanged from session 13's brief and now the only
 un-run gate in the spec. It is what licenses turning injection on for anybody. The shape is
 `TestWriteM3Candidates`'s: the prompts are already captured as `UserPromptSubmit` events, the
 injector's output for each is mechanical, and the only column that has to be human is the verdict.
@@ -51,10 +49,10 @@ Two constraints from rev.9 before you start. The **corpus's own prompts** are th
 because a synthesised prompt measures the synthesiser. And the harness must not print an excerpt or a
 prompt into a terminal — `internal/inject`'s gates are measured clean and this one has to be too.
 
-**T3 — Step 6, the update path.** Memory spec **M-7** and the plan's Step 6. Independent of
+**T2 — Step 6, the update path.** Memory spec **M-7** and the plan's Step 6. Independent of
 everything above, and the only step left in the plan.
 
-**T4 — Verify, close.** Suite, the pinned linter (check its exit code, never its summary line),
+**T3 — Verify, close.** Suite, the pinned linter (check its exit code, never its summary line),
 `./scripts/race.sh`, in that order and not concurrently. The plan gets a dated Done paragraph for
 whatever closed, and a session 15 brief lands in this directory. **Push only after asking.**
 
@@ -88,6 +86,8 @@ figure.
   `MatchAll`**, and that is structural — its abstention is a threshold on the match set's size.
 - **A two-phase selector was measured and rejected.** It is worse than the plain OR, not safer.
 - **M3's bar was pre-registered at 19 of 50 before the number was known.** It measured 25.
+- **A window function does not share a SELECT list with a large column.** `count(*) OVER ()`
+  materialises every matching row; the payload is joined onto what survives the LIMIT.
 
 ---
 
@@ -127,9 +127,14 @@ figure.
    carries no backslash.
 7. **The installed service holds its database exclusively (I-07).** Every figure in rev.12 is over
    `.capture/` and native memory, not over the 18,000-event corpus the machine has.
-8. **A live MCP client caches the reply schema.** Step 7 changes no schema and adds no tool, so a
-   session open across the upgrade keeps working — but it will start getting different *results*,
+8. **A live MCP client caches the reply schema.** Steps 7 and 8 change no schema and add no tool, so
+   a session open across the upgrade keeps working — but it will start getting different *results*,
    which is the change nobody's cache protects them from.
+9. **A benchmark over the synthetic corpus can be right and useless.** Spec §7.1 priced the search's
+   worst shape at 24.2 ms and the real machine took 4 s, because the synthetic documents are a few
+   dozen bytes and the real ones average about 11.5 KB. Anything measuring cost against document
+   size has to say which corpus, and a ratio between two corpora in one run is what survives it.
+   `AGENTS.md` carries the row.
 
 `AGENTS.md`'s own table carries the rest.
 
@@ -138,6 +143,6 @@ figure.
 ## 7. Done when
 
 M7's harness exists and its gate has either run or been reported as un-runnable with the reason;
-Step 6 is done or explicitly deferred with what is left; the installation matches the tree or the
-divergence is written down; suite, pinned linter and race script are green; the plan says what closed
+Step 6 is done or explicitly deferred with what is left; suite, pinned linter and race script are
+green; the plan says what closed
 with the evidence; and a session 15 brief exists.
