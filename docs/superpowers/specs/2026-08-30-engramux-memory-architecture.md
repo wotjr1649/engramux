@@ -1,5 +1,13 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.10** · 2026-09-03 — rev.10 records the first time a person asked this product a question.
+Gate **M3** ran against the owner's own 50 queries and returned **0 of 25 on each host**, and the
+zero is not about ranking: the queries are Korean and the documents are English, and 34 of 50 share
+no word with the answer at any rank. A second wall sits in front of it — a sentence handed to an
+implicit AND matches nothing — and the ceiling with that wall removed is 26%. It is the condition
+**M-1** named for reopening the summariser, arriving by a route M-1 did not predict, and the gate is
+left **unpinned and red** because a floor of zero is a gate that is off. rev.1 to rev.9 below.
+
 **rev.9** · 2026-09-03 — rev.9 records what building **M-4** settled. The decision rev.8 did not
 name turned out to be the one that decides what the feature is: a prompt is not a query, and how it
 becomes one is written here now. Gates **M5**, **M6**, **M9** and **M10** have their first numbers,
@@ -424,6 +432,73 @@ literal user name the *body* carried, and the source path a test writes to is un
 temporary directory — so it carries the **real** user name and the assertion never reached the field
 it was named for. It sweeps the marshalled hit with the detector now, which is what §8's Phase 5
 clause does and for this reason.
+
+### What gate M3 measured on its first human fixture (M-2)
+
+**Measured 2026-09-03**, the first time this product has been asked a natural-language question by a
+person. The owner wrote **50 queries, 25 per host**, from memory rather than from the answers beside
+them, against `.capture/m3/candidates.tsv`'s verified answer column. Every line is well formed and
+every answer still verifies — the gate checks both — so what follows is about retrieval and not about
+the fixture.
+
+**Recall@10 is 0 of 25 on each host.** That number is not a statement about ranking, and pinning it
+would have turned the gate off while leaving it green, which is why the gate now refuses to advise a
+pin at zero.
+
+**There are two walls, and both are load-bearing.**
+
+**The first is the implicit AND.** §5.7's query builder turns a query into one quoted prefix phrase
+per token joined by an implicit AND, which is exactly right for a known-item literal and wrong for a
+sentence. The fixture's queries are **4 to 9 tokens, median 7**, and **2 of 50** return a single hit.
+Reducing to the three longest tokens — the reduction M-4's injector already makes — takes that to
+**7 of 50**, and crudely stripping a trailing Korean particle from each takes it to **15 of 50**.
+
+**The second is language, and it is the larger one.** All 50 queries are **100% Hangul** by letter.
+The documents they ask about are not: the median target item's body is **0% Hangul**, and **37 of 50**
+are under 20%. Asking token by token whether any word of a query reaches its answer document *at any
+rank* — the token itself, a Latin stem cut before an attached particle, and one or two syllables
+trimmed — **34 of 50 connect to nothing at all**. The cross-tabulation is close to a clean split:
+of 37 mostly-Latin targets **4** connect, and of 13 mostly-Korean targets **12** do.
+
+**The ceiling, with the first wall removed entirely.** Handing the search exactly the tokens that do
+connect — an oracle selector no implementation can have — puts the answer in the top 10 for **13 of
+50**. So **26% is the ceiling for any lexical selector over this corpus and these queries**, and the
+remaining 74% is not reachable by choosing better words from the question.
+
+*Measured through a throwaway probe in `internal/search`, deleted with the run — the same standing
+the 1.0 spec §7.1's `00002` migration-cost row has. What survives in the tree is the gate's own
+same-script and cross-script split, which is the half that has to be visible on every run: measured
+on the same fixture, **0 of 8** and **0 of 42**. The first wall is why the same-script arm is also
+zero.*
+
+#### What this decides, and what it does not
+
+**It does not falsify the ranking, the tokenizer or the derived-field boost.** Gate M4 measured the
+boost over literal known-item classes and it still holds; the Phase 4 gate's five classes still pass.
+Those measure a literal a person pastes back. This measures a question a person asks, and the two are
+different instruments.
+
+**It narrows P4 as written.** *"One query reaches answers that exist only in the other host's
+sessions or memory"* is true when the query and the document share a language and false when they do
+not, and on this machine they usually do not — the owner asks in Korean and both hosts write their
+notes in English. P4's claim is unchanged for a literal; it is `[unverified]` and currently measured
+at zero for a question.
+
+**It is the condition M-1 named for reopening the summariser, arriving by a route M-1 did not
+predict.** M-1 says to reopen *"if §5's M8 shows a class of question that verbatim retrieval cannot
+reach at all"*, and expects the class to be *"why did we choose X"* — scattered, with no literal span
+to match. The class that turned up instead is **any question asked in the reader's own language about
+a document written in another**, which is not an abstraction problem and would not be fixed by a
+summariser writing in the same language the source already uses. M-1's own next move — **M-2 first,
+read a summary someone else already paid for** — has been made: these 303 items *are* both hosts'
+own summaries, and the gap is over them.
+
+**The options are not this document's to choose and none of them is small.** Translating the query,
+translating the index, a multilingual embedding beside the FTS index, or narrowing P4 to same-language
+retrieval and saying so. §7 rejected a vector index on the `CGO_ENABLED=0` boundary and noted that
+`modernc.org/sqlite` v1.57.0 vendors sqlite-vec CGO-free, so half of that objection has already
+lapsed; what has not is that an embedding needs inference, which is the sidecar or the API key §2
+rejected. **This is the largest open question in the product and it is older than injection.**
 
 ### Why derived fields are not a summary (M-3)
 
@@ -937,7 +1012,7 @@ capabilities, each with a definition that can fail.
 | **P1** | **Exact-span recall** | For a literal that exists in the corpus — an error message, a stack frame, a command line, a path — a natural-language query for it puts a document containing that literal in the top *k*. Reported as recall@k and MRR per class | Those three classes are the ones native declines to store |
 | **P2** | **Zero-cost abstention** | For a prompt with no relevant history, the injector emits **exactly zero bytes**. Required at 100% | Native loads its index every session **regardless of the query**, so its context cost is a constant. A query-dependent zero is structurally ours |
 | **P3** | **Temporal resolution** | A time-qualified query is narrowed by real event timestamps and session boundaries | Native carries a `modified` field, which is when a note was written, not when the fact was true |
-| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory | Each host sees half |
+| **P4** | **Cross-host single search** | One query reaches answers that exist only in the other host's sessions or memory. **Measured 2026-09-03 and true only for a literal**: a natural-language question in the reader's own language about a document written in another reaches nothing, and on this machine that is the usual case — see *What gate M3 measured on its first human fixture* | Each host sees half |
 | **P5** | **Failure-fix pairs** | Querying with the text of a failure returns the edit or command that resolved it | *"Debugging fixes"* is on native's documented exclusion list |
 
 P2 is the sharpest of the five and the least obvious. *Context Rot* (Chroma Research, 2025-07-14, 18
@@ -974,7 +1049,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 |---|---|---|
 | **M1** | Native parse fidelity | Over every native memory file present on the machine: no crash, frontmatter fields extracted exactly where they exist, body bytes preserved losslessly. One failure fails the gate |
 | **M2** | Drift canary | An unknown frontmatter key, an unknown file name, a missing index — each **warns and continues**. A silent skip is a failure |
-| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes |
+| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes | **Run 2026-09-03 against the owner's own 50 queries: 0 of 25 on each host, and left unpinned** — a floor of zero is a gate that is off. What the zero is about is not ranking; the section *What gate M3 measured on its first human fixture* carries the two walls, the cross-tabulation and the 26% ceiling, and what has to be decided before this row can have a number.
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |

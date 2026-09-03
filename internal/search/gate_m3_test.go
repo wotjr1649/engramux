@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/wotjr1649/engramux/internal/memory"
 	"github.com/wotjr1649/engramux/internal/search"
@@ -132,6 +133,8 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 
 	asked := map[string]int{}
 	found := map[string]int{}
+	armAsked := map[string]int{}
+	armFound := map[string]int{}
 	for _, q := range queries {
 		asked[q.host]++
 		// The cross-host half of the definition, checked rather than
@@ -143,11 +146,20 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 				"cross-host query", q.line, n)
 			continue
 		}
-		if n := m3Carriers(t, db, q.host, q.answer); n == 0 {
+		n, body := m3CarriersBody(t, db, q.host, q.answer)
+		if n == 0 {
 			t.Errorf("line %d: no %s item carries the answer at all, so this query cannot be "+
 				"satisfied - check that the text is not something the mask rewrites", q.line, q.host)
 			continue
 		}
+		// Which arm this line belongs to, decided by the script the query
+		// is written in against the script of the document it has to
+		// reach. See [m3Script] for why the gate reports this at all.
+		arm := "cross-script"
+		if (m3Script(q.query) >= m3MostlyHangul) == (m3Script(body) >= m3MostlyHangul) {
+			arm = "same-script"
+		}
+		armAsked[arm]++
 
 		hits, _, err := search.SearchMemory(t.Context(), db, q.query, nil, 10)
 		if err != nil {
@@ -156,12 +168,26 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 		}
 		if m3Hit(t, db, hits, q.answer) {
 			found[q.host]++
+			armFound[arm]++
 			continue
 		}
 		// A miss, reported by line number and by nothing else. It is not a
 		// failure any more (see the doc comment) and it is not the query
 		// either: both columns of that line are the owner's own words.
 		t.Logf("M3: line %d missed, %s, %d hits searched", q.line, q.host, len(hits))
+	}
+
+	// The split first, because it is what the per-host numbers below mean.
+	// A gate reporting a recall of zero and nothing else invites the reader
+	// to conclude the ranking is broken; these two lines are what say
+	// whether the query and the document were even written in the same
+	// language.
+	for _, arm := range []string{"same-script", "cross-script"} {
+		if armAsked[arm] == 0 {
+			continue
+		}
+		t.Logf("M3: %s recall@10 = %d of %d (%.3f)",
+			arm, armFound[arm], armAsked[arm], float64(armFound[arm])/float64(armAsked[arm]))
 	}
 
 	for _, host := range []string{memory.HostClaude, memory.HostCodex} {
@@ -179,6 +205,17 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 
 		pin, ok := m3PinnedRecall[host]
 		switch {
+		case (!ok || pin == m3Unpinned) && recall == 0:
+			// A zero is not a number to pin, and saying "pin 0.000"
+			// here would be this gate advising the one action its shape
+			// exists to prevent: a floor of zero is cleared by every
+			// result, so pinning it turns the gate off while leaving it
+			// green. The two lines above are the diagnosis - see the
+			// memory spec's M-4 findings - and what has to happen next
+			// is a decision rather than a constant.
+			t.Errorf("M3: %s recall is 0 of %d, which is not a number to pin. Read the "+
+				"same-script and cross-script lines above: a zero here is not a statement about "+
+				"ranking", host, asked[host])
 		case !ok || pin == m3Unpinned:
 			// Loud rather than skipped, and this is the whole point of
 			// the shape: a fixture exists, so the gate can measure, and
@@ -217,6 +254,15 @@ func m3Hit(t *testing.T, db *sql.DB, hits []search.MemoryHit, answer string) boo
 // Masked, because that is what a reader gets and therefore what the fixture has
 // to be written against.
 func m3Carriers(t *testing.T, db *sql.DB, host, answer string) int {
+	n, _ := m3CarriersBody(t, db, host, answer)
+	return n
+}
+
+// m3CarriersBody is [m3Carriers] and the first matching body, which is the
+// document retrieval actually has to reach. The script of that body is what
+// [m3Script] reads, and the split it produces is what keeps a reader from
+// mistaking this gate's recall for a statement about ranking.
+func m3CarriersBody(t *testing.T, db *sql.DB, host, answer string) (int, string) {
 	t.Helper()
 	rows, err := db.QueryContext(t.Context(), `SELECT id FROM memory_items WHERE host = ?`, host)
 	if err != nil {
@@ -240,6 +286,7 @@ func m3Carriers(t *testing.T, db *sql.DB, host, answer string) int {
 	}
 
 	var n int
+	var body string
 	for _, id := range ids {
 		it, err := search.GetMemoryItem(t.Context(), db, id, nil)
 		if err != nil {
@@ -247,10 +294,47 @@ func m3Carriers(t *testing.T, db *sql.DB, host, answer string) int {
 		}
 		if it != nil && strings.Contains(it.Body, answer) {
 			n++
+			if body == "" {
+				body = it.Body
+			}
 		}
 	}
-	return n
+	return n, body
 }
+
+// m3Script says whether a run of text is mostly Hangul, by letter.
+//
+// It is in this gate because the gate's first run against a human fixture
+// produced 0 of 50 and the number said nothing about ranking: the queries are
+// the owner's, written in the owner's language, and most of the documents they
+// ask about are in the other one. A recall figure with no script beside it
+// invites exactly one wrong conclusion - that the ranking is broken - and a
+// second wrong action, pinning the zero.
+//
+// The threshold is a share and not a flag because a real document is mixed: a
+// Codex rollout summary is English prose about Korean prompts, and a note the
+// owner wrote is Korean prose about English identifiers.
+func m3Script(s string) (hangulShare float64) {
+	var h, n int
+	for _, c := range s {
+		if !unicode.IsLetter(c) {
+			continue
+		}
+		n++
+		if unicode.In(c, unicode.Hangul) {
+			h++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return float64(h) / float64(n)
+}
+
+// m3MostlyHangul is where "mostly" is drawn. 0.5 for the query, which is one
+// short sentence and is one language or the other; the target uses the same
+// number for the same reason rather than a second one nobody chose.
+const m3MostlyHangul = 0.5
 
 func otherHost(h string) string {
 	if h == memory.HostClaude {
