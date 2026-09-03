@@ -27,7 +27,7 @@ Done paragraph and **Step 6**. Backlog rows **28**, **36**, **37**, **38** and *
 | | |
 |---|---|
 | `main` | Carries Step 5 merged `--no-ff`, plus M3's shape change, spec rev.9, the plan's Done paragraph and backlog 41's closure. Several commits ahead of `origin/main`. **The owner was not asked to push.** `git status -sb` is the answer |
-| Installed | **Step 4**, on migration `00005`. Step 5 changes both binaries and **has not been installed** — the tree and the installation are one build apart, which they have not been since Step 1 |
+| Installed | **Step 5**, on migration `00005` — none was needed, the injector only reads. `doctor` green at exit 0 on every section, `injection off`, spool 0, errors 0. The tree and the installation are the same build |
 | Injection | Built, and **off**. There is no `inject.json` on this machine and the installer writes none. `doctor` reports the state either way and prints the path on the off answer |
 | Gates | **M1**, **M2** pass in the normal suite. **M4** passes over the corpus. **M5**, **M6**, **M9**, **M10** pass, first numbers in rev.9. **M3** still skips. **M7** is un-run and un-built |
 | M3's fixture | `.capture/m3/candidates.tsv`, **120 candidate lines**, every answer filled and verified, every query still `TODO-WRITE-THE-QUERY`. Unchanged since session 11 |
@@ -62,8 +62,9 @@ must not print an excerpt or a prompt into a terminal — `internal/inject`'s ga
 and this one has to be too.
 
 **T5 — Step 6, the update path.** Memory spec **M-7** and the plan's Step 6. Independent of
-everything above. It is the step that makes the sentence in §1 above — *the tree and the installation
-are one build apart* — stop being a thing a person fixes by hand.
+everything above. It is the step that turns `scripts/reinstall.sh` — which is what put Step 5 on this
+machine, and which is bash in a product whose whole argument is two binaries and no runtime — into a
+one-line wrapper around a command.
 
 **T6 — Verify, install, close.** Suite, the pinned linter (check its exit code, never its summary
 line), `./scripts/race.sh`, in that order and not concurrently. The plan gets a dated Done paragraph

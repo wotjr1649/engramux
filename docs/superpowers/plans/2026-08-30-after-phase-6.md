@@ -237,6 +237,14 @@ answered by the other half of the same condition. `scripts/breakit.sh` is that p
 and it refuses a dirty tree because `git checkout -- <file>` restores HEAD rather than the working
 tree.
 
+**Installed** through `scripts/reinstall.sh` on the owner's machine, under the `AGENTS.md` carve-out
+that `doctor` reported both hosts already pointing at the endpoint before it ran. No migration: the
+injector reads and adds no column. `doctor` green at exit 0 on every section, with its new line
+reading `injection off` and printing the path a person would write to. The service restarted with an
+uptime of 82 ms and `events` 19,104 → 19,108 across the stop and start, spool 0 and errors 0 on both
+sides of it. **There is no `inject.json` on this machine**, which is what "ships off" means here
+rather than a default in code.
+
 **Step 6 — the update path.** Memory spec **M-7**. `engramux update` as its own command: the two
 binaries and the service lifecycle, never host configuration, with `--from` as an escape hatch rather
 than the default.
