@@ -365,6 +365,11 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 				return getMemory(ctx, db, req)
 			})
 		},
+		Inject: func(ctx context.Context, req ipc.InjectRequest) (ipc.InjectReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.InjectReply, error) {
+				return injectFor(ctx, db, req)
+			})
+		},
 	}
 }
 

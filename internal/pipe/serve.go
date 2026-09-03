@@ -82,6 +82,7 @@ type (
 	GetEventFunc     func(ctx context.Context, req ipc.GetEventRequest) (ipc.GetEventReply, error)
 	ListSessionsFunc func(ctx context.Context, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error)
 	GetMemoryFunc    func(ctx context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error)
+	InjectFunc       func(ctx context.Context, req ipc.InjectRequest) (ipc.InjectReply, error)
 )
 
 // DoctorFunc answers a Doctor request. It takes no request document - the
@@ -120,6 +121,11 @@ type Handler struct {
 	// Doctor answers a Doctor request. A nil Doctor refuses one, the same
 	// way.
 	Doctor DoctorFunc
+	// Inject answers an Inject request, the hook-time push path (memory
+	// spec rev.8, M-4). A nil Inject refuses one, the same way - and a
+	// refusal is the right answer for a build that does not serve it,
+	// because the relay then injects nothing.
+	Inject InjectFunc
 }
 
 // Serve accepts connections on l and answers each one, until l is closed or
@@ -320,6 +326,35 @@ func route(ctx context.Context, env ipc.Envelope, h Handler) []byte {
 		}
 		return b
 
+	case ipc.Inject:
+		if h.Inject == nil {
+			slog.WarnContext(ctx, "pipe: this build serves no Inject handler")
+			return refuse(ctx, env.IngestID, fmt.Errorf("%w: %s", errNoHandler, env.Type))
+		}
+		// Decoded here for the reason the Search case is: the envelope
+		// check cannot see inside Payload, and a document that did not
+		// decode would otherwise become an injection for an empty prompt.
+		var ireq ipc.InjectRequest
+		if err := json.Unmarshal(env.Payload, &ireq); err != nil {
+			slog.WarnContext(ctx, "pipe: decode the inject request", "error", err)
+			return refuse(ctx, env.IngestID, err)
+		}
+		ireply, err := h.Inject(ctx, ireq)
+		if err != nil {
+			// The prompt is not logged, on the rule the search case
+			// states: it is text a person typed and a log is an
+			// egress (I-10, spec 7.5).
+			slog.ErrorContext(ctx, "pipe: inject failed", "error", err)
+			return refuse(ctx, env.IngestID, err)
+		}
+		ireply.Version, ireply.Type = ipc.Version, ipc.Inject
+		ib, err := json.Marshal(ireply)
+		if err != nil {
+			slog.ErrorContext(ctx, "pipe: encode inject reply", "error", err)
+			return nil
+		}
+		return ib
+
 	case ipc.Doctor:
 		if h.Doctor == nil {
 			slog.WarnContext(ctx, "pipe: this build serves no Doctor handler")
@@ -503,7 +538,7 @@ func validate(env ipc.Envelope) error {
 		if env.IngestID == "" {
 			return errIngestID
 		}
-	case ipc.Status, ipc.Doctor, ipc.Search, ipc.GetEvent, ipc.ListSessions, ipc.GetMemory:
+	case ipc.Status, ipc.Doctor, ipc.Search, ipc.GetEvent, ipc.ListSessions, ipc.GetMemory, ipc.Inject:
 	default:
 		// Bounded with a precision: the type is arbitrary bytes off the
 		// wire, capped only by ipc.MaxFrameLen, and this string reaches a
