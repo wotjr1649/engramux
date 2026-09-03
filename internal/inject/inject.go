@@ -205,12 +205,23 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	if err != nil {
 		return abstain(ctx, err)
 	}
-	// The deadline is checked here as well as inside the two reads. Whether
-	// this driver cancels a statement already running is not this package's
-	// to rely on, and an injection that arrives after the budget is one the
-	// relay has already stopped waiting for - so the check that makes M10's
-	// assertion true is this one, and the context is what makes the reads
-	// stop early when they can.
+	// The deadline again, after the reads rather than only inside them.
+	//
+	// **No test owns this line and one cannot be written today**, which is
+	// worth saying rather than leaving for the next break-it pass to find:
+	// measured 2026-09-03 against modernc.org/sqlite v1.57.0, a search that
+	// takes 13 ms under a 1 ms budget returns `context deadline exceeded`
+	// rather than its rows, so the two reads above already fail and
+	// [abstain] is what answers. Deleting this line changes no result, and a
+	// mutation against it is discarded rather than counted as killed.
+	//
+	// It stays because what makes it dead is a dependency's behaviour and
+	// not this package's own arithmetic - the redundant cap check that used
+	// to sit below was the second kind, and was deleted for it. A driver
+	// that stopped cancelling a running statement would put an injection
+	// past its deadline onto the user's critical path, and this is one
+	// comparison. Re-verify on a driver upgrade, which is the rule AGENTS.md
+	// applies to every row naming a pinned version.
 	if ctx.Err() != nil {
 		return Result{Reason: ReasonDeadline}, nil
 	}
