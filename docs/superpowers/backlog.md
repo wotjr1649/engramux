@@ -95,6 +95,16 @@ a build.
 
 ## Raised by Step 4's first live search, 2026-09-03
 
-| # | Where | What |
-|---|---|---|
-| 41 | `internal/search`'s boost, and Step 5's selector | **A search's own capture comes back as its own top hit.** Observed at the terminal on the first live `engramux search` after Step 4 installed: the rank-1 result for a query was the `PreToolUse` event of the shell command that ran that very search, because the command line contained the query string and therefore so did `derived_cmd`. It is not a defect of the boost - a document whose command line carries the query is exactly what the boost promotes, and the alternative, a ranking function that special-cases "events that are searches", is how a ranking function starts to rot. **What is `[unverified]` is the causal half**: the same document is a short one with a high term density, so bm25 may have ranked it first unaided and the boost may only have widened the margin. What would settle it is one query run through `Search` and `SearchUnboosted` over the live corpus, which needs a harness this repository does not have and which is not worth one on its own. **Why it is a row rather than an anecdote is Step 5.** M-4's injector selects from this same corpus, so a user's own last search is a candidate for injection into their next prompt - which is precisely the distractor §6's *Context Rot* citation is about, and the shape gate **M6** exists to make emit zero bytes. **Decided 2026-09-03, in the memory spec rev.8's M-4 section**: not injectable, excluded in the selector rather than in the ranking, and identified by the command line invoking the installed binary rather than by carrying the string. The row stays until Step 5 implements it. A human at a shell makes one such event per search; an agent searching in a loop makes a cascade of them, and this machine is the second case |
+**41 is closed by Step 5's build on 2026-09-03**, and by this file's own rule the row is gone: three
+tests own it. `TestInvokesEngramux` is the decision itself, sixteen rows of which the last five are
+the ones that matter - a command line that *mentions* this product is kept and one that *invokes* it
+is dropped. `TestBuildExcludesThisProductsOwnCommands` holds the same pair through the selector, with
+the kept row carrying the same words as the dropped one. And `TestTheSelfExclusionOverTheCorpus`
+measures it over the captures: **0 of 216** command lines mentioning this product invoke it, which is
+correct for a corpus taken before this product had a binary to run, and which a string match would
+have answered 216.
+
+What the row left open and the build did not close is the causal half it marked `[unverified]`:
+whether the boost promoted that document or bm25 had it first. Step 5 makes it moot for injection -
+the exclusion is in the selector and fires either way - and it stays unmeasured for search, where the
+row already said it was not worth a harness of its own.
