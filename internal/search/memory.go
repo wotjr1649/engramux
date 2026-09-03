@@ -180,27 +180,38 @@ func GetMemoryItem(ctx context.Context, db *sql.DB, id string, projectKeys []str
 // predicate, on the same rule [matchQuery] follows: an always-true disjunction
 // would put an unmeasured expression in front of every invocation.
 func memoryMatchQuery(tokens []string, projectKeys []string, limit int, m Match) (string, []any) {
+	// The body is joined after the LIMIT, for [matchQuery]'s reason and by its
+	// shape: `count(*) OVER ()` materialises every matching row, so a body in
+	// the same SELECT list is a body read per match rather than per hit. The
+	// native corpus is three hundred items where the event corpus is twenty
+	// thousand, so the cost here is small - but it is the same defect, and
+	// one of the two statements quietly keeping it is how it comes back.
 	const (
-		head = `
-		SELECT memory_items.id, memory_items.host, memory_items.kind,
-		       memory_items.source_path, memory_items.title, memory_items.body,
-		       memory_items.host_modified_at, count(*) OVER ()
+		inner = `
+		SELECT memory_fts.rowid AS rid, count(*) OVER () AS total, rank AS score
 		FROM memory_fts
 		JOIN memory_items ON memory_items.rowid = memory_fts.rowid
 		WHERE memory_fts MATCH ?`
 		tail = `
-		ORDER BY rank
+		ORDER BY score
 		LIMIT ?`
+		outer = `
+		SELECT mi.id, mi.host, mi.kind, mi.source_path, mi.title, mi.body,
+		       mi.host_modified_at, k.total
+		FROM (`
+		join = `) AS k
+		JOIN memory_items mi ON mi.rowid = k.rid
+		ORDER BY k.score`
 	)
 	if len(projectKeys) == 0 {
-		return head + tail, []any{matchExpression(tokens, m), limit}
+		return outer + inner + tail + join, []any{matchExpression(tokens, m), limit}
 	}
 	args := []any{matchExpression(tokens, m)}
 	for _, k := range projectKeys {
 		args = append(args, k)
 	}
 	args = append(args, limit)
-	return head + `
+	return outer + inner + `
 		  AND memory_items.project_path IN (` +
-		strings.TrimSuffix(strings.Repeat("?, ", len(projectKeys)), ", ") + `)` + tail, args
+		strings.TrimSuffix(strings.Repeat("?, ", len(projectKeys)), ", ") + `)` + tail + join, args
 }
