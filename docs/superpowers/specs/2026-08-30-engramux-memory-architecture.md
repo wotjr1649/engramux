@@ -1,5 +1,11 @@
 # Engramux — memory architecture, after 1.0
 
+**rev.8** · 2026-09-03 — rev.8 settles what **M-4**'s one-line row never said: which hook, which
+hosts, what injection may cost, and what it may not select. It adds gate **M10**, because M5, M6 and
+M9 between them measure bytes, abstention and the fence and not one of them measures time — and
+injection is the first thing this product does on the user's critical path. It also changes **M3**'s
+shape, which a human-labelled fixture forced rather than a preference. rev.1 to rev.7 below.
+
 **rev.7** · 2026-09-03 — rev.7 reverses one of rev.5's decisions on the owner's word: the
 false-positive submission is **not** adopted, because the objection is who does it and when it
 answers rather than whether it is worth doing. §8's fourth publication condition is unmoved — it is
@@ -531,6 +537,61 @@ add an egress if anything read them out. Nothing does: they appear in the `ORDER
 select list, and §8's Phase 5 clause sweeps a marshalled reply with the detector rather than naming
 fields, so a future select that changed that would be caught rather than reviewed for.
 
+### Where injection attaches, and what it may spend (M-4)
+
+**Decided 2026-09-03**, before Step 5 rather than during it. M-4's row in §2 is one line and says
+only that injection is built and ships off. What Step 5 cannot start without is a hook, a host, two
+budgets and a boundary, and this document owns every one of those.
+
+**`UserPromptSubmit`, and nothing else.** Codex documents `additionalContext` on seven of its
+events and Claude Code accepts it here too, so the choice was available. Only this one carries a
+query. `SessionStart` has none, so injection there is a constant — and a constant context cost is
+exactly what **P2** says native already pays and this product structurally does not have to. The 1.0
+spec §5.8's *"SessionStart emits nothing"* survives Step 5 unchanged, for a better reason than the
+one it was written with.
+
+**Both hosts, and that was never ours to choose.** **[verified]** 2026-09-03 against both current
+references: the shape is identical — a hook writes `hookSpecificOutput.additionalContext` on stdout
+and the text is added as developer context before the prompt is processed. What differs is that
+Codex renders the injected text as a visible message in its transcript, which is §6's fifth
+mitigation — *off, and visible* — arriving free on one host and owed on the other.
+
+**500 ms, taken from inside the 1.0 spec §5.3's second rather than added to it.** **[verified]**
+2026-09-03: five `engramux search` runs against the installed service over a 227,954,688 B database
+took **93, 113, 185, 245 and 251 ms**, which is process start, pipe dial, search and reply — the
+injector's whole path. 500 ms is twice the worst of the five, and it comes out of the 1 s the relay
+already has rather than raising it, so the product's own budget does not move because a feature was
+added inside it. What is **[unverified]** is the tail: all five are warm, and every one of the twelve
+read-deadline failures the 1.0 spec §7.1 records was a cold read after an idle period, against a
+database two thirds this size. **M10** exists to measure that rather than to assume it. When the
+deadline is missed the answer is **zero bytes down M6's own path** — the abstention that is already
+gated at 100%, not a second failure mode beside it.
+
+**5,000 B, and only one host gave a number to convert.** **[verified]** 2026-09-03: Codex documents
+a default `additionalContext` limit of about **2,500 tokens**, past which it spills the full text to
+a file and gives the model a head-and-tail preview and that file's path; it is configurable per
+handler. **Claude Code documents no limit at all.** So the "hosts' documented budget" M5 names is
+Codex's, it is also the stricter of the two by virtue of existing, and what is left to decide is
+bytes per token: **2**, the conservative end for a corpus that carries Korean, which costs more
+tokens per byte than anything else in it. The figure is a conversion and not a measurement, and §6's
+third mitigation wants the error in this direction.
+
+**Engramux's own events are not injectable, and what identifies one is the binary rather than the
+word.** Backlog **41** found a search returning its own capture as its own top hit. The pull path is
+left alone — asking for a thing and getting your own last ask for it is an answer, and a ranking
+function that special-cases a document class is how a ranking function starts to rot. The push path
+is a different question with a different answer: M-4 selects from the same corpus, so a user's own
+last search becomes a candidate for their next prompt, which is the distractor §6 cites *Context
+Rot* for. The exclusion therefore lives in the selector and not in the ranking. **The test is that
+the command line invokes the installed binary**, not that it contains the string: this repository's
+own corpus is largely prose about `engramux`, and a string match would exclude the owner's work on
+the product along with the product's own noise.
+
+**No migration, and settled before one was written.** The injector reads. `memory_items`, `events`
+and M-3's derived columns are all written already, and a hook-time path needs no column of its own.
+§6's fifth mitigation also asks for a switch and a way to see what was injected; both are
+configuration and a log, neither is schema.
+
 ### Replacing an installed build is its own command (M-7)
 
 **Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
@@ -764,20 +825,21 @@ not a saving, it is the feature.
 
 ## 5. The gates
 
-M-4 does not turn on for anyone until M5, M6 and M9 pass and M7 clears its threshold. M1–M4 and M8
-are conditions on the work that precedes it.
+M-4 does not turn on for anyone until M5, M6, M9 and M10 pass and M7 clears its threshold. M1–M4 and
+M8 are conditions on the work that precedes it.
 
 | | Gate | What it asserts |
 |---|---|---|
 | **M1** | Native parse fidelity | Over every native memory file present on the machine: no crash, frontmatter fields extracted exactly where they exist, body bytes preserved losslessly. One failure fails the gate |
 | **M2** | Drift canary | An unknown frontmatter key, an unknown file name, a missing index — each **warns and continues**. A silent skip is a failure |
-| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10, reported against each native memory's own ceiling |
+| **M3** | P4 recall | Queries whose answer exists in only one host, 25 per host, recall@10 against each native memory's own ceiling. **Measured once, pinned, and thereafter a regression test on the pinned number** — M7's shape, for M7's reason. A natural-language query a person wrote from memory is not a literal cut from the document the way P1's classes are, so a miss is not unambiguously a retrieval failure, and a gate that asserts 100% is answered by rewording the query until it passes |
 | **M4** | Field boost earns its place | P1's three new classes, recall@10 and MRR with the derived-field boost on and off. **No improvement means the code is deleted** |
-| **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap. The cap comes from the hosts' documented budget, not from an observed p95 |
+| **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |
 | **M7** | Precision at budget | A human-labelled fixture of real prompts and what should have been injected, pinned once and then a regression test. Below threshold, the feature does not ship enabled |
 | **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
+| **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 
 **What cannot be measured here, stated so nobody claims it.** Whether injection improves task
 outcomes needs paired runs over hundreds of tasks, which is what SWE Context Bench did with 399. One
@@ -962,9 +1024,9 @@ of living in a session brief.
    is a real and different benefit. A first release by a new publisher still has no reputation, so a
    condition that named signing would be satisfied by something that does not yet deliver the
    outcome. What satisfies this condition is that a stranger's first run works, or that the
-   documentation tells them exactly what will happen and what to do — and submitting the binary to
-   Microsoft as a false positive, which is free and fixes it for everyone rather than for one
-   machine, is the cheapest thing that moves it.
+   documentation tells them exactly what will happen and what to do — and with the false-positive
+   submission declined in M-7, the documentation is the whole of it. Condition 3 carries what the
+   `README` therefore owes.
 
    Two costs of signing are recorded so the decision is made against them rather than against a
    guess: a code signing key has had to live on FIPS 140-2 Level 2 hardware since June 2023, so there
@@ -977,6 +1039,5 @@ of living in a session brief.
    here**, because it is a decision and this is a condition: signing is sequenced behind a release
    process rather than bought, the cheapest paid option turns out to be closed to this project by
    geography, and the free one is closed only until a release exists. What that changes about this
-   condition is nothing — the outcome is still a stranger's first run working or being documented,
-   and the false-positive submission still moves it. What it changes is that "sign the binaries"
-   now has an answer instead of a price tag.
+   condition is nothing — the outcome is still a stranger's first run working or being documented.
+   What it changes is that "sign the binaries" now has an answer instead of a price tag.
