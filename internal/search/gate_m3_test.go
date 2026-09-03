@@ -31,6 +31,28 @@ import (
 // would put a fixture into exactly once before wondering why nothing ran.
 var m3FixturePath = filepath.Join("..", "..", ".capture", "m3", "queries.tsv")
 
+// m3Unpinned is what [m3PinnedRecall] holds for a host whose recall has not
+// been measured yet, and it is a distinct value rather than 0 on purpose: 0 is a
+// floor every result clears, so a pin left at 0 is a gate that passes without
+// checking anything - which is the exact failure the pinned shape exists to
+// remove. An unpinned host with a fixture is a **failure** that prints the
+// number to pin.
+const m3Unpinned = -1
+
+// m3PinnedRecall is gate M3's floor per host: the recall@10 measured once over
+// the owner's own fixture, asserted thereafter as a regression test on that
+// number (memory spec rev.8, M3).
+//
+// Both are [m3Unpinned] until the fixture exists and a run measures them.
+// Setting one is a deliberate act with a date and a corpus behind it, recorded
+// in the spec's M3 row - not a number moved to make a red run green. A recall
+// that falls below the floor is a retrieval regression; one that rises above it
+// is a new floor somebody has to choose to take.
+var m3PinnedRecall = map[string]float64{
+	memory.HostClaude: m3Unpinned,
+	memory.HostCodex:  m3Unpinned,
+}
+
 // m3Query is one labelled known-item query.
 type m3Query struct {
 	line   int
@@ -61,17 +83,34 @@ type m3Query struct {
 // an id: an id is derived from the file's path, so it moves when the file does
 // and a fixture written against one rots silently.
 //
-// # What it asserts and what it only reports
+// # What it asserts, and why it is not 100%
 //
-// Recall is asserted at 100%: these are known-item queries whose answer is known
-// to be in the corpus, so a miss is a retrieval failure and not a judgement
-// call - the same shape TestPhase4Gate's five classes have.
+// Recall is measured once and thereafter asserted against [m3PinnedRecall] as a
+// floor - M7's shape, for M7's reason (memory spec rev.8, M3). It was 100% until
+// 2026-09-03 and that shape could only ever be green or red: a query a person
+// wrote from memory is not a literal cut from the document the way
+// TestPhase4Gate's five classes are, so a miss is not unambiguously a retrieval
+// failure, and this test's own doc comment named the *query* as the thing to
+// change when one missed. A gate answered by rewording the query until it passes
+// measures nothing.
+//
+// So a miss is a data point here and not an error. What is still an error is a
+// fixture line the gate cannot measure at all - an answer the other host also
+// carries, or one no item carries - because those are defects in the fixture
+// rather than results.
 //
 // The ceiling is reported and not asserted. On the machine this was written for,
 // Claude Code's whole population is 38 items over 3 projects and Codex's is 265,
 // so "25 per host" is a number the corpus may not support; the spec's own
 // wording is that the result is reported against each native memory's own
 // ceiling, and printing the two numbers is what that means.
+//
+// # Nothing here prints a query or an answer
+//
+// Both are the owner's own words - the query is what they typed and the answer
+// is a run of their private notes - and a miss is the common case this test has
+// to report on every run. So a miss names the fixture's line number and nothing
+// else, which is enough to find it in a file only the owner has.
 func TestGateM3CrossHostRecall(t *testing.T) {
 	queries := readM3Fixture(t)
 	if len(queries) == 0 {
@@ -119,11 +158,10 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 			found[q.host]++
 			continue
 		}
-		// The query and not the answer: the query is what the owner typed
-		// and is the thing to change, and the answer is a run of their own
-		// notes.
-		t.Errorf("line %d: %s query %q found no item carrying its answer in the top %d",
-			q.line, q.host, q.query, len(hits))
+		// A miss, reported by line number and by nothing else. It is not a
+		// failure any more (see the doc comment) and it is not the query
+		// either: both columns of that line are the owner's own words.
+		t.Logf("M3: line %d missed, %s, %d hits searched", q.line, q.host, len(hits))
 	}
 
 	for _, host := range []string{memory.HostClaude, memory.HostCodex} {
@@ -131,11 +169,27 @@ func TestGateM3CrossHostRecall(t *testing.T) {
 			t.Logf("M3: %s has no queries in the fixture", host)
 			continue
 		}
-		t.Logf("M3: %s recall@10 = %d of %d, over a population of %d items",
-			host, found[host], asked[host], population[host])
+		recall := float64(found[host]) / float64(asked[host])
+		t.Logf("M3: %s recall@10 = %d of %d (%.3f), over a population of %d items",
+			host, found[host], asked[host], recall, population[host])
 		if asked[host] < 25 {
 			t.Logf("M3: %s has %d queries against the spec's 25; the ceiling above is what that "+
 				"is reported against", host, asked[host])
+		}
+
+		pin, ok := m3PinnedRecall[host]
+		switch {
+		case !ok || pin == m3Unpinned:
+			// Loud rather than skipped, and this is the whole point of
+			// the shape: a fixture exists, so the gate can measure, and
+			// a run that measured and asserted nothing is the failure
+			// mode being removed. The number to write is on the line
+			// above and in the spec's M3 row, with the corpus and the
+			// date it was measured over.
+			t.Errorf("M3: %s recall is not pinned yet; pin %.3f in m3PinnedRecall and record the "+
+				"corpus and the date in the memory spec's M3 row", host, recall)
+		case recall < pin:
+			t.Errorf("M3: %s recall@10 = %.3f, below the pinned %.3f", host, recall, pin)
 		}
 	}
 }
