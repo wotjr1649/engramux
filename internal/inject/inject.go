@@ -278,8 +278,18 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	// timer, Windows resolves one at about half a millisecond, and a timer
 	// that has not fired yet leaves ctx.Err() nil past the instant it names.
 	// Measured 2026-09-03 - a call took 1.1445 ms under a 1 ms budget and
-	// ctx.Err() was still nil. Comparing the instant is what makes the
-	// assertion true rather than usually true.
+	// ctx.Err() was still nil, and a second run injected 640 bytes under a
+	// one-microsecond budget for the same reason. Comparing the instant is
+	// what makes the assertion true rather than usually true.
+	//
+	// **A break-it pass survives a mutation of the wall-clock half**, and
+	// that is recorded rather than fixed: what it guards is a race, so a
+	// run where the timer happened to fire on time is answered by the
+	// ctx.Err() half alone and the suite stays green. The two timings above
+	// are the evidence that the race is real; a test that reproduced it on
+	// demand would need a clock this package does not own. Removing the
+	// ctx.Err() half instead does not compile - `deadline` goes unused -
+	// which is the third state AGENTS.md's row on break-it passes names.
 	elapsed := time.Since(start)
 	if time.Now().After(deadline) || ctx.Err() != nil {
 		return Result{Reason: ReasonDeadline, Elapsed: elapsed}, nil
