@@ -272,8 +272,12 @@ func TestEveryExcerptCarriesItsProvenance(t *testing.T) {
 // zero bytes down M6's own path rather than a second failure mode beside it.
 func TestBuildAbstainsWhenTheBudgetIsBlown(t *testing.T) {
 	db := corpus(t, event("PostToolUse", "the checkpoint threshold was raised", ""))
+	// A budget already in the past rather than a very small one: a positive
+	// nanosecond needs the context's timer goroutine to be scheduled before
+	// database/sql looks, which is a race the test lost about one run in
+	// five. A deadline behind the clock is cancelled at construction.
 	res, err := inject.BuildWithBudget(t.Context(), db,
-		inject.Request{Prompt: "checkpoint threshold raised"}, time.Nanosecond)
+		inject.Request{Prompt: "checkpoint threshold raised"}, -time.Second)
 	if err != nil {
 		t.Fatalf("BuildWithBudget: %v", err)
 	}

@@ -205,6 +205,16 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	if err != nil {
 		return abstain(ctx, err)
 	}
+	// The deadline is checked here as well as inside the two reads. Whether
+	// this driver cancels a statement already running is not this package's
+	// to rely on, and an injection that arrives after the budget is one the
+	// relay has already stopped waiting for - so the check that makes M10's
+	// assertion true is this one, and the context is what makes the reads
+	// stop early when they can.
+	if ctx.Err() != nil {
+		return Result{Reason: ReasonDeadline}, nil
+	}
+
 	broad := total > maxMatches
 	if broad {
 		hits = nil
@@ -227,8 +237,13 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 
 	// The overhead is measured rather than computed: the fence's own
 	// constants are its business, and [rand.Text] documents that it may
-	// return longer strings in a future release. Fencing an empty body
-	// costs one mint and makes the arithmetic below exact.
+	// return longer strings in a future release. Fencing an empty body costs
+	// one mint and makes the arithmetic exact rather than approximate -
+	// len(Fence(body)) is len(probe)+len(body) for a body that does not end
+	// in a newline and one less for one that does, so a body built to
+	// MaxBytes-len(probe) cannot produce a payload over MaxBytes. There is
+	// no second check on the finished bytes for that reason: it would be a
+	// branch no input reaches, and a break-it pass says so.
 	probe, err := Fence("")
 	if err != nil {
 		return Result{Reason: ReasonNoFence}, nil
@@ -240,14 +255,6 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	text, err := Fence(body)
 	if err != nil {
 		return Result{Reason: ReasonNoFence}, nil
-	}
-	// The cap is asserted on the finished bytes and not only budgeted for.
-	// [assemble] works to the same number, so this fires only if the two
-	// mints disagreed about the nonce's length - and an injection over the
-	// cap is one the host truncates or spills to a file, which is worse
-	// than no injection.
-	if len(text) > MaxBytes {
-		return Result{Reason: ReasonNoRoom}, nil
 	}
 	return Result{Text: text, Events: events, Memory: memories, Reason: ReasonInjecting}, nil
 }
