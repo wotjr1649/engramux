@@ -103,13 +103,17 @@ type m7Prompt struct {
 }
 
 // m7Block is one excerpt block inside an injection, with the bytes it spent.
+//
+// It carries no label of its own: a label is keyed by prompt *and* block and
+// lives in the map [m7LabelledBlocks] returns, which is what lets an arm credit
+// the same block to a different prompt. A field here would be a second place for
+// one answer to live.
 type m7Block struct {
 	promptID string
 	id       string
 	kind     string
 	bytes    int
 	text     string
-	relevant string // the human's label, "" before pass 2 is answered
 }
 
 // TestWriteM7Prompts is pass 1: it writes the prompts to be labelled and does

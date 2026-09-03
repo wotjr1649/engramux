@@ -48,6 +48,20 @@ type DoctorReply struct {
 	LastCheckpoint *CheckpointResult `json:"last_checkpoint"`
 	// DatabasePath is the real path of the database the service opened.
 	DatabasePath string `json:"database_path"`
+
+	// Product is the version of the binary the service is running, which is
+	// a different question from Version above: that one is the wire
+	// protocol, it has exactly one consumer, and it moves on a
+	// compatibility event (M-7).
+	//
+	// It is `omitempty` and nothing verifies it, deliberately. A service
+	// built before this field existed answers without it, and the right
+	// behaviour there is for `doctor` to say the running version is unknown
+	// rather than for the reply to fail Verify - which would turn "your
+	// service is older than your CLI" into "your service is broken". That
+	// is also why adding it does not move ipc.Version: an optional field an
+	// old peer omits is not a compatibility event.
+	Product string `json:"product,omitempty"`
 	// TokenizerLive is the tokenizer the live search index was created
 	// with, read out of sqlite_schema; TokenizerExpected is the one the
 	// embedded migration declares. Both are empty when the index carries no

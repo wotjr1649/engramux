@@ -414,6 +414,46 @@ func checkName(name string) error {
 	return nil
 }
 
+// End asks Windows to stop the task's running instance, and a task that is not
+// registered or not running is not an error.
+//
+// # It returns before the process is gone, and that is the whole trap
+//
+// `schtasks /end` requests a stop and returns; the process is still exiting.
+// The row AGENTS.md carries is what happens to a caller that believes it: an
+// `/end` followed straight by a [Run] leaves **nothing** running, because the
+// new instance loses the pipe race to the one still dying (I-09 working) and
+// then the old one finishes dying too. What is left is no service at all and a
+// log line that reads like a singleton conflict rather than like an empty
+// machine.
+//
+// So this package deliberately does not offer a stop-and-wait. Waiting needs to
+// observe the thing the caller actually cares about, and that is not a task
+// state - a service that has stopped answering its pipe is the only evidence
+// that matters, and this package cannot see a pipe. [cmd/engramux]'s update
+// command is where the wait lives, against `status`.
+//
+// Polling [Query] for a state is not the wait either: a task that has only just
+// been asked to stop still reads as running, and one that has stopped reads the
+// same whether its process died cleanly or was never up.
+func End(ctx context.Context, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if _, err := query(ctx, name); errors.Is(err, ErrNotRegistered) {
+		return nil
+	}
+	// A task with no running instance answers with an error and a message
+	// saying so, which is not a failure to stop it - it is already stopped.
+	// The exit code does not distinguish that from a real refusal, so the
+	// caller gets it back and decides; what makes that safe is that the
+	// caller's own wait is what establishes the service is down.
+	if out, err := run(ctx, "/end", "/tn", name); err != nil {
+		return fmt.Errorf("schedule: end %s: %w: %.400s", name, err, out)
+	}
+	return nil
+}
+
 // Run starts the task now, without waiting for its trigger.
 //
 // It is what an installation uses to bring the service up: starting it through

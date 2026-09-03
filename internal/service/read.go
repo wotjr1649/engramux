@@ -10,6 +10,7 @@ import (
 	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/store"
+	"github.com/wotjr1649/engramux/internal/version"
 )
 
 // getEvent answers a [ipc.GetEvent] request (spec 5.2, 5.9) and is the third
@@ -174,6 +175,7 @@ func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, sta
 		return ipc.DoctorReply{}, err
 	}
 	reply := ipc.DoctorReply{
+		Product:        version.Product(),
 		UptimeMS:       st.UptimeMS,
 		Events:         st.Events,
 		SpoolDepth:     st.SpoolDepth,

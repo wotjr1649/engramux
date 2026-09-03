@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Replaces the installed Engramux with what is in dist/, and checks it answered.
 #
-# Six commands become one, and the two that are easy to get wrong are the reason
-# this exists rather than a note in a document.
+# It used to be six commands and two traps. Both traps are now inside the binary,
+# in `engramux update`, which is what Step 6 was for:
 #
-#   * `schtasks /end` returns before the process is gone. Running
-#     `install --apply` straight after it starts a second instance while the
-#     first is still exiting, that instance loses the pipe race (I-09) and
-#     exits, and then the first finishes dying - leaving no service at all, with
-#     a log line that reads like a singleton conflict rather than like an empty
-#     machine. The wait below is what avoids it, and polling for a `status` that
-#     *succeeds* would prove nothing: during the gap it is answered by the
-#     instance on its way out.
-#   * MSYS path conversion turns `/end` into a path. MSYS_NO_PATHCONV=1 is set
-#     for exactly the two schtasks calls and nothing else.
+#   * `schtasks /end` returns before the process is gone, so a `/run` straight
+#     after it leaves nothing running - the new instance loses the pipe race
+#     (I-09) and exits, then the old one finishes dying. `update` waits for the
+#     service to stop *answering* before it touches a file, which is the only
+#     evidence that the image is free.
+#   * MSYS path conversion turns `/end` into a path. Nothing here runs schtasks
+#     any more, so nothing here needs MSYS_NO_PATHCONV.
+#
+# What is left is three commands, and M-7 predicted that: "nearly empty" is the
+# answer rather than "entirely", because `update` alone does not tell you the
+# thing came back healthy.
+#
+# `$cli` stays dist's copy for the update call and that is not incidental.
+# Windows will not let a running image overwrite itself, so `update` refuses
+# when it is the installed copy - running dist's is what makes it work at all.
 #
 # What it deliberately does not do is verify the build. The suite, the pinned
 # linter and the race script are AGENTS.md's, in that order, and the race script
@@ -24,6 +29,11 @@
 # AGENTS.md and it is about the agent, not about installing: baking it in here
 # would refuse the owner's own first install on a machine where the hosts are
 # not registered yet, which is the one time it is certainly right to run.
+#
+# One thing `update` does not do that `install --apply` did: re-register the
+# logon task. That is the division rather than a gap - `update` refuses outright
+# when the task points somewhere other than the installed service, and says to
+# run `install --apply`. A machine that has never installed is the same answer.
 #
 # Usage: scripts/reinstall.sh [--no-verify]
 set -euo pipefail
@@ -47,21 +57,8 @@ if [ ! -x "$repo/dist/engramux-service.exe" ]; then
     exit 1
 fi
 
-echo "reinstall.sh: stopping the logon task"
-MSYS_NO_PATHCONV=1 schtasks /end /tn Engramux >/dev/null 2>&1 || true
-
-echo "reinstall.sh: waiting for the old service to stop answering"
-for _ in $(seq 1 60); do
-    "$cli" status >/dev/null 2>&1 || break
-    sleep 1
-done
-if "$cli" status >/dev/null 2>&1; then
-    echo "reinstall.sh: a service is still answering after 60s; not installing over it" >&2
-    exit 1
-fi
-
-echo "reinstall.sh: installing"
-"$cli" install --apply
+echo "reinstall.sh: update"
+"$cli" update --from "$repo/dist"
 
 if [ "$verify" -eq 0 ]; then
     exit 0
