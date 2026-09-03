@@ -702,6 +702,17 @@ and P5 against verbatim retrieval's, and it needs the labelled questions of both
 not exist at all. What the run reports instead, under its own name, is where an injection's content
 came from.
 
+**The one over-budget reading that exists is the race run's, and it is the abstention path working.**
+`./scripts/race.sh` puts the same gate over the same corpus at a median of **124.13 ms** against
+3.11 ms without it, a worst of **523.01 ms**, and **1 of 16 abstained on time**. The race detector is
+not a user's machine, but it is the only condition anyone has yet measured this feature under where
+the deadline is reachable at all — every other reading is warm, unloaded and three orders of
+magnitude inside the budget. What it says is that the abstention fires when the budget is genuinely
+exceeded rather than only under a shortened one, and that the overshoot past 500 ms is the check's
+own granularity: the two searches carry the deadline and the assembly after them does not. It also
+corrected the gate, which had been asserting on the duration rather than on the injection and so
+called a correct abstention a failure.
+
 #### Two findings the design did not predict
 
 **Native memory contributed to 0 of 16 injections.** The pull path reaches it — gate M3's own corpus
