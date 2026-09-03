@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -106,5 +107,25 @@ type dbSizes struct{ db, wal int64 }
 
 func fileSizes(t *testing.T, path string) dbSizes {
 	t.Helper()
-	return dbSizes{db: fileSize(t, path), wal: fileSize(t, path+"-wal")}
+	return dbSizes{db: statSize(t, path), wal: statSize(t, path+"-wal")}
+}
+
+// statSize is [fileSize] with the suppression on this file's own call site
+// rather than on that one's.
+//
+// The path here comes from an environment variable, so gosec's taint analysis
+// follows it into whatever stats it - and reported the sink, in a file that has
+// had no such input since it was written. Its own stat keeps the annotation
+// where the claim is true: the operator names the copy, and naming a file to
+// measure is the whole of this harness's interface.
+func statSize(t *testing.T, path string) int64 {
+	t.Helper()
+	fi, err := os.Stat(path) //nolint:gosec // G703: the operator names the copy to measure
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return fi.Size()
 }
