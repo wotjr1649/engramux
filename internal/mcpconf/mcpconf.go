@@ -5,11 +5,18 @@
 //
 // Two binaries have to touch this file and neither can import the other's
 // world. The service writes it (spec 5.9 gives it the port and the token, and
-// gives the installer neither). `engramux doctor` reads it - and that binary is
-// the hook relay as well as the CLI (spec 5.1), so it cannot import
-// internal/service, which links the SQLite driver through internal/store and
-// put 4 MiB into a process spawned once per hook event. Everything here is
-// encoding/json, net/url and os.
+// gives the installer neither). `engramux doctor` reads it, and that binary is
+// the hook relay as well as the CLI (spec 5.1).
+//
+// This paragraph used to end by saying the relay must not link the SQLite
+// driver, and that everything here is encoding/json, net/url and os. **Measured
+// 2026-09-04, both halves are false**: `go list -deps ./cmd/engramux` reports
+// modernc.org/sqlite and goose, because cmd/engramux's own doctor.go and
+// inject.go import internal/inject, which reaches internal/store. The relay is
+// 8,703,488 B against the 3,862,528 B spec 7.1 records. That is a regression of
+// its own and is carried as one; what it settles here is that a size argument
+// cannot be why this package is separate, and must not be what licenses or
+// refuses an import in it. The reason below can.
 //
 // # Nothing here reads the token back
 //
@@ -34,6 +41,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/wotjr1649/engramux/internal/winacl"
 )
 
 // Name is the file spec 5.6 assigns to the service, under the same directory as
@@ -92,10 +101,18 @@ func Port(endpoint string) int {
 // product writes, and here it is what keeps a host from reading half a document
 // while the service is starting.
 //
-// The 0o600 mode is advisory on Windows: the file inherits the directory's ACL
-// and Go's mode does not narrow it. Spec 5.9 records what that leaves resting on
-// the bearer token. It is set anyway because it costs nothing and is the right
-// mode wherever it is not advisory.
+// The DACL is what narrows it, and [winacl.Restrict] is called on the temporary
+// file before one byte of the token is written to it: the file exists under the
+// directory's inherited ACL only while it is empty. Backlog 28 and memory spec
+// §8's second publication condition are what that closes for this file - the two
+// host configuration files carry a copy of the same token and are not this
+// product's to narrow, so `doctor` reports them instead.
+//
+// The 0o600 mode stays and does nothing here. On Windows Go's mode is derived
+// from FILE_ATTRIBUTE_READONLY and cannot express a DACL, which is precisely why
+// spec 7.1 measured this file at -rw-rw-rw- with every ACE inherited. It is set
+// because it is the right mode wherever it is not advisory, and it is no longer
+// what this function relies on.
 func Write(dir, endpoint, token string) error {
 	b, err := json.Marshal(struct {
 		URL   string `json:"url"`
@@ -127,6 +144,14 @@ func Write(dir, endpoint, token string) error {
 
 	if err = f.Chmod(0o600); err != nil {
 		return fmt.Errorf("mcpconf: restrict %s: %w", tmp, err)
+	}
+	// Before the first write, so the token never sits on disk under an ACL
+	// this has not replaced. The rename below carries the DACL with the
+	// file: os.Rename is MoveFileEx without MOVEFILE_COPY_ALLOWED, the
+	// temporary file is in the destination's own directory, and a
+	// same-volume move takes the security descriptor along.
+	if err = winacl.Restrict(tmp); err != nil {
+		return fmt.Errorf("mcpconf: %w", err)
 	}
 	if _, err = f.Write(b); err != nil {
 		return fmt.Errorf("mcpconf: write %s: %w", tmp, err)

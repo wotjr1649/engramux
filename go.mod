@@ -7,6 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pressly/goose/v3 v3.27.3
+	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.57.0
 )
 
@@ -24,7 +25,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

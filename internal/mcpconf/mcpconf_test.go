@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/wotjr1649/engramux/internal/winacl"
 )
 
 // TestWriteAndReadBackTheEndpoint. [URL] is the whole read side of this
@@ -116,5 +118,39 @@ func TestPortAnswersZeroForEverythingItCannotUse(t *testing.T) {
 		if p := Port(in); p != 0 {
 			t.Errorf("Port(%q) = %d, want 0", in, p)
 		}
+	}
+}
+
+// TestWriteNarrowsTheFileItPublishes is backlog 28's first half, asserted on the
+// file Write actually leaves behind rather than on the temporary one it narrowed.
+//
+// That distinction is the test: Restrict runs on the temporary file, and what a
+// host reads is the renamed one. os.Rename is MoveFileEx, which carries a
+// security descriptor across a same-volume move and would not across volumes -
+// so this is the assertion that fails if the temporary file ever stops being
+// created in the destination's own directory.
+func TestWriteNarrowsTheFileItPublishes(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, "http://127.0.0.1:1/mcp", "not-a-real-token"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := winacl.Describe(Path(dir))
+	if err != nil {
+		t.Fatalf("describe the published file: %v", err)
+	}
+	if !got.Protected {
+		t.Error("the published file does not block inheritance, so the DACL " +
+			"did not survive the rename")
+	}
+	if got.Inherited != 0 {
+		t.Errorf("the published file carries %d inherited ACEs, want 0", got.Inherited)
+	}
+	if got.Others != 0 {
+		t.Errorf("the published file admits %d principals beyond SYSTEM, "+
+			"Administrators and this user, want 0 - it holds a bearer token", got.Others)
+	}
+	if !got.Narrowed() {
+		t.Error("Narrowed() disagrees with the three fields above")
 	}
 }
