@@ -34,7 +34,7 @@ go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # s
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
 bash scripts/soak-summary.sh docs/evidence/soak/soak.tsv                     # reduces a soak series to the figures spec §7.1 records
-bash scripts/reinstall.sh                                                    # dist/ over the installed service, then doctor and status
+bash scripts/reinstall.sh                                                    # update --from dist/, then doctor and status
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
@@ -78,6 +78,30 @@ above is the one-shot form on purpose: every other line in that block exits, and
 which is how the soak is actually run — does not. It dies with the shell that started it anyway;
 surviving a logoff needs a scheduled task, which is the user's to create. A missing prerequisite,
 a bad `--every`, or a log it cannot append to are all exits rather than a loop that writes nothing.
+
+A release build adds one flag and nothing else:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wotjr1649/engramux/internal/version.linked=0.1.0" -o dist/engramux.exe ./cmd/engramux
+```
+
+**Check it by running the binary — `engramux doctor` prints the version — and not by re-reading the
+command line you meant to type.** `-X` sets a package-level string **variable**, and against a
+`const`, a mistyped import path, or a non-constant initializer it does **nothing at all and reports
+nothing**: there is no linker error. The obvious symbol to copy, `ipc.Version`, is a `const` for
+exactly the reason `version.linked` is not. Nothing in this repository can catch a flag that silently
+no-opped — there is no CI, and a test cannot see release ldflags — so the shipped surface is the
+check.
+
+**`go version -m` is not that check on a release build, and it looks like it should be.** It does
+print the ldflags a build used, through `-s -w`, because build information is not a symbol table.
+But **measured 2026-09-04: `-trimpath` removes the `-ldflags` line from the recorded settings
+entirely.** Two builds of the same package, one with `-trimpath` and one without: the second records
+`-ldflags="-s -w -X …"` and the first records `-trimpath=true` and no ldflags at all. The release
+line above has `-trimpath` — it is what makes an artefact attributable to a commit — so that is the
+one build where this diagnostic is blind. What survives `-trimpath` is `vcs.revision`, `vcs.time`
+and `vcs.modified`, which is what a build with **no** `-X` reports as its version instead of
+answering "dev".
 
 `CGO_ENABLED=0` is written out rather than inherited: the environment default happens to be 0 on the
 machine this was written on, which means a build that violates the boundary would look fine here.

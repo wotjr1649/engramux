@@ -22,6 +22,7 @@ import (
 	"github.com/wotjr1649/engramux/internal/schedule"
 	"github.com/wotjr1649/engramux/internal/secret"
 	"github.com/wotjr1649/engramux/internal/spool"
+	"github.com/wotjr1649/engramux/internal/version"
 )
 
 // taskBudget bounds one schtasks invocation. It is not the pipe's budget: this
@@ -609,6 +610,7 @@ func (r *report) reportService() {
 		r.fail("not answering", "%v", err)
 		return
 	}
+	r.reportVersions(reply.Product)
 	r.field("uptime", "%s", (time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond))
 	r.field("events", "%d", reply.Events)
 	r.field("spool", "%d", reply.SpoolDepth)
@@ -632,6 +634,36 @@ func (r *report) reportService() {
 			"the migration declares %.64q; the index needs a rebuild",
 			reply.TokenizerLive, reply.TokenizerExpected)
 	}
+}
+
+// reportVersions is M-7's three versions, and it prints the two that can be
+// answered without a delivery channel.
+//
+// **Installed against running** catches a replacement that was copied and never
+// restarted, which is the state an interrupted reinstall leaves. **Cache against
+// installed** is the "there is something newer" half, and there is no plugin
+// cache to read yet - so it says so rather than printing a blank. M-7's own
+// reading is that the first pair is the more useful half anyway, because a user
+// who never installs the plugin still gets it.
+//
+// Nothing here fails the report. A version disagreement is a fact about the
+// machine and the two commands that resolve it are named in the line itself;
+// `doctor`'s exit code is M-6's and belongs to the stages, not to this.
+func (r *report) reportVersions(running string) {
+	installed := version.Product()
+	switch {
+	case running == "":
+		r.field("version", "%s installed; the service does not report one, so it is older than "+
+			"this build - restart it with `engramux update --from <dir>`", installed)
+	case running == installed:
+		r.field("version", "%s, installed and running agree", installed)
+	default:
+		r.field("version", "%s installed but %s running - the binary was replaced and the "+
+			"service was not restarted; `engramux update --from <dir>` does both",
+			installed, running)
+	}
+	r.field("newest available", "unknown - there is no delivery channel yet, so `update` reads "+
+		"a directory you point it at")
 }
 
 // reportMCP prints spec 5.9's endpoint, whether it is answering, and whether

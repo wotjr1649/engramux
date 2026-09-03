@@ -40,13 +40,15 @@ func cli(args []string) int {
 		return sessions(args[1:])
 	case "install":
 		return install(args[1:])
+	case "update":
+		return update(args[1:])
 	case "register":
 		return register(args[1:])
 	case "unregister":
 		return unregister(args[1:])
 	default:
 		warn("unknown command %.32q", args[0])
-		warn("usage: engramux install [--apply] [--remove] | status | cells | doctor [--full] | search | event | memory | sessions | register | unregister")
+		warn("usage: engramux install [--apply] [--remove] | update --from <dir> | status | cells | doctor [--full] | search | event | memory | sessions | register | unregister")
 		return 2
 	}
 }

@@ -167,6 +167,25 @@ func PlanCopies(srcDir, destDir string, bins []Binary, probe bool) (plan []CopyP
 	return plan, unchanged, nil
 }
 
+// Copy executes a plan and returns the destinations it replaced, in order.
+//
+// It returns what it managed before an error rather than only the error,
+// because copies happen one at a time and a failure part-way leaves some
+// destinations replaced and some not. Nothing here copies the previous bytes
+// aside: this product has no rollback, and a caller that needs one has to say
+// so rather than assume it. [Install] does the same thing inline and says the
+// same sentence in its report; this is the same loop reachable by a caller that
+// is not installing.
+func Copy(plan []CopyPlan) (copied []string, err error) {
+	for _, c := range plan {
+		if err := copyFile(c.Src, c.Dest); err != nil {
+			return copied, err
+		}
+		copied = append(copied, c.Dest)
+	}
+	return copied, nil
+}
+
 // probeWritable asks for the write handle a copy would ask for, and asks
 // without truncating anything: O_RDWR rather than a trial copy.
 func probeWritable(dest string, role Role) error {
