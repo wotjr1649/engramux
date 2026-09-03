@@ -69,7 +69,7 @@ func BenchmarkProjectScope(b *testing.B) {
 			b.Run(term.name+"/"+arm.name, func(b *testing.B) {
 				var hits int
 				for b.Loop() {
-					h, _, err := search.Search(b.Context(), db, term.text, arm.project, limit)
+					h, _, err := search.Search(b.Context(), db, term.text, arm.project, limit, search.MatchAll)
 					if err != nil {
 						b.Fatalf("search: %v", err)
 					}
@@ -215,4 +215,56 @@ func planOf(b *testing.B, db *sql.DB, text, projectID string, limit int) string 
 		b.Fatalf("read the plan: %v", err)
 	}
 	return "scoped plan: " + strings.Join(out, " | ")
+}
+
+// BenchmarkSelectorMode prices [search.MatchAny] against [search.MatchAll] on
+// one two-token query over the same synthetic corpus.
+//
+// It is a separate benchmark rather than a fourth arm of BenchmarkProjectScope
+// because that one's numbers are in spec 7.1 and its terms are single tokens,
+// where the two modes produce a byte-identical expression and there is nothing
+// to compare.
+//
+// The pair is chosen so the two modes land on opposite ends of the corpus:
+// [scopeRareTerm] is in one document in a hundred and [scopeTerm] is in all of
+// them, so the AND selects the rare set and the OR selects the population. That
+// is the worst case for the OR rather than a typical one - a real query's terms
+// are not one-in-a-hundred and everywhere - and the worst case is what a budget
+// is written against.
+//
+//	go test -p 1 -run '^$' -bench BenchmarkSelectorMode -benchtime 200x -v ./internal/search/
+func BenchmarkSelectorMode(b *testing.B) {
+	const (
+		projects = 40
+		perLarge = 500
+		perTiny  = 3
+		limit    = 20
+	)
+	db, _, _, total := scopedCorpus(b, projects, perLarge, perTiny)
+	query := scopeRareTerm + " " + scopeTerm
+	b.Logf("%d events, limit %d, two tokens: one in %d documents and one in all of them",
+		total, limit, rareEvery)
+
+	for _, mode := range []struct {
+		name string
+		m    search.Match
+	}{
+		{"MatchAll", search.MatchAll},
+		{"MatchAny", search.MatchAny},
+	} {
+		b.Run(mode.name, func(b *testing.B) {
+			var matched int64
+			for b.Loop() {
+				_, t, err := search.Search(b.Context(), db, query, "", limit, mode.m)
+				if err != nil {
+					b.Fatalf("search: %v", err)
+				}
+				matched = t
+			}
+			// The match set, reported beside the time, because it is
+			// the thing that decides the time and a run where the two
+			// modes matched the same number priced nothing.
+			b.ReportMetric(float64(matched), "matched")
+		})
+	}
 }
