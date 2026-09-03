@@ -1,5 +1,8 @@
 # Execution order after Phase 6
 
+**rev.5** · 2026-09-04 — rev.5 adds **Step 8**, which installing Step 7 surfaced: search was reading
+a payload for every match to return twenty. Done in the same revision.
+
 **rev.4** · 2026-09-04 — rev.4 adds **Step 7**, the selector, which rev.3 could not have ordered:
 it exists because gate M3's first human fixture returned zero and the diagnosis found a query builder
 rather than a corpus. It is done in the same revision.
@@ -291,6 +294,15 @@ codex 0.600. Suite green over every package, the pinned linter at `0 issues.` an
 figures, the two-phase shape that was measured and rejected, the rank ceiling that was written first
 and killed by its own break-it pass, and what the OR costs in time are all in the spec's *What
 building the selector settled*.
+
+**Step 8 — the window's payload.** Memory spec **rev.13**. Not ordered before Step 7 because nothing
+knew about it: installing Step 7 is what surfaced it, and it is not Step 7's defect — one common
+token was always enough to trigger it.
+
+Done: **2026-09-04**, on `step-8-window-cost`, merged `--no-ff`. `count(*) OVER ()` no longer shares
+a SELECT list with the payload, in both the event and the memory statement, and a ratio gate holds
+it: 22.26x before, 2.03x after, ceiling 3, and 16.77x when the payload is put back. Suite green over
+every package, the pinned linter at `0 issues.` and exit 0.
 
 ## Not ordered here
 

@@ -188,27 +188,59 @@ func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit i
 // happens to be true. A disjunction like `(? = ” OR project_id = ?)` would read
 // as tidier and would put an unmeasured expression in front of every existing
 // invocation for the sake of one fewer string.
+// # The payload is joined after the limit, not selected beside the count
+//
+// `count(*) OVER ()` is a window over the whole result set, so SQLite has to
+// materialise every matching row before it can return the first one - and while
+// `events.payload` sat in the same SELECT list, that meant reading a payload for
+// every match to return twenty of them. On a corpus of small documents it is
+// invisible: spec 7.1 measured this shape at 24.2 ms over 19,503 synthetic
+// events. On the owner's real 227 MB database the same query took **4 s** and
+// hit the service's 4 s read deadline - measured 2026-09-04, 5 of 10 ordinary
+// questions came back as `context deadline exceeded`, and one common token was
+// enough on its own.
+//
+// So the inner query selects the rowid, the count and the score, and the payload
+// is joined onto the twenty rows that survive the LIMIT.
+// [TestGateTheSearchDoesNotReadPayloadsItDoesNotReturn] is what holds it, as a
+// ratio between two corpora identical but for their payload size: 22.26x before
+// this shape and a ceiling of 3.
+//
+// The score is carried out as a column and the outer query orders by it, because
+// a subquery's ORDER BY decides which rows the LIMIT keeps and not what order
+// they arrive in. `rank` is not available outside the query holding the MATCH
+// either, which is the same reason.
 func matchQuery(tokens []string, projectID string, limit int, boost bool, m Match) (string, []any) {
-	const head = `
-		SELECT events.id, events.host, events.event_name, events.received_at, events.payload,
-		       count(*) OVER ()
+	const (
+		inner = `
+		SELECT events_fts.rowid AS rid, count(*) OVER () AS total, `
+		from = ` AS score
 		FROM events_fts
 		JOIN events ON events.rowid = events_fts.rowid
 		WHERE events_fts MATCH ?`
+	)
 
-	args := []any{matchExpression(tokens, m)}
-	stmt := head
+	score, scoreArgs := orderExpr(tokens, boost)
+	// The score's own arguments come first: it is in the SELECT list, which
+	// SQLite binds before the WHERE below it.
+	args := append([]any{}, scoreArgs...)
+	args = append(args, matchExpression(tokens, m))
+	stmt := inner + score + from
 	if projectID != "" {
 		stmt += `
 		  AND events.project_id = ?`
 		args = append(args, projectID)
 	}
-	order, orderArgs := orderBy(tokens, boost)
-	stmt += order + `
+	stmt += `
+		ORDER BY score
 		LIMIT ?`
-	args = append(args, orderArgs...)
 	args = append(args, limit)
-	return stmt, args
+
+	return `
+		SELECT e.id, e.host, e.event_name, e.received_at, e.payload, k.total
+		FROM (` + stmt + `) AS k
+		JOIN events e ON e.rowid = k.rid
+		ORDER BY k.score`, args
 }
 
 // boostPerDerivedToken is what one query token found in a derived column is
@@ -237,7 +269,12 @@ func matchQuery(tokens []string, projectID string, limit int, boost bool, m Matc
 // rather than of the column.
 const boostPerDerivedToken = 5.0
 
-// orderBy builds the ORDER BY clause and the arguments it needs.
+// orderExpr builds the ranking expression and the arguments it needs.
+//
+// The expression and not the whole clause: [matchQuery] carries it out of its
+// inner query as a column, so that the outer query can order by it without the
+// payload having to sit beside the window count. `rank` is not visible outside
+// the query holding the MATCH, which is the other half of the same reason.
 //
 // # The boost reorders and never filters
 //
@@ -271,14 +308,12 @@ const boostPerDerivedToken = 5.0
 // concatenating builds a new string per row per token - the same allocation in a
 // different place - and because OR short-circuits: a query that matches the
 // command line never looks at the output.
-func orderBy(tokens []string, boost bool) (string, []any) {
+func orderExpr(tokens []string, boost bool) (string, []any) {
 	if !boost {
-		return `
-		ORDER BY rank`, nil
+		return `rank`, nil
 	}
 	var b strings.Builder
-	b.WriteString(`
-		ORDER BY rank - ? * (`)
+	b.WriteString(`rank - ? * (`)
 	args := []any{boostPerDerivedToken}
 	for i, tok := range tokens {
 		if i > 0 {
