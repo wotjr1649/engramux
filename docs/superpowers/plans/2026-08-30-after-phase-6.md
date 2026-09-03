@@ -1,5 +1,9 @@
 # Execution order after Phase 6
 
+**rev.6** · 2026-09-04 — rev.6 records that **Step 6's local half is built and the step is not done**,
+and amends rev.3's ruling that the two halves must not be split. Reading the code also contradicted
+the step's own description of `update`: there was no stop sequence anywhere to subtract from.
+
 **rev.5** · 2026-09-04 — rev.5 adds **Step 8**, which installing Step 7 surfaced: search was reading
 a payload for every match to return twenty. Done in the same revision.
 
@@ -279,9 +283,41 @@ here is the push and pull-request check workflow — it changes nothing the bina
 repository's own rule it lands on `main` whenever somebody writes it, and it is worth writing before
 this step rather than during it.
 
-Done when: `update` replaces a running installation and restarts what was there when a copy fails,
+**rev.6 amends the paragraph above rather than appending under it.** The two halves *were* split, on
+2026-09-04, because the release half is a publication act — a tag, a GitHub Release, a marketplace
+entry — and every one of those needs the owner's own hands. The objection rev.3 recorded is real and
+stands: the local half cannot verify that the channel serves anything. What it does verify is
+everything short of that, against the real installation, and what it does not is written into the
+Done paragraph rather than left to be inferred. A step that waits for a publication it cannot perform
+is not a step; it is a queue.
+
+Done when: `update` replaces a running installation and restarts the service when a copy fails,
 `doctor` reports all three versions rev.5 names, a release exists that the channel can serve, and
 `scripts/reinstall.sh` is the one-line wrapper rev.5 decided it becomes.
+
+**Partly done: 2026-09-04**, on `step-6-update-path`, merged `--no-ff`. **The step is not closed.**
+
+*What is built and verified.* `engramux update [--from <dir>]`, with `schedule.End` and a wait that
+polls `status` rather than a task state — the stop the product never had, and the reason the step
+was not the subtraction its own description called it: `host.Install` has no stop anywhere in it, and
+the only stop-and-wait that existed was bash in `scripts/reinstall.sh`. Four refusals, each named in
+the spec's M-7 sections or found by review: the installed copy cannot overwrite itself, `--from`
+cannot be the install directory, an unregistered task means there is nothing to update, and a task
+pointing at another binary is refused rather than started. `internal/version` with a link-time value
+and a `vcs.revision` fallback. `ipc.DoctorReply.Product`, optional so `ipc.Version` does not move.
+`doctor`'s version section. `scripts/reinstall.sh` is three commands.
+
+*Evidence.* Suite green over every package; the pinned linter `0 issues.` at **exit 0**; `update` run
+against the owner's real installation, replacing both binaries and bringing the service back, with
+`doctor` at exit 0 and both hosts pointing at the endpoint.
+
+*What is open, and it is two of the four clauses.* **A release exists that the channel can serve** —
+nothing is tagged, there is no `.github/`, no marketplace entry and no zip. **`doctor` reports all
+three versions** — it reports two, and says of the third that there is no delivery channel to read.
+The remaining clause is met in the narrower form the spec now uses: `update` restarts the service on
+a failed copy and says which destinations it replaced, rather than restoring what was there, because
+nothing copies the previous bytes aside and claiming a rollback this product does not have would be
+worse than the gap.
 
 **Step 7 — the selector.** Memory spec **rev.11** and **rev.12**. Not in rev.3's order because it did
 not exist then: gate M3's first human fixture returned zero, and what the diagnosis found was a query

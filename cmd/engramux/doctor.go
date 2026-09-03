@@ -651,11 +651,11 @@ func (r *report) reportService() {
 // `doctor`'s exit code is M-6's and belongs to the stages, not to this.
 func (r *report) reportVersions(running string) {
 	installed := version.Product()
-	switch {
-	case running == "":
+	switch running {
+	case "":
 		r.field("version", "%s installed; the service does not report one, so it is older than "+
 			"this build - restart it with `engramux update --from <dir>`", installed)
-	case running == installed:
+	case installed:
 		r.field("version", "%s, installed and running agree", installed)
 	default:
 		r.field("version", "%s installed but %s running - the binary was replaced and the "+
