@@ -52,6 +52,14 @@ const Name = "mcp.json"
 // Path is where [Name] lives under dir.
 func Path(dir string) string { return filepath.Join(dir, Name) }
 
+// tempInfix is what [Write]'s temporary file is named with, and the only reason
+// it is spelled out rather than left as os.CreateTemp's usual `Name+".*"` is
+// that [staleTemps] has to glob for it. `mcp.json.*` would also match a copy the
+// user made by hand beside the real file, and a sweep that removes a credential
+// must not be able to remove anything else. It is `internal/host`'s spelling on
+// purpose: the two files are swept by the same policy.
+const tempInfix = ".engramux-tmp-"
+
 // URL is the endpoint the last service start published, or "" with a nil error
 // when the file does not exist - which is what a service that never started, or
 // one that could not bind, leaves behind.
@@ -95,6 +103,35 @@ func Port(endpoint string) int {
 	return p
 }
 
+// staleTemps removes temporary files an earlier [Write] left behind when it was
+// killed between its write and its rename. Best effort and silent: a leftover it
+// cannot remove is not something this run should fail over, and publishing the
+// endpoint is the caller's actual business.
+//
+// It is backlog 43, and the asymmetry that row records is worth keeping in view
+// here rather than only there. `internal/host.writeAtomic` has had this sweep
+// since it was written, and its temporary file carries a bearer token *inside
+// another product's configuration*; this one carries the token on its own, two
+// fields and nothing else, and had no sweep at all. Since the DACL landed
+// (backlog 28) a leftover here is at least narrowed to SYSTEM, Administrators
+// and this user - [winacl.Restrict] runs before the first write, so a file that
+// exists at all has been through it - but narrowed is not absent, the token is
+// sticky across restarts, and os.CreateTemp's random suffix means nothing will
+// ever replace the copy.
+//
+// The two packages still do not share code, for the reason writeAtomic's own
+// comment gives: what differs between them is policy, not sequence. This is the
+// policy arriving on the side that needed it more.
+func staleTemps(dir string) {
+	matches, err := filepath.Glob(Path(dir) + tempInfix + "*")
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
+}
+
 // Write publishes endpoint and token, replacing whatever was there.
 //
 // Temporary file, fsync, atomic rename - spec 5.6's rule for every file this
@@ -127,7 +164,9 @@ func Write(dir, endpoint, token string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mcpconf: create %s: %w", dir, err)
 	}
-	f, err := os.CreateTemp(dir, Name+".*")
+	staleTemps(dir)
+
+	f, err := os.CreateTemp(dir, Name+tempInfix+"*")
 	if err != nil {
 		return fmt.Errorf("mcpconf: create a temp %s in %s: %w", Name, dir, err)
 	}
