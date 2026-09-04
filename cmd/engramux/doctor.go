@@ -224,10 +224,10 @@ func (r *report) permissions(label, path string) {
 		r.field(label, "narrowed to SYSTEM, Administrators and this user")
 	case acc.Others > 0:
 		r.note(label, "inherited DACL - %d principals beyond SYSTEM, Administrators "+
-			"and this user reach a file holding the bearer token (backlog 28)", acc.Others)
+			"and this user reach a file that holds the token", acc.Others)
 	default:
 		r.note(label, "inherited DACL - nothing beyond SYSTEM, Administrators and this "+
-			"user reaches it today, but the parent directory decides that (backlog 28)")
+			"user reaches it today, but the parent directory decides that")
 	}
 }
 
@@ -261,7 +261,7 @@ func (r *report) backups(label, path string) {
 	case n == 0:
 	default:
 		r.note(label, "%d kept, oldest %s - each is a copy of this file, so a copy "+
-			"of the bearer token in it", n, oldest.Format(time.DateOnly))
+			"of the token in it", n, oldest.Format(time.DateOnly))
 	}
 }
 
