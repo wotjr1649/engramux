@@ -231,6 +231,40 @@ func (r *report) permissions(label, path string) {
 	}
 }
 
+// backups counts the saved copies standing beside one host configuration.
+//
+// It is backlog 44's reporting half. `internal/host` takes a copy before it
+// replaces either host file and now keeps a bounded number of them, and one of
+// those files holds `Authorization = "Bearer <token>"` - so each copy is another
+// long-lived copy of the token, in a directory people are asked to attach to bug
+// reports. The bound stops that growing; this is what says how many are there.
+//
+// # A count and a date, and there is nothing here to unmask
+//
+// [host.Backups] answers a number and a time and cannot be asked for a name,
+// which is the same trade internal/mcpconf makes about the token: a rule the
+// package keeps rather than one this call site remembers. A backup's name is
+// this file's own path plus a stamp, and a path in a masked diagnostic is what
+// [report.mask] exists for.
+//
+// # It is a note and never a fail, and it says nothing when there are none
+//
+// A backup is a working installation's ordinary residue, and the exit code
+// answers whether the installation works. Nothing said for zero copies: a
+// finding that fires on every machine is a finding nobody reads, and the file
+// this product never writes - Claude Code's own state file - reaches zero by
+// itself rather than by a special case here.
+func (r *report) backups(label, path string) {
+	switch n, oldest, err := host.Backups(path); {
+	case err != nil:
+		r.note(label, "uncountable: %v", err)
+	case n == 0:
+	default:
+		r.note(label, "%d kept, oldest %s - each is a copy of this file, so a copy "+
+			"of the bearer token in it", n, oldest.Format(time.DateOnly))
+	}
+}
+
 // installedNames is what an installation puts in its bin directory.
 var installedNames = []string{host.RelayName, host.ServiceName}
 
@@ -817,9 +851,11 @@ func (r *report) reportHostMCP(label, path, endpoint, marker string) {
 	case strings.Contains(text, endpoint):
 		r.field(label, "points at this endpoint")
 		r.permissions(label+" file", path)
+		r.backups(label+" backups", path)
 	case strings.Contains(text, marker):
 		r.note(label, "STALE - it names engramux at another URL; re-run `engramux install --apply`")
 		r.permissions(label+" file", path)
+		r.backups(label+" backups", path)
 	default:
 		r.note(label, "not registered - run `engramux install --apply`")
 	}
