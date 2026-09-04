@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/wotjr1649/engramux/internal/inject"
+	"github.com/wotjr1649/engramux/internal/injectconf"
 	"github.com/wotjr1649/engramux/internal/ipc"
 )
 
@@ -61,8 +61,8 @@ type promptEvent struct {
 // the request carries the id to exclude - exactly, rather than by resemblance.
 func injectContext(start time.Time, payload []byte, ingestID string) {
 	// The switch first, so a machine with injection off pays one failed
-	// os.ReadFile and never a dial. Absent means off (inject.ConfigName).
-	if !inject.Enabled() {
+	// os.ReadFile and never a dial. Absent means off (injectconf.ConfigName).
+	if !injectconf.Enabled() {
 		return
 	}
 	var ev promptEvent
@@ -70,11 +70,11 @@ func injectContext(start time.Time, payload []byte, ingestID string) {
 		return
 	}
 
-	// The budget is inject.Budget clamped by what is left of the relay's
+	// The budget is injectconf.Budget clamped by what is left of the relay's
 	// own second (1.0 spec §5.3). It comes out of that second rather than
 	// being added to it, so a delivery that ran long leaves injection less
 	// time rather than pushing the process past its ceiling.
-	deadline := earliest(time.Now().Add(inject.Budget), start.Add(totalBudget))
+	deadline := earliest(time.Now().Add(injectconf.Budget), start.Add(totalBudget))
 	text, err := askInject(deadline, ipc.InjectRequest{
 		Prompt:    ev.Prompt,
 		Project:   ev.Cwd,
@@ -179,9 +179,9 @@ func askInject(deadline time.Time, req ipc.InjectRequest) (string, error) {
 	// but this is the process that hands the bytes over - so it checks
 	// rather than trusts. A service one version ahead with a larger cap
 	// would otherwise put a payload past this host's limit into a prompt.
-	if len(reply.Context) > inject.MaxBytes {
+	if len(reply.Context) > injectconf.MaxBytes {
 		return "", fmt.Errorf("the reply is %d bytes, over the %d-byte cap",
-			len(reply.Context), inject.MaxBytes)
+			len(reply.Context), injectconf.MaxBytes)
 	}
 	return reply.Context, nil
 }

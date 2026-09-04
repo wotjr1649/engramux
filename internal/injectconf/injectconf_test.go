@@ -1,11 +1,11 @@
-package inject_test
+package injectconf_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/wotjr1649/engramux/internal/inject"
+	"github.com/wotjr1649/engramux/internal/injectconf"
 	"github.com/wotjr1649/engramux/internal/spool"
 )
 
@@ -33,7 +33,7 @@ func TestInjectionIsOffUntilAFileSaysOtherwise(t *testing.T) {
 			// parallel: the value is process-wide.
 			dir := t.TempDir()
 			t.Setenv("LOCALAPPDATA", dir)
-			path, err := inject.ConfigPath()
+			path, err := injectconf.ConfigPath()
 			if err != nil {
 				t.Fatalf("ConfigPath: %v", err)
 			}
@@ -45,7 +45,7 @@ func TestInjectionIsOffUntilAFileSaysOtherwise(t *testing.T) {
 					t.Fatalf("write the config: %v", err)
 				}
 			}
-			if got := inject.Enabled(); got != tc.enabled {
+			if got := injectconf.Enabled(); got != tc.enabled {
 				t.Errorf("Enabled() = %v with %s, want %v", got, tc.name, tc.enabled)
 			}
 		})
@@ -58,7 +58,7 @@ func TestInjectionIsOffUntilAFileSaysOtherwise(t *testing.T) {
 // A switch in a directory nothing else uses is a switch nobody finds.
 func TestTheConfigSitsBesideTheSpool(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", t.TempDir())
-	dir, err := inject.Dir()
+	dir, err := injectconf.Dir()
 	if err != nil {
 		t.Fatalf("Dir: %v", err)
 	}
@@ -67,6 +67,6 @@ func TestTheConfigSitsBesideTheSpool(t *testing.T) {
 		t.Fatalf("spool.Dir: %v", err)
 	}
 	if got := filepath.Dir(sp); got != dir {
-		t.Errorf("inject.Dir() = %q, want the spool's parent %q", dir, got)
+		t.Errorf("injectconf.Dir() = %q, want the spool's parent %q", dir, got)
 	}
 }

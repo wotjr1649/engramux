@@ -112,7 +112,7 @@ func runWith(t *testing.T, bin string, setup func(*exec.Cmd)) result {
 
 // runWithLocal is [runWith] against a caller-chosen data directory, which is
 // what a test needs when it has to put a file there before the child starts -
-// injection's switch is the only such file (inject.ConfigName).
+// injection's switch is the only such file (injectconf.ConfigName).
 func runWithLocal(t *testing.T, bin, local string, setup func(*exec.Cmd)) result {
 	t.Helper()
 	// Before os.Environ is read below: the child derives its pipe name from
