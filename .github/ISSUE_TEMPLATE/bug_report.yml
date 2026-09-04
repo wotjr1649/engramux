@@ -1,0 +1,104 @@
+name: Bug report
+description: Something Engramux did, or did not do, on your machine.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Engramux records raw prompts, file contents, tool output and the paths you work in.
+        **Nothing from the database, the spool or the service log belongs in a public issue.**
+
+        `engramux doctor` masks its own output. `engramux doctor --full` stops masking — use the
+        plain form here. If you believe you have found a security problem, do not open an issue;
+        the repository owner's contact is in the commit history.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: engramux doctor
+      description: >
+        The masked form, not `--full`. It carries the version, both hosts' registration, the
+        endpoint, the data directory's state and the file permissions, which is most of what a
+        first question would ask for.
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: When did it happen
+      options:
+        - Building from source
+        - engramux install (dry run, no --apply)
+        - engramux install --apply
+        - engramux update --from
+        - A running installation
+        - Signing in (the logon task)
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Which host
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Neither — it did not get that far
+    validations:
+      required: true
+
+  - type: dropdown
+    id: antivirus
+    attributes:
+      label: Did antivirus touch either binary
+      description: >
+        Windows Defender has quarantined `engramux.exe` on the developer's own machine, on
+        behaviour rather than on a signature. Whether it fires on yours is a thing this project
+        wants to know either way, including when the answer is no.
+      options:
+        - "No — nothing fired"
+        - "Yes — something was quarantined or blocked"
+        - "I do not know"
+    validations:
+      required: true
+
+  - type: input
+    id: detection
+    attributes:
+      label: The detection string, if there was one
+      description: >
+        Exactly as your antivirus shows it, and which file it named. `Behavior:Win32/Execution.A!ml`
+        against `engramux.exe` is the one already recorded.
+      placeholder: "Behavior:Win32/Execution.A!ml — engramux.exe"
+    validations:
+      required: false
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: "`winver` gives it. Engramux is measured on Windows 11 / amd64 and nothing else."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before you post
+      options:
+        - label: This issue carries no prompts, file contents or bearer token.
+          required: true
+        - label: Any `doctor` output here is the masked form, not `--full`.
+          required: true

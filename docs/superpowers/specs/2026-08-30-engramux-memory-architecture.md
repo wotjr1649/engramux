@@ -1894,3 +1894,46 @@ of living in a session brief.
    geography, and the free one is closed only until a release exists. What that changes about this
    condition is nothing — the outcome is still a stranger's first run working or being documented.
    What it changes is that "sign the binaries" now has an answer instead of a price tag.
+
+#### What closes 1, 3 and 4, and the run that is about to test them
+
+Decided 2026-09-04, because the three open conditions are about to be attempted together and none of
+them closes by being attempted. Each says what a satisfying outcome is; none said what a person has
+to bring back, and a run that produces no record leaves the condition exactly where it was.
+
+**The run is on a new machine rather than on a second local account.** That exceeds condition 1
+rather than substituting for it: a profile is the unit, and a new machine carries a new profile plus
+the one thing the condition explicitly accepted losing — another Windows build. The binaries are
+carried rather than rebuilt there, which is what makes it a test of the artefact instead of a test
+of a second toolchain, and `install` copies from the directory the running binary is in, so a folder
+holding both is the whole prerequisite.
+
+**Condition 1 closes on four observations, and the fourth is the one a sandbox could never give.**
+That `install --apply` completes on a profile that has never held these binaries; that `doctor`
+reports both hosts registered and the endpoint reachable; that the data directory, `mcp.json` and
+the logon task are created; and that **after a sign-out and a sign-in the service is already running**
+without anyone starting it. The first three are an install working. The fourth is the logon task
+working, which is the claim the condition was written to test.
+
+**Condition 3 closes on the exclusion steps, and only on those.** The `README` exists and says
+everything else §8 asks of it. What is `[unverified]` in it is the procedure, because
+`Add-MpPreference -ExclusionPath` was refused with HRESULT `0xc0000142` and nobody has walked the
+Windows Security UI instead. What closes it is somebody doing that and writing down the path they
+took and what it asked for. **If Defender does not fire on the new machine, this condition does not
+close** — it is satisfied by a recorded procedure, not by an absence, and an absence is condition 4's
+evidence rather than this one's.
+
+**Condition 4 closes either way, and which way is the finding.** A first run that is not quarantined
+closes it as an outcome, and the observation worth keeping is the negative one: which binaries ran,
+whether Defender was at its defaults, and that nothing was excluded beforehand. A first run that
+*is* quarantined closes it only once the documentation carries what happened and what to do, which
+routes straight back through condition 3. Both halves want the detection string exactly as the user
+sees it, which artefact it named, and whether the executable had run before it was removed — the
+existing record has all three for the owner's machine and is what a second machine is compared
+against.
+
+**What not to bring back.** `doctor` masks its own output and `--full` stops masking; a report that
+leaves this machine uses the masked form. The database, the spool and the service log are raw
+capture by design and none of them belongs in an issue. Backlog 37 carries the measurement these
+conditions rest on and is not superseded by a second reading — a second machine adds a data point to
+it rather than replacing it.
