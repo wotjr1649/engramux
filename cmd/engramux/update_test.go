@@ -126,3 +126,32 @@ func TestUpdateSaysWhereToGetAnArtefact(t *testing.T) {
 		t.Errorf("a dangling --from gave %q", got)
 	}
 }
+
+// TestUpdateDoesNotSendTheReaderAfterAnArtefactThatDoesNotExist holds the one
+// thing a bare `update` must not do.
+//
+// The message contradicted itself: its first line said there is no delivery
+// channel and its second told the reader to download the release archive. There
+// is no release - no tag, no archive, no marketplace entry - so the second line
+// sent whoever read it looking for a file nobody has ever built, and it is the
+// first thing a reader meets after the README tells them `update` is not a first
+// step.
+//
+// What is asserted is the pair, because either half alone passes for the wrong
+// reason: a message that names no source at all is honest and useless, and a
+// message naming --from could still carry the download line beside it.
+//
+// This test is deleted, not relaxed, on the day a release exists. Telling a
+// reader to download an archive is then correct, and a test forbidding it would
+// be pinning a fact that has moved.
+func TestUpdateDoesNotSendTheReaderAfterAnArtefactThatDoesNotExist(t *testing.T) {
+	help := strings.Join(updateNoSourceHelp, "\n")
+	for _, banned := range []string{"release", "archive", "download", "unpack"} {
+		if strings.Contains(strings.ToLower(help), banned) {
+			t.Errorf("the bare-update message says %q, and there is no release to get:\n%s", banned, help)
+		}
+	}
+	if !strings.Contains(help, "--from <directory>") {
+		t.Errorf("the bare-update message does not name the only door there is:\n%s", help)
+	}
+}

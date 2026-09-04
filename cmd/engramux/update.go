@@ -165,11 +165,32 @@ func updateSource(args []string) (from string, rest []string, ok bool) {
 		}
 	}
 	if !ok {
-		warn("update: no --from, and there is no delivery channel to read instead.")
-		warn("download the release archive, unpack it, and point --from at the directory:")
-		warn("    engramux update --from <directory>")
+		for _, line := range updateNoSourceHelp {
+			warn("%s", line)
+		}
 	}
 	return from, rest, ok
+}
+
+// updateNoSourceHelp is what a bare `update` says.
+//
+// It is a value rather than three warn calls so that a test can read it. warn
+// writes straight to os.Stderr with no seam, and adding one for a string is a
+// larger change than naming the string.
+//
+// # It said the opposite of its own first line, and that is what changed
+//
+// The second line used to say "download the release archive, unpack it" - one
+// line after the first said there is no delivery channel to read instead. There
+// is no release: no tag, no archive, no marketplace entry. So the message
+// answered a reader by sending them after a file nobody has built, and it is
+// the first thing they meet after the README tells them `update` is not a first
+// step. What it names now is the only thing that exists, which is a directory
+// they already have.
+var updateNoSourceHelp = []string{
+	"update: no --from, and there is no delivery channel to read instead.",
+	"point --from at a directory holding both binaries - there is nothing to fetch:",
+	"    engramux update --from <directory>",
 }
 
 // updateRefusals is every check that has to happen before anything stops.
