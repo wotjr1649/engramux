@@ -29,8 +29,18 @@ func TestPermissionsTellsANarrowedFileFromAnInheritedOne(t *testing.T) {
 	if !strings.Contains(inherited, "inherited DACL") {
 		t.Errorf("an inherited file reported %q, want it to say so", inherited)
 	}
-	if !strings.Contains(inherited, "backlog 28") {
-		t.Errorf("an inherited file reported %q, without naming the open finding", inherited)
+	// This line is a finding rather than a fact, so it owes the reader what
+	// is at stake and not only a verdict. Both inherited branches carry that
+	// clause - one says the token is reachable, the other says the parent
+	// directory is what decides - and a message trimmed to "inherited DACL"
+	// would pass every other assertion here.
+	//
+	// This used to assert the line named backlog 28. That row closed on
+	// 2026-09-04 and was deleted by the backlog's own rule, so the message
+	// was pointing at a row that no longer exists - which is worse than
+	// pointing nowhere, because a reader would go looking.
+	if !strings.Contains(inherited, "token") && !strings.Contains(inherited, "parent directory") {
+		t.Errorf("an inherited file reported %q, which is a verdict with no consequence attached", inherited)
 	}
 
 	if err := winacl.Restrict(path); err != nil {
