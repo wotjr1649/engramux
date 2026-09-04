@@ -2,8 +2,10 @@ package mcpconf
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/wotjr1649/engramux/internal/winacl"
@@ -152,5 +154,74 @@ func TestWriteNarrowsTheFileItPublishes(t *testing.T) {
 	}
 	if !got.Narrowed() {
 		t.Error("Narrowed() disagrees with the three fields above")
+	}
+}
+
+// TestWriteSweepsWhatAKilledRunLeft is backlog 43, and it is the path
+// TestWriteLeavesNoTemporaryFile above does not reach: that one asserts a write
+// that finished cleans up after itself, and this one asserts a write cleans up
+// after a run that never finished at all.
+//
+// Two leftovers rather than one, because os.CreateTemp's random suffix is the
+// whole reason a sweep is needed. The installer this product replaces named its
+// temporary file after the process id, so a later run overwrote it; a random
+// suffix means every killed run leaves its own file under a name nothing will
+// ever replace, and each of them holds the token verbatim.
+//
+// The `.bak` neighbour is not padding. It is what says the sweep is bounded by
+// [tempInfix] rather than by `mcp.json.*`, which would also remove a copy the
+// user made beside the file - a sweep that removes a credential must not be able
+// to remove anything else.
+func TestWriteSweepsWhatAKilledRunLeft(t *testing.T) {
+	dir := t.TempDir()
+	const (
+		endpoint = "http://127.0.0.1:1/mcp"
+		token    = "TOKENTOKENTOKENTOKENTOKEN1"
+	)
+	body := []byte(`{"url":"` + endpoint + `","token":"` + token + `"}`)
+
+	var killed []string
+	for range 2 {
+		f, err := os.CreateTemp(dir, Name+tempInfix+"*")
+		if err != nil {
+			t.Fatalf("stage a leftover: %v", err)
+		}
+		if _, err := f.Write(body); err != nil {
+			t.Fatalf("stage a leftover: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("stage a leftover: %v", err)
+		}
+		killed = append(killed, f.Name())
+	}
+	keep := Path(dir) + ".bak"
+	if err := os.WriteFile(keep, body, 0o600); err != nil {
+		t.Fatalf("stage the neighbour: %v", err)
+	}
+
+	if err := Write(dir, endpoint, token); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	for _, p := range killed {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a temporary file holding a token survived the write: Stat answered %v", err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("the sweep removed a file that is not its own: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("list %s: %v", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	slices.Sort(names)
+	if want := []string{Name, Name + ".bak"}; !slices.Equal(names, want) {
+		t.Fatalf("the directory holds %v, want %v", names, want)
 	}
 }
