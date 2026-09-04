@@ -12,35 +12,28 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/wotjr1649/engramux/internal/injectconf"
 	"github.com/wotjr1649/engramux/internal/memory"
 	"github.com/wotjr1649/engramux/internal/project"
 	"github.com/wotjr1649/engramux/internal/search"
 	"github.com/wotjr1649/engramux/internal/secret"
 )
 
-// MaxBytes is gate M5's cap on one injection, fence included.
+// MaxBytes and Budget are [injectconf]'s, named again here because this is
+// where the spec's reader looks for injection's vocabulary and where this
+// package's own gates read them.
 //
-// It is a conversion and not a measurement (memory spec rev.8, M-4). Codex
-// documents a default additionalContext limit of about 2,500 tokens, past which
-// it spills the text to a file and gives the model a preview and a path; Claude
-// Code documents no limit at all. So the hosts' documented budget is Codex's, it
-// is the stricter of the two by virtue of existing, and 2 bytes per token is the
-// conservative end for a corpus carrying Korean. §6's third mitigation - small -
-// wants the error in this direction.
-const MaxBytes = 5000
-
-// Budget is the 500 ms M-4 gives one injection, and gate M10's subject.
-//
-// It comes out of the 1 s the relay already has (1.0 spec §5.3) rather than
-// being added to it, so the product's own budget does not move because a
-// feature was added inside it. Twice the worst of the five measured
-// `engramux search` runs against the installed service over a 227,954,688 B
-// database - 93, 113, 185, 245 and 251 ms - each of which is process start,
-// pipe dial, search and reply. What is unverified is the tail: all five are
-// warm, and every read-deadline failure the 1.0 spec §7.1 records was a cold
-// read after an idle period against a smaller database. M10 measures that
-// rather than assuming it.
-const Budget = 500 * time.Millisecond
+// The values moved because the relay needs them and must not link a database to
+// get them: internal/inject reaches internal/search and internal/store, so four
+// symbols were pulling fourteen packages of modernc.org/sqlite and goose into a
+// binary spawned once per hook event (1.0 spec 7.1, backlog 42). A name in two
+// places is normally how that regression comes back; here it cannot, because
+// TestTheRelayDoesNotLinkTheSQLiteDriver fails the moment cmd/engramux reaches
+// this package for either of them.
+const (
+	MaxBytes = injectconf.MaxBytes
+	Budget   = injectconf.Budget
+)
 
 // candidates is how many hits each of the two indexes is asked for before
 // anything is filtered out.

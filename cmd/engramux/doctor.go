@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/host"
-	"github.com/wotjr1649/engramux/internal/inject"
+	"github.com/wotjr1649/engramux/internal/injectconf"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/mcpconf"
 	"github.com/wotjr1649/engramux/internal/schedule"
@@ -515,11 +515,11 @@ func (r *report) reportLocal() {
 	//
 	// The path is printed on the off answer because that is where a person
 	// has to write the file, and the file is the whole of the interface.
-	if inject.Enabled() {
+	if injectconf.Enabled() {
 		r.field("injection", "on - hook-time context is being added to UserPromptSubmit")
 	} else {
 		r.field("injection", "off - write {\"enabled\":true} to %s to turn it on",
-			filepath.Join(dir, inject.ConfigName))
+			filepath.Join(dir, injectconf.ConfigName))
 	}
 
 	if depth, err := spool.Depth(spoolPath); err != nil {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wotjr1649/engramux/internal/inject"
+	"github.com/wotjr1649/engramux/internal/injectconf"
 	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/pipe"
 )
@@ -64,7 +65,7 @@ func enableInjection(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("make the data directory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, inject.ConfigName), []byte(`{"enabled":true}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, injectconf.ConfigName), []byte(`{"enabled":true}`), 0o600); err != nil {
 		t.Fatalf("write the switch: %v", err)
 	}
 	return local
@@ -247,7 +248,7 @@ func TestAServiceThatRefusesInjectInjectsNothing(t *testing.T) {
 // service one version ahead with a larger cap cannot put a payload past this
 // host's limit into a prompt.
 func TestInjectionRefusesAReplyOverTheCap(t *testing.T) {
-	over := strings.Repeat("x", inject.MaxBytes+1)
+	over := strings.Repeat("x", injectconf.MaxBytes+1)
 	serveWithInject(t, &ipc.InjectReply{Version: ipc.Version, Type: ipc.Inject, Context: over})
 	local := enableInjection(t)
 	res := runWithLocal(t, relayBin, local, stdinReader(promptPayload("what did the checkpoint threshold decide")))

@@ -13,7 +13,7 @@
 //
 // Of §6's five mitigations, exactly one does not rest on a model behaving well,
 // and it is [Fence]. The other four are here too - not injecting is the default
-// (see [Enabled]), the cap is [MaxBytes], every excerpt carries its provenance,
+// (see [injectconf.Enabled]), the cap is [MaxBytes], every excerpt carries its provenance,
 // and the service logs what it injected - but they are smaller windows rather
 // than closed doors. Nothing in this package is safe against an adaptive
 // attacker and the published position is that detection-based defences fail;
