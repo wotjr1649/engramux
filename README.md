@@ -40,15 +40,21 @@ build that is not a release calls itself `0.0.0-dev`, with the first twelve char
 appended when the binary carries build information, and `.dirty` on top of that when the tree was
 modified.
 
-Four publication conditions are recorded in the memory spec. **One is closed** — the bearer token's
-file permissions, on 2026-09-04. Three are open:
+Four publication conditions are recorded in the memory spec. **Three are closed**, all on
+2026-09-04: the bearer token's file permissions, a first install on a profile that had never run
+these binaries, and a first run that antivirus did not touch. What that install measured is in the
+spec; the short version is that it worked, including the part no disposable environment can test —
+after a sign-out and a sign-in the service was already running, started by nothing but the logon
+task.
 
-- **A first install on a clean profile.** Read this one plainly: these two binaries have never been
-  installed onto a Windows profile that has not already run every earlier build of them. If you
-  install this, you are the first.
-- **This README.** It is condition 3, and it does not close itself: the condition asks for the
-  Defender exclusion steps, and those are `[unverified]` below rather than given.
-- **A first run that survives antivirus.** See below.
+**One is open, and it is this file.** Condition 3 asks for the Defender exclusion steps, and those
+are still `[unverified]` below rather than given, because on the machine that closed the other two
+Defender never fired and so nobody had to walk that route.
+
+Two things about the closed pair are worth knowing before they read as more than they are. That
+install was onto a second machine belonging to the same person, not a stranger's. And the binary
+antivirus left alone is **not** the binary that was quarantined here on 2026-09-03: it is a
+different, smaller build from a different commit. Two machines, two builds, two verdicts.
 
 ## What it stores, and who can read it
 
@@ -89,8 +95,14 @@ repository calls.
 ## Windows Defender will quarantine the CLI
 
 It has happened here, and the memory spec's fourth publication condition says a stranger's first
-install presents the same two shapes. Treat that as the condition's own claim rather than as
-something anyone has watched on another machine — nobody has, which is what condition 1 above is.
+install presents the same two shapes.
+
+**On a second machine, on 2026-09-04, it did not happen at all.** Default settings, no exclusions in
+place, first execution of freshly copied unsigned binaries, and nothing was touched. That is not the
+all-clear it looks like, for a reason worth stating plainly: the build that was left alone is not
+the build that was quarantined — it is smaller and from a later commit — so what the two runs
+together show is that a `Behavior:` `!ml` verdict is a machine's opinion of a rare executable rather
+than a property of these bytes. **Plan for it firing on yours.**
 
 **`Behavior:Win32/Execution.A!ml`** removed `engramux.exe` — the CLI — from both the build output
 directory and the install directory, severity 5, blocked before it ran. The service binary was not

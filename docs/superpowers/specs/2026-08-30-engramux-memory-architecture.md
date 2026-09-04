@@ -1783,7 +1783,7 @@ Decided 2026-09-02. §1 already makes publication wait on the memory feature bei
 better; this list is what else it waits on, written here so that the conditions have one owner instead
 of living in a session brief.
 
-1. **A first install on a clean profile.** The 1.0 spec's Windows argument has been measured on one
+1. **A first install on a clean profile. [verified] 2026-09-04, and this condition is closed.** The 1.0 spec's Windows argument has been measured on one
    profile only, and that profile has had every build of Engramux on it. What the argument needs is an
    install by the two shipped binaries alone onto a profile that has never run them. A *profile* is the
    unit, not a machine, because it is the product's own unit of isolation: one service per user, a pipe
@@ -1857,7 +1857,9 @@ of living in a session brief.
    whole of the second one. So the `README` has to name the detection by the string a user will see,
    say that it fires on the CLI and not on the service, and give the exclusion steps — which makes
    this condition partly a dependency of condition 4 rather than only a courtesy.
-4. **A first run that survives the machine's own antivirus, and is documented.** Written as an
+4. **A first run that survives the machine's own antivirus, and is documented. [verified] 2026-09-04,
+   and this condition is closed on the outcome - with a caveat that is worth more than the closure,
+   below.** Written as an
    outcome rather than as a mechanism, which the other three are too, and deliberately: signing is
    not a pass. **[verified] 2026-09-03**, on the owner's machine, mid-session: Windows Defender
    removed `engramux.exe` from both the build directory and the install directory as
@@ -1937,3 +1939,53 @@ leaves this machine uses the masked form. The database, the spool and the servic
 capture by design and none of them belongs in an issue. Backlog 37 carries the measurement these
 conditions rest on and is not superseded by a second reading — a second machine adds a data point to
 it rather than replacing it.
+
+#### The run happened, 2026-09-04, and three of the four are closed
+
+**It was a new machine, and that is checked rather than taken on trust.** Four things in the report
+cannot come from the machine every earlier measurement was taken on: the MCP endpoint is on port
+51244 against that machine's 8867, the database holds 2,310 events against its 27,303, the service
+had been up 7.8 seconds, and the version line reads that the installed and running binaries agree -
+which the owner's machine cannot print, because its service is still running an earlier build and
+reports the mismatch instead. Both hosts were installed before Engramux, which is the prerequisite
+that has no error message.
+
+**Condition 1 closes on all four observations.** `install --apply` completed on a profile that had
+never held these binaries; `doctor` reports both hosts at eleven of eleven events pointing at the
+installed relay, the endpoint listening, the data directory and the logon task present; and after a
+sign-out and a sign-in the service answered `status` with nobody having started it. The fourth is
+the one no sandbox could have given and it is why this condition was not satisfiable by a disposable
+environment.
+
+**Condition 2 gained an independent reading it had never had.** `mcp.json` came back narrowed to
+SYSTEM, Administrators and this user on a second account - the DACL code had only ever run against
+one SID, and the principals it names are derived rather than written down, so a second account is
+the first time that derivation was exercised at all.
+
+**Condition 4 closes on the outcome, and the caveat is the finding.** Nothing was quarantined:
+default antivirus, no exclusions in place, first execution of freshly copied unsigned binaries.
+What that is not is evidence that the detection is gone, and the reason is specific rather than
+cautious. **The artefact is not the one that was quarantined.** The 2026-09-03 removal was of an
+8,703,488 B build; this is 4,817,408 B at a different commit, after backlog 42 took the SQLite
+driver out of the relay. So two machines ran two builds and got two verdicts, and the honest reading
+is the one backlog 37 already argued: `Behavior:` and `!ml` describe a model's opinion of a rare
+executable on a particular machine with particular definitions, not a property of the bytes. A
+second machine is a second data point on that row and does not replace the first.
+
+**Condition 3 did not close, exactly as the section above said it would not.** The exclusion
+procedure is closed by somebody walking the Windows Security UI and writing down what it asked for,
+and nothing asked them to. It is satisfied by a recorded procedure and not by an absence.
+
+**Two things only a second machine could show, and one of them was a defect.** The `claude code
+backups` line printed nothing at all, because Claude Code's own state file is one this product never
+writes and so has zero copies - the silence falls out of the placement rule rather than out of a
+special case, which is what the rule was for. And the report carried a fault of its own: two
+sentences saying "the bearer token" were rewritten by `doctor`'s own redactor into "the bearer
+[redacted-authorization]", in the lines that exist to tell a user their token has copies. The mask
+is right and the prose changed; a test now reads every string literal out of that file's syntax tree
+and masks it, so the sentence somebody adds next is covered too.
+
+**What the run did not report.** A `search` returning the two probe words, and an MCP tool call from
+either host. Capture itself is not in doubt - 2,310 events, no errors, nothing spooled, both hosts
+at eleven of eleven, and the native memory indexer had run - but a query answering over a database
+built from nothing on a machine that is not this one is a different claim and is still unmade.

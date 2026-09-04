@@ -372,8 +372,13 @@ closed by having a `README`. An adversarial pass over the first draft found elev
 repository did not support, five of them falsified by this session's own condition-2 work landing
 twenty-six minutes after the draft.
 
-**Conditions 1 and 4 are untouched** and neither is an agent's: a clean-profile install needs a
-second local account, and a first run surviving antivirus needs that install.
+**Conditions 1 and 4 were untouched when this was written and both closed on 2026-09-04**, on a new
+machine rather than on a second local account - which exceeds condition 1 rather than substituting
+for it, a profile being the unit. All four observations held, the fourth included: after a sign-out
+and a sign-in the service was already running. Antivirus did not fire, which closes 4 on the
+outcome and leaves 3 open, since an exclusion procedure is recorded by walking it and nothing asked
+anyone to. The memory spec §8 carries the evidence and the caveat that the build antivirus left
+alone is not the build that was quarantined.
 
 Evidence for both: suite green over 20 packages, the pinned linter at `0 issues.` and **exit 0**,
 and `scripts/race.sh` green with no data race — run in that order and not concurrently.
