@@ -159,7 +159,33 @@ the download line beside it. Both arms were watched failing under a mutation tha
 answer. **The test is deleted rather than relaxed on the day a release exists**, since telling a
 reader to download an archive is correct then and a test forbidding it would pin a fact that moved.
 
+**42 closed on 2026-09-04**, on its own branch and merged `--no-ff`, and **ahead of gate M7 under
+the row's own escape clause rather than in spite of it**. `internal/injectconf` is the switch file
+and the two spec constants as a leaf - `encoding/json`, `fmt`, `os`, `path/filepath`, `time` and
+nothing else - and `cmd/engramux` reaches it instead of `internal/inject`. The four switch symbols
+are gone from `internal/inject` entirely, since nothing outside the relay used them; `MaxBytes` and
+`Budget` are named again there, because that is where the spec's reader looks and where the gates
+read them, and a name in two places is safe here only because the new test fails the moment the
+second name is used to reach the leaf the long way round. Measured: fourteen banned packages to
+**zero**, and the relay from **8,703,488 B to 4,817,408 B**. That is still not the 3,862,528 B §7.1
+records - the remaining 954,880 B is growth this row was never about, and **the spec's figure stays
+stale for a reason that is now separable from the driver**.
+
+`TestTheRelayDoesNotLinkTheSQLiteDriver` is the part worth more than the split, as the row said. It
+runs `go list -deps` rather than asserting a size, because a size assertion goes red on an
+`ldflags` change and green on a driver arriving in a build that stripped more; and it names the
+suspect import in its failure, so the answer is "this import did" instead of "something linked
+SQLite". Watched failing at fourteen packages before the split, and again under a mutation that
+changes the answer: **one blank import of `internal/inject` in `doctor.go` brings all fourteen
+back**.
+
+**Behaviour-neutrality was proved, not asserted.** Pass 2 ran over the frozen snapshot through
+`ENGRAMUX_M7_DIR` before and after: 28 injections, largest 4,944 B, median 1,918 B, 122 abstained,
+172 blocks, the three abstention reasons and all nine per-stratum figures identical line for line
+with only the timing normalised out. The M7 fixture was not touched and is still 150 of 150
+unlabelled. **Row 46 was deliberately left**: it changes a log line, and the same tripwire would
+have to be re-run against it.
+
 | # | Where | What |
 |---|---|---|
-| 42 | `cmd/engramux`'s `doctor.go` and `inject.go`, and 1.0 spec §7.1 | **The relay binary links the SQLite driver, against an invariant this repository declared and still repeats.** Measured 2026-09-04: `go list -deps ./cmd/engramux` reports `modernc.org/sqlite` and `github.com/pressly/goose/v3`, reached through `internal/inject` → `internal/search` → `internal/store`, which both `doctor.go` and `inject.go` import. `dist/engramux.exe` is **8,703,488 B** against the **3,862,528 B** §7.1 records twice. The session-05 brief states the rule outright - *"The relay binary must not link the SQLite driver"* - and `doctor.go`'s own comment explains that it uses `spool.Dir()` rather than importing `internal/store` *because* that would link the driver, in the file that imports it anyway two hundred lines above. What this costs is not only bytes: §5.9's rejection of an stdio proxy and `doctor`'s rejection of a `net/http` probe (+93.7%) are both argued against the 3,862,528 B baseline, so both rejections now rest on a figure that has moved. The relay is spawned once per hook event, which is what made the size an invariant rather than a preference. **Measured 2026-09-04, after this row was first written and against it: it is a package split, not a design decision.** The relay uses exactly four symbols from `internal/inject` - `Enabled()`, `ConfigName`, `Budget` and `MaxBytes` - and not one of them touches the database: `config.go` imports `encoding/json`, `fmt`, `os` and `path/filepath` and nothing else. The relay never calls `Build` at all, because injection happens service-side and the relay only gates on the switch file and forwards over the pipe. The driver arrives because those four symbols share a *package* with `Build`, which reaches `internal/search` and `internal/store`. And that package is the only route: `cmd/engramux`'s non-test imports contain no `internal/store`, and none of the other eight internal packages it imports reaches the driver. So the fix is to move the switch and the two budget constants into a leaf package both sides import. The first version of this row called it a design decision about how `doctor` reports injection; that was written from a reviewer's account without checking the coupling surface, and it is wrong. **A test could own it and none does**: a dependency assertion over `go list -deps ./cmd/engramux` fails the moment it happens again, and is the part of this row worth more than the split. **Sequencing**: it edits `internal/inject` and `m7_test.go`'s imports, so it waits for gate M7 unless the split is proved behaviour-neutral by reproducing pass 2's recorded figures exactly |
 | 46 | `internal/inject`'s abstention reasons | **`ReasonNoHits` covers at least three different situations and `ReasonTooBroad` absorbs a fourth, so the service log cannot tell recall from silence - which is the thing §6's fifth mitigation asks it to do.** Read 2026-09-04. One return point produces `ReasonNoHits`, reached when the event side and the memory side are both empty after filtering, and the event side empties three ways: nothing matched at all; the only match was the prompt's own event, removed by the exclusion; or everything that survived the exclusion was one of this product's own command lines, removed by `keepable`'s `InvokesEngramux` filter. The third is not in the spec's account of it. Worse, `broad` is set when **either** index exceeds the 200-document ceiling, so a run where the memory side was suppressed and the event side was emptied by the exclusion returns `ReasonTooBroad` - an exclusion reported as a selectivity ceiling. Session 14 read the reason one way, wrote it into the spec and corrected it the same day; the spec's corrected sentence still says the one surviving match *is* the prompt's own event, which was measured over 115 of 120 and not 120. **What a fix is**: split the constant, and return what `keepable` removed. That also makes gate M7's `byReason` count the causes for free and with no leak surface, where measuring it from outside the injector cannot - `candidates`, `maxMatches` and `keepable` are all unexported, so an out-of-package replication measures a different population. Product behaviour changes (a log line), so it wants its own branch. **Deliberately not done in session 15**, because the M7 fixture was being labelled and the gate re-injects: changing the injector mid-labelling makes pass 2 and the gate measure different treatments |

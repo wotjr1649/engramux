@@ -196,8 +196,9 @@ delete `%LOCALAPPDATA%\engramux` yourself.
 is registered, before it touches a file or stops the service, and tells you to run `install --apply`
 instead. It is how an *existing* installation is replaced: it stops the service, waits for it,
 copies the binaries, and starts it again. `scripts/reinstall.sh` wraps it and has the same
-precondition. Running `update` with no `--from` at all currently tells you to download a release
-archive; there is no release, and that message is a known defect.
+precondition. Running `update` with no `--from` at all says there is no delivery channel and points
+at a directory you already have — it used to tell you to download a release archive, one line after
+saying there is nothing to read from.
 
 ## Delivery, in the future tense
 
