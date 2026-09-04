@@ -5,14 +5,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
 
 // backupInfix is what a saved copy of a host configuration is named with. The
 // destination's own name is kept in front of it so that the backup sorts beside
-// the file it came from, and the caller can find every one of them with a glob.
+// the file it came from, and [savedCopies] can find every one of them.
 const backupInfix = ".engramux-backup-"
+
+// backupKeep is how many saved copies of one destination survive a [Commit],
+// counting the one that Commit is about to take.
+//
+// It is backlog 44. Every Commit left a timestamped copy and nothing removed
+// any of them, so the count grew without bound - and one of the files this
+// backs up is ~/.codex/config.toml, which holds `Authorization = "Bearer
+// <token>"`. Each copy taken after the token was written is another long-lived
+// copy of it, under a name nothing replaces, in a directory people are asked to
+// attach to bug reports.
+//
+// # Why this is a bound and not a sweep
+//
+// A backup here is meant to be recoverable, so removing all of them would take
+// the remedy away with the exposure. [Plan]'s own comment is the evidence: the
+// failure it describes leaves one host's configuration already replaced "with
+// only a timestamped backup to recover it", and install.go prints every path
+// [Commit] returns so that a person can go and use one. Same trade that put
+// BUILTIN\Administrators on mcp.json's DACL - a narrowing that removes the only
+// route back is not a narrowing worth having.
+//
+// # Why three
+//
+// It is a bound rather than a measurement, and what it has to be is finite and
+// more than one. A copy is taken *before* each write, so the copy holding the
+// last good configuration is one write older than the copy holding the bad one:
+// keeping a single copy would mean a user who noticed one install too late had
+// only the broken content left. Three survives noticing twice too late.
+const backupKeep = 3
 
 // # The paths here are variables, and gosec says so at three sites
 //
@@ -83,7 +113,8 @@ func PlanMerge(path, label string, events []string, entryFor func(event string) 
 // another copy of that token, under a timestamped name nothing will ever
 // replace, in a directory people are asked to attach to bug reports. The
 // installer this replaces printed every backup path; a review found that this
-// one had stopped.
+// one had stopped. How many of them a destination accumulates is [backupKeep],
+// and `doctor` counts them through [Backups].
 func Commit(plans []*Plan) ([]string, error) {
 	var saved []string
 	for _, plan := range plans {
@@ -120,14 +151,111 @@ func staleTemps(path string) {
 	}
 }
 
+// savedCopy is one backup beside a destination: where it is, and when it was
+// taken. The time comes from the directory scan rather than from the name, and
+// that is not indifference - see [savedCopies].
+type savedCopy struct {
+	path string
+	when time.Time
+}
+
+// savedCopies returns every backup beside path, newest first.
+//
+// # The order is by modification time and not by name, and the difference is
+// # measurable
+//
+// The stamp in the name is [time.RFC3339Nano], which **trims trailing zeros**
+// from the fractional second, so that field is variable width and a
+// lexicographic sort of the names is not reliably chronological: `...-55-1Z`
+// sorts after `...-55-12Z`, because `Z` is greater than `2`. Whole seconds are
+// unaffected, so the wrongness is bounded and nothing here would have noticed
+// it - which is exactly the kind of thing that survives into a retention policy
+// and quietly keeps the wrong three files.
+//
+// The name is still the tie-break, because a Windows file time moves in ticks
+// of about 15.6 ms by default and several copies written inside one tick share
+// a modification time exactly. That is unreachable for real installs, which are
+// minutes apart, and immediate for a test that calls [Commit] in a loop.
+func savedCopies(path string) ([]savedCopy, error) {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("host: list %s: %w", dir, err)
+	}
+	prefix := filepath.Base(path) + backupInfix
+	var found []savedCopy
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			// It went away between the scan and the stat, which is
+			// another run of this product doing its own pruning.
+			continue
+		}
+		found = append(found, savedCopy{filepath.Join(dir, e.Name()), info.ModTime()})
+	}
+	slices.SortFunc(found, func(a, b savedCopy) int {
+		if c := b.when.Compare(a.when); c != 0 {
+			return c
+		}
+		return strings.Compare(b.path, a.path)
+	})
+	return found, nil
+}
+
+// Backups answers how many saved copies stand beside path and when the oldest
+// was taken. A destination with none answers 0 and the zero time.
+//
+// # It answers a count and a time, and there is no way to ask it for a name
+//
+// `doctor` is the caller, every line of that command goes through a mask, and a
+// backup's name is the destination's own path plus a stamp - the shape the mask
+// exists to keep out of a diagnostic somebody pastes into a public issue. A
+// function returning the names would leave "print only the count" as a rule the
+// call site follows; this leaves it as something the package cannot be asked to
+// break. It is the same trade internal/mcpconf's package comment makes about
+// the token: no field for it on the way out, so no caller can be handed one.
+func Backups(path string) (int, time.Time, error) {
+	found, err := savedCopies(path)
+	if err != nil || len(found) == 0 {
+		return 0, time.Time{}, err
+	}
+	return len(found), found[len(found)-1].when, nil
+}
+
+// prune removes all but the newest keep backups beside path.
+//
+// Best effort and silent, like [staleTemps]: a copy it cannot remove is not
+// something an install should fail over, and the write about to happen is the
+// caller's actual business.
+func prune(path string, keep int) {
+	found, err := savedCopies(path)
+	if err != nil {
+		return
+	}
+	for _, c := range found[min(len(found), keep):] {
+		_ = os.Remove(c.path)
+	}
+}
+
 // backup copies a file beside itself under a timestamped name and returns that
 // name. The stamp carries no colons, which a Windows path may not hold.
+//
+// The prune runs **before** the copy and keeps one fewer, rather than running
+// after and keeping [backupKeep]. That is what makes the copy this run is about
+// to take structurally ineligible for its own prune: it does not exist yet, so
+// no ordering mistake can reach it. What an ordering mistake can still do is
+// keep the wrong old copies, which costs recovery depth rather than the
+// remedy.
 func backup(path string) (string, error) {
 	//nolint:gosec // G304: see the note above.
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("host: read %s to back it up: %w", path, err)
 	}
+	prune(path, backupKeep-1)
 	stamp := strings.NewReplacer(":", "-", ".", "-").Replace(time.Now().UTC().Format(time.RFC3339Nano))
 	dest := path + backupInfix + stamp
 	//nolint:gosec // G703: dest is path plus a suffix this file appends; see the note above.

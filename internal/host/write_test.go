@@ -2,10 +2,13 @@ package host
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // planFor is the plan these tests make: the probe entry, over the two-event
@@ -53,6 +56,116 @@ func leftovers(t *testing.T, dir string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+// TestBackupsAreBoundedAndTheNewestSurvive is backlog 44.
+//
+// Every [Commit] left a timestamped copy and nothing removed any of them, so a
+// machine that had been installed a few dozen times held a few dozen copies of
+// ~/.codex/config.toml - a file that holds `Authorization = "Bearer <token>"`,
+// in a directory people are asked to attach to bug reports.
+//
+// # Which three survive is the assertion, and a count alone would not be one
+//
+// A bound that keeps an arbitrary three passes a count check and destroys the
+// thing the copies are for: the newest is the only one that can undo the write
+// that just happened. So each write here leaves a copy with distinguishable
+// contents, and the test names the three it expects by content.
+//
+// # The copies are stamped by hand, and that is what makes this about ordering
+//
+// A Windows file time moves in ticks of about 15.6 ms, so six writes in a loop
+// share a modification time exactly and the retention order would fall to
+// [savedCopies]' name tie-break - which is not what is under test, and which
+// RFC3339Nano's trimmed fractional second makes unreliable at sub-second
+// spacing anyway. Real installs are minutes apart. An hour apart is that,
+// made exact.
+func TestBackupsAreBoundedAndTheNewestSurvive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	seedRaw(t, path, "v0")
+
+	// A neighbour that is not ours. The bound is scoped by backupInfix, and
+	// a prune that removes a credential must not be able to remove anything
+	// else.
+	neighbour := path + ".bak"
+	seedRaw(t, neighbour, "not a backup")
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const writes = 6
+	for i := 1; i <= writes; i++ {
+		saved, err := Commit([]*Plan{{
+			Path:  path,
+			Label: "test-host",
+			Text:  fmt.Appendf(nil, "v%d", i),
+		}})
+		if err != nil {
+			t.Fatalf("commit %d: %v", i, err)
+		}
+		if len(saved) != 1 {
+			t.Fatalf("commit %d reported %d backups, want 1", i, len(saved))
+		}
+		when := base.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(saved[0], when, when); err != nil {
+			t.Fatalf("stamp the backup from commit %d: %v", i, err)
+		}
+	}
+
+	if got := read(t, path); got != "v6" {
+		t.Errorf("the destination holds %q, want the last write", got)
+	}
+	if got := read(t, neighbour); got != "not a backup" {
+		t.Errorf("the prune reached a file that is not its own: %q", got)
+	}
+
+	found, err := savedCopies(path)
+	if err != nil {
+		t.Fatalf("list the copies: %v", err)
+	}
+	var got []string
+	for _, c := range found {
+		got = append(got, read(t, c.path))
+	}
+	// A copy taken before write i holds what write i-1 left, so the copy
+	// from the last write holds "v5". Newest first.
+	want := []string{"v5", "v4", "v3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the surviving copies hold %v, want %v", got, want)
+	}
+
+	n, oldest, err := Backups(path)
+	if err != nil {
+		t.Fatalf("Backups: %v", err)
+	}
+	if n != backupKeep {
+		t.Errorf("Backups counted %d, want %d", n, backupKeep)
+	}
+	// The fourth write is what left the "v3" copy, so base+4h is the answer
+	// - taken from the stamps above rather than from savedCopies, or this
+	// would be savedCopies agreeing with itself.
+	if want := base.Add(4 * time.Hour); !oldest.Equal(want) {
+		t.Errorf("Backups reported the oldest at %s, want %s", oldest.UTC(), want)
+	}
+}
+
+// TestBackupsCountsNoneWithoutFailing. A destination nobody has written yet has
+// no copies beside it, and that is an answer rather than an error - `doctor`
+// asks this about a host file on every run.
+func TestBackupsCountsNoneWithoutFailing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	seedRaw(t, path, "v0")
+
+	n, oldest, err := Backups(path)
+	if err != nil {
+		t.Fatalf("Backups: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("Backups counted %d beside a file nothing has replaced, want 0", n)
+	}
+	if !oldest.IsZero() {
+		t.Errorf("Backups reported an oldest of %s for no copies at all", oldest.UTC())
+	}
 }
 
 // TestCommitWritesAndBacksUp is the ordinary path.
