@@ -1839,9 +1839,17 @@ of living in a session brief.
    own directory is four ACEs, one of which names a principal beyond SYSTEM, Administrators and this
    user. Spec 7.1 recorded the same shape.
 
-   **What it does not close** is carried rather than implied: `mcpconf`'s temporary file holds a raw
-   token and has no equivalent of `internal/host`'s `staleTemps` sweep, and `internal/host`'s own
-   backup copies accumulate under timestamped names with no retention policy. Both are backlog rows.
+   **What it did not close, closed the same day.** Both were carried as backlog rows rather than
+   implied, and both are now built with tests that fail when the fix is undone. `mcpconf`'s
+   temporary file — the one holding a *raw* token, where `internal/host`'s holds one inside another
+   product's configuration — is swept before each write, under a name narrow enough to glob for.
+   `internal/host`'s backup copies are **bounded and not swept**: three survive, because a backup
+   here is the documented way back from a bad write and removing all of them would take the remedy
+   away with the exposure — the same reasoning that put Administrators on the DACL above. `doctor`
+   counts them beside the permissions line, as a count and a date, on the two branches where the
+   file carries the token. How many stood on the owner's machine before the bound is
+   `[unverified]` and stays so: a credential-directory guard refused the listing in both sessions
+   that tried, and neither worked around it. That refusal is what the `doctor` line answers.
 3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
    nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0. **It gained a
    named requirement on 2026-09-03** when the false-positive submission was declined (M-7): condition
