@@ -90,10 +90,16 @@ the quotes removed. The stored payload carries a `transcript_path` under the Cod
 directory, so host detection classified it correctly with no help. The relay, the pipe, the service,
 ingest and detection were never the problem.
 
-**Not proved, and do not write otherwise.** Only `UserPromptSubmit` has been observed arriving.
-The other ten events carry the same spelling by construction and none of them has been watched. A
-path containing a space is untested and is expected to fail. And the fix has not yet been through an
-`install --apply` on any machine — the owner's file is still hand-edited.
+**Not proved, and do not write otherwise.** Six of the eleven events have been observed arriving
+after `install --apply` and a `/hooks` re-trust, on 2026-09-05 20:40: `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop` and `SessionEnd`. **Five have not** -
+`SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact` and `PermissionRequest` - because that
+session did none of the things that fire them, not because anything says they are broken. A path
+containing a space is untested and is expected to fail (backlog 51).
+
+**`Stop` is delivered even though Codex calls it failed.** Two `Stop` events landed in the same
+session that printed `Stop hook (failed)` twice. Backlog 52 is therefore a user-visible defect and
+not a capture defect, and that is measured rather than reasoned.
 
 ---
 
