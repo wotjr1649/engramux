@@ -71,12 +71,16 @@ func shortName(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	buf := make([]uint16, windows.MAX_LONG_PATH)
-	n, err := windows.GetShortPathName(in, &buf[0], uint32(len(buf)))
+	// The length is passed as the constant it is rather than as len(buf),
+	// so the conversion the API needs is a constant one: gosec reads
+	// uint32(len(...)) as an overflow whatever the slice was made from.
+	const buflen = windows.MAX_LONG_PATH
+	buf := make([]uint16, buflen)
+	n, err := windows.GetShortPathName(in, &buf[0], buflen)
 	if err != nil {
 		return "", err
 	}
-	if n == 0 || int(n) > len(buf) {
+	if n == 0 || n > buflen {
 		return "", errors.New("host: GetShortPathName wants a buffer longer than a Windows path")
 	}
 	return windows.UTF16ToString(buf[:n]), nil
