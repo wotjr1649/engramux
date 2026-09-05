@@ -15,11 +15,15 @@ import (
 // TestDetectFixtures asserts the exact host value for each of the four Phase 1
 // fixtures, naming the spec 4.3 step each one must be classified through.
 func TestDetectFixtures(t *testing.T) {
+	// Every fixture carries a transcript_path, so under spec 4.3's corrected
+	// order the path decides all of them. What each label records is what the
+	// key fallback would have said, which is the only thing that can disagree.
 	steps := map[string]string{
-		fixtures.ClaudePostToolUseObject: "step 1: prompt_id/effort present",
-		fixtures.CodexPostToolUseString:  "step 2: model/turn_id present",
-		fixtures.CodexPostToolUseArray:   "step 2: model/turn_id present",
-		fixtures.CodexSessionEnd:         "step 3: transcript_path fallback",
+		fixtures.ClaudePostToolUseObject: "path .claude, and prompt_id agrees",
+		fixtures.CodexPostToolUseString:  "path .codex, and model agrees",
+		fixtures.CodexPostToolUseArray:   "path .codex, and model agrees",
+		fixtures.CodexSessionEnd:         "path .codex, and no key rule can reach it",
+		fixtures.ClaudeSessionStart:      "path .claude, and the key rule says codex - the cell this fixture exists for",
 	}
 
 	all := fixtures.All()
@@ -125,6 +129,7 @@ func TestDetectCorpusMeasurement(t *testing.T) {
 		viaStep1or2      int
 		viaStep3         int
 		unknown          int
+		disagree         int
 	)
 
 	for _, e := range entries {
@@ -161,6 +166,16 @@ func TestDetectCorpusMeasurement(t *testing.T) {
 		hasStep1or2 := present(capture.Payload, "prompt_id") || present(capture.Payload, "effort") ||
 			present(capture.Payload, "model") || present(capture.Payload, "turn_id")
 
+		// The two rules disagreeing is what backlog 49 was. Counting it
+		// here is the assertion that would have caught it, had the
+		// corpus held one Claude Code SessionStart: the key rules
+		// answered Codex for a payload whose transcript sits under
+		// .claude, and the old order let the wrong one win.
+		if byKey := keyRuleSays(capture.Payload); byKey != "" && transcriptDir(capture.Payload) != "" && byKey != host {
+			disagree++
+			t.Errorf("%s: transcript_path says %q and the key rule says %q", e.Name(), host, byKey)
+		}
+
 		switch {
 		case host == "unknown":
 			unknown++
@@ -174,6 +189,11 @@ func TestDetectCorpusMeasurement(t *testing.T) {
 		}
 	}
 
+	if disagree != 0 {
+		t.Errorf("%d captures where the path rule and the key rule disagree, want 0. "+
+			"a non-zero count is not a failure of this test - it is a cell where spec 4.3's "+
+			"two rules give different answers, and which one is right has to be decided", disagree)
+	}
 	if filteredSelftest != 1 {
 		t.Errorf("filtered %d selftest captures, want 1 (spec 7.5)", filteredSelftest)
 	}
@@ -192,4 +212,20 @@ func TestDetectCorpusMeasurement(t *testing.T) {
 	if classified := viaStep1or2 + viaStep3; classified != 900 {
 		t.Errorf("classified %d total, want 900 (spec 4.3, 7.1)", classified)
 	}
+}
+
+// keyRuleSays is spec 4.3's key half on its own: what the payload's keys claim
+// the host is, or "" when they claim nothing.
+//
+// It exists so that TestDetectCorpusMeasurement can ask the two halves of the
+// rule separately and notice when they disagree. Detect answers with the whole
+// rule, so it cannot be used to check itself against one of its own arms.
+func keyRuleSays(payload map[string]any) string {
+	switch {
+	case present(payload, "prompt_id") || present(payload, "effort"):
+		return "claude-code"
+	case present(payload, "model") || present(payload, "turn_id"):
+		return "codex"
+	}
+	return ""
 }

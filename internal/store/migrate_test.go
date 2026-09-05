@@ -468,10 +468,11 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
 	// The literal is bumped by hand with every migration added, so a
-	// migration that arrives without anyone noticing fails here. 5 is
-	// 00005, Step 4's three derived ranking columns (memory spec M-3).
-	if v != 5 {
-		t.Fatalf("db version = %d, want 5", v)
+	// migration that arrives without anyone noticing fails here. 6 is
+	// 00006, backlog 49's re-scan of every stored event's host against
+	// spec 4.3's corrected rule.
+	if v != 6 {
+		t.Fatalf("db version = %d, want 6", v)
 	}
 }
 

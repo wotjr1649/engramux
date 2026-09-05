@@ -244,7 +244,12 @@ func TestTheIntegrityCheckCatchesADroppedTrigger(t *testing.T) {
 		"tool_name":       "Bash",
 		"tool_input":      map[string]any{"command": "echo " + desyncToken},
 	})
-	status, err := Ingest(ctx, db, ingestEnv(ftsID(4), payload), SourcePipe, time.Now())
+	// One past whatever ingestFixtures used. It was the literal 4 until a
+	// fifth fixture was added, and then it collided with that fixture's own
+	// id: Ingest ACKs a duplicate as committed (I-05), so the row never
+	// arrived, the index never desynced, and this test passed by asserting
+	// nothing. The count is the only honest source for that number.
+	status, err := Ingest(ctx, db, ingestEnv(ftsID(len(fixtures.All())), payload), SourcePipe, time.Now())
 	requireCommitted(t, status, err, "ingest past the dropped trigger")
 
 	requireSQLiteCode(t, integrityCheck(t, db, 1), sqliteCorruptVTab,

@@ -148,8 +148,12 @@ func mustPathComponent(t *testing.T, p map[string]any, key, dir string) {
 // each fixture still exercises the path spec 8 chose it for. It needs no corpus
 // and always runs.
 func TestFixturesAreWhatTheyClaim(t *testing.T) {
-	if got := len(All()); got != 4 {
-		t.Fatalf("All() returned %d fixtures, want the 4 of spec 8", got)
+	// Five since 2026-09-04. Spec 8 chose four, one per detection path it
+	// knew about; the fifth is the cell that turned out not to have a
+	// detection path - Claude Code's SessionStart, whose key set is a strict
+	// subset of Codex's, so only transcript_path can separate them.
+	if got := len(All()); got != 5 {
+		t.Fatalf("All() returned %d fixtures, want the 5 of spec 8", got)
 	}
 
 	t.Run("codex SessionEnd reaches detection step 3", func(t *testing.T) {
@@ -291,7 +295,17 @@ func TestFixtureShapesOccurInCorpus(t *testing.T) {
 		t.Run(f.File, func(t *testing.T) {
 			real := corpus[cell{f.Host, f.Event}]
 			if len(real) == 0 {
-				t.Fatalf("corpus holds no %s %s captures to compare against", f.Host, f.Event)
+				// A skip and not a failure, and only because the
+				// gap is pinned elsewhere. This corpus holds 13
+				// of the 22 host x event cells and
+				// TestTheCorpusCoverageIsWhatIsRecorded is the
+				// list; a cell becoming covered turns that test
+				// red, which is what brings somebody back here
+				// to run this guard for real. Without the pin
+				// this skip would be the same silence that let
+				// spec 4.3 be recorded as 900/900.
+				t.Skipf("corpus holds no %s %s capture, so this fixture's shape is unguarded - "+
+					"see TestTheCorpusCoverageIsWhatIsRecorded for the nine cells it lacks", f.Host, f.Event)
 			}
 			pairs := shapeOf(payloadOf(t, f.File))
 			for _, key := range slices.Sorted(maps.Keys(pairs)) {
