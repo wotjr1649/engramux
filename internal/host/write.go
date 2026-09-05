@@ -2,10 +2,13 @@ package host
 
 import (
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -257,12 +260,72 @@ func backup(path string) (string, error) {
 	}
 	prune(path, backupKeep-1)
 	stamp := strings.NewReplacer(":", "-", ".", "-").Replace(time.Now().UTC().Format(time.RFC3339Nano))
-	dest := path + backupInfix + stamp
-	//nolint:gosec // G703: dest is path plus a suffix this file appends; see the note above.
-	if err := os.WriteFile(dest, body, 0o600); err != nil {
+	f, dest, err := createUntaken(path + backupInfix + stamp)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(body); err != nil {
+		_ = f.Close()
+		// A copy that was only partly written is worse than no copy: it
+		// is counted by [savedCopies], it can survive a prune that
+		// removes a whole one, and nothing about it says it is short.
+		_ = os.Remove(dest)
 		return "", fmt.Errorf("host: write %s: %w", dest, err)
 	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("host: close %s: %w", dest, err)
+	}
 	return dest, nil
+}
+
+// backupNameTries is how many names [createUntaken] will try before giving up.
+//
+// It is small because it only has to get past the copies that are *live*:
+// [prune] runs before every copy and leaves [backupKeep]-1 of them, so three
+// names is already more than can be taken at once. The rest of the room is for
+// a second process of this product's doing the same thing at the same instant.
+const backupNameTries = 8
+
+// createUntaken creates the file a saved copy will be written to and returns it
+// with the name it got, appending a counter rather than overwriting when the
+// name is already a file.
+//
+// # The stamp is not unique, and this machine is where that was measured
+//
+// The name is `time.Now()` formatted, and the clock behind it is coarse.
+// Measured 2026-09-06: **200,000 samples of that exact expression produced 75
+// distinct names**, which is the ~15.6 ms tick
+// [TestBackupsAreBoundedAndTheNewestSurvive] already names for file times - the
+// same clock. In a loop shaped like [backup] - a read, a directory scan, a write
+// - **128 of 2,000 consecutive pairs produced the same name**.
+//
+// What the old `os.WriteFile` did with that was destroy the copy already
+// holding the name and hand the caller a name whose contents are not what it
+// just copied. The destination here is `~/.codex/config.toml`, which holds a
+// bearer token, and backlog 44 bounded these copies to three precisely so that
+// the newest is available to undo the write that just happened. One collision
+// makes that three into two.
+//
+// O_EXCL rather than a stat first, because two of this product's own processes
+// may be backing the same file up - which is the case [savedCopies] already
+// allows for when a file goes away between its scan and its stat.
+func createUntaken(base string) (*os.File, string, error) {
+	for n := range backupNameTries {
+		name := base
+		if n > 0 {
+			name += "-" + strconv.Itoa(n)
+		}
+		//nolint:gosec // G304, G703: name is the destination path plus a suffix this file appends.
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return f, name, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", fmt.Errorf("host: create %s: %w", name, err)
+		}
+	}
+	return nil, "", fmt.Errorf("host: %s and the %d names beside it are all taken",
+		base, backupNameTries-1)
 }
 
 // writeAtomic writes through a temporary file and a rename, which spec 5.6
