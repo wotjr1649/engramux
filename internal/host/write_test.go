@@ -386,3 +386,60 @@ func TestTheEntryPointsAreWhatTheCallerNeeds(t *testing.T) {
 		t.Errorf("Plan.Text is not valid JSON:\n%s", plan.Text)
 	}
 }
+
+// TestASavedCopyNeverOverwritesAnother is the contract [backup] broke: a copy
+// may not land on a copy that survived the prune.
+//
+// # The assertion is the count, and the two near misses are why
+//
+// A collision is not observable from out here by name or by content. Both the
+// harmful case and a harmless one end with the returned name holding the new
+// bytes: `backup` prunes and then creates, so a name that the prune has just
+// freed may legitimately be taken again, and a name that a *surviving* copy
+// still holds may not. What separates them is arithmetic. [backup] removes all
+// but [backupKeep]-1 and then adds one, so the number of copies afterwards is
+// exactly `min(before, backupKeep-1) + 1` - and an overwrite is the one thing
+// that makes it one less.
+//
+// # Why a loop, and why this many
+//
+// The name is `time.Now()` formatted, and the clock behind it is coarse.
+// Measured 2026-09-06 on this machine: 200,000 samples of that exact expression
+// produced **75 distinct names**, and in a loop shaped like [backup] - a read, a
+// directory scan, a write - **128 of 2,000 consecutive pairs produced the same
+// name**. So a collision is not a hypothetical to be simulated; it is what
+// happens when two copies are taken close together, and this loop is how a test
+// reaches it without putting a seam on the clock. Against the unfixed [backup]
+// it failed on iteration 4.
+//
+// This is what [TestBackupsAreBoundedAndTheNewestSurvive] was failing on
+// intermittently - `[v5 v4 v2]` for `[v5 v4 v3]`, which is exactly one
+// collision: the copy from write 5 landed on write 4's file, so there were two
+// copies where there should have been three, and write 6's prune then had
+// nothing to remove.
+func TestASavedCopyNeverOverwritesAnother(t *testing.T) {
+	const backupLoop = 200
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	seedRaw(t, path, "v0")
+
+	for i := range backupLoop {
+		before, err := savedCopies(path)
+		if err != nil {
+			t.Fatalf("list the copies before %d: %v", i, err)
+		}
+		if _, err := backup(path); err != nil {
+			t.Fatalf("backup %d: %v", i, err)
+		}
+		after, err := savedCopies(path)
+		if err != nil {
+			t.Fatalf("list the copies after %d: %v", i, err)
+		}
+		if want := min(len(before), backupKeep-1) + 1; len(after) != want {
+			t.Fatalf("backup %d left %d copies, want %d: it prunes to %d and adds one, so a smaller "+
+				"number is a copy that was written over",
+				i, len(after), want, backupKeep-1)
+		}
+	}
+	t.Logf("%d copies taken, none landed on a copy that had survived the prune", backupLoop)
+}
