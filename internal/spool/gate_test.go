@@ -27,10 +27,18 @@ import (
 
 // The ingest ids this run uses, one range per clause, so every row in the
 // database says which clause wrote it.
-const (
-	gateFixtureID = 1 // ..4, one per fixture
-	gateSecretID  = 5
-	gateKilledID  = 6
+const gateFixtureID = 1 // ..len(fixtures.All()), one per fixture
+
+// Derived and not written down, because they were written down and a fifth
+// fixture walked straight into them: gateSecretID was the literal 5, which
+// became the fifth fixture's own id, so clause 4 ingested a duplicate. Ingest
+// ACKs a duplicate as committed (I-05), so nothing failed at the ingest and the
+// row this clause then read was the fixture's - which carries a user path and
+// not an api key. The clause reported the wrong privacy_class for an event it
+// had never written.
+var (
+	gateSecretID = gateFixtureID + len(fixtures.All())
+	gateKilledID = gateSecretID + 1
 )
 
 // gateRowsBeforeTheKill is what clauses 1 and 4 together are expected to have
@@ -38,7 +46,9 @@ const (
 // real relay delivers it over each of the two paths, plus the one carrying the
 // secret. Clause 3 counts relative to it, and asserting the absolute number is
 // what catches a clause that committed nothing and reported success.
-const gateRowsBeforeTheKill = 7
+//
+// Derived from the fixture count for the same reason the ids above are.
+var gateRowsBeforeTheKill = int64(len(fixtures.All()) + 3)
 
 // gateCWD is the working directory every payload this file builds claims. It is
 // on a volume that does not exist, so nothing walks out of it, and it holds no
@@ -172,8 +182,11 @@ func readStored(t *testing.T, db *sql.DB, id string) storedEvent {
 // not know about and re-encoding numbers.
 func gateFixturesRoundTrip(t *testing.T, db *sql.DB) {
 	all := fixtures.All()
-	if len(all) != 4 {
-		t.Fatalf("fixtures.All returned %d fixtures, want the 4 spec 8 names", len(all))
+	// Five since 2026-09-04. Spec 8 named four, one per detection path it
+	// knew of; the fifth is Claude Code's SessionStart, the cell that turned
+	// out to have no key rule that could reach it (backlog 49).
+	if len(all) != 5 {
+		t.Fatalf("fixtures.All returned %d fixtures, want the 5 spec 8 names", len(all))
 	}
 	for i, f := range all {
 		want, err := f.Bytes()

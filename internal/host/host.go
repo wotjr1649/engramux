@@ -6,25 +6,56 @@ package host
 
 import "strings"
 
-// Detect classifies payload per the three ordered steps of spec 4.3 and
-// returns "claude-code", "codex", or "unknown". It never returns an error:
-// I-04 requires an unclassifiable event to be stored as unknown rather than
-// dropped, so there is nothing here for a caller to treat as "discard this."
+// Detect classifies payload per spec 4.3 and returns "claude-code", "codex",
+// or "unknown". It never returns an error: I-04 requires an unclassifiable
+// event to be stored as unknown rather than dropped, so there is nothing here
+// for a caller to treat as "discard this."
 //
 // Detect takes only the payload already decoded from the hook's stdin, and
 // this file imports nothing that could reach argv - so a caller cannot even
 // accidentally route os.Args into the decision (I-12).
+//
+// # transcript_path decides, and the keys are the fallback. It was the other
+// # way round until 2026-09-04
+//
+// The key steps ran first and answered Codex for every Claude Code
+// SessionStart, whose payload carries `model` and no `prompt_id`. Each one
+// minted a Codex session that had never existed, at the real session's start
+// time, holding one event and standing `active` for ever - because SessionEnd
+// carries no `model`, fell through to the path rule, and landed correctly under
+// the host the SessionStart had been taken from. Nine of them in one project on
+// the machine it was found on, every one sharing a host_session_id with a
+// Claude Code session, which the schema permits because the key is the pair.
+//
+// **No ordering of key rules could have fixed it.** Measured over the corpus:
+// Claude Code's SessionStart key set is a strict subset of Codex's. There is no
+// key present in one and absent in the other, so key presence cannot separate
+// them in that cell at all - only the value of transcript_path can.
+//
+// Reordering costs nothing that was working. transcript_path is present in
+// 900 of the 902 captures, and in all 900 its directory component agrees with
+// the host, so spec 4.3's count is the same number under either order; the two
+// without one are what 7.5 filters. What changes is only the cell where the two
+// rules disagree, and there the path is right and the keys are wrong.
+//
+// # Why the corpus said the old order was 900/900
+//
+// It holds zero `claude-code SessionStart` and zero `claude-code SessionEnd`
+// captures - 783 Claude Code captures across seven other event names, and the
+// two that produce the counter-example are the two it lacks. A rule measured
+// against evidence that cannot contain its counter-example reads as verified
+// and is not. TestFixturesCoverEveryCellTheCorpusDoes is what says so now.
 func Detect(payload map[string]any) string {
-	if present(payload, "prompt_id") || present(payload, "effort") {
-		return "claude-code"
-	}
-	if present(payload, "model") || present(payload, "turn_id") {
-		return "codex"
-	}
 	switch transcriptDir(payload) {
 	case ".claude":
 		return "claude-code"
 	case ".codex":
+		return "codex"
+	}
+	if present(payload, "prompt_id") || present(payload, "effort") {
+		return "claude-code"
+	}
+	if present(payload, "model") || present(payload, "turn_id") {
 		return "codex"
 	}
 	return "unknown"

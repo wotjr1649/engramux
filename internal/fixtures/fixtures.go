@@ -15,7 +15,7 @@ import (
 //go:embed testdata/*.json
 var files embed.FS
 
-// Fixture is one of the four Phase 1 fixtures (spec 8): the bytes a host writes
+// Fixture is one of the Phase 1 fixtures (spec 8): the bytes a host writes
 // to a hook process's stdin, and the host x event cell it belongs to.
 type Fixture struct {
 	// File is the fixture's name under testdata/.
@@ -32,6 +32,7 @@ const (
 	CodexPostToolUseString  = "codex-posttooluse-string.json"
 	CodexPostToolUseArray   = "codex-posttooluse-array.json"
 	ClaudePostToolUseObject = "claude-code-posttooluse-object.json"
+	ClaudeSessionStart      = "claude-code-sessionstart.json"
 )
 
 var all = []Fixture{
@@ -39,9 +40,10 @@ var all = []Fixture{
 	{File: CodexPostToolUseString, Host: "codex", Event: "PostToolUse"},
 	{File: CodexPostToolUseArray, Host: "codex", Event: "PostToolUse"},
 	{File: ClaudePostToolUseObject, Host: "claude-code", Event: "PostToolUse"},
+	{File: ClaudeSessionStart, Host: "claude-code", Event: "SessionStart"},
 }
 
-// All returns the four Phase 1 fixtures.
+// All returns the Phase 1 fixtures.
 func All() []Fixture { return slices.Clone(all) }
 
 // Bytes returns the fixture's exact bytes. Later phases gate on a byte-for-byte
