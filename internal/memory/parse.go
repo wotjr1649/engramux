@@ -238,12 +238,16 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 		}
 		warns = append(warns, w...)
 		items = append(items, Item{
-			Host:           s.Host,
-			Kind:           s.Kind,
-			SourcePath:     s.Path,
-			EntryKey:       uniqueKey(seen, key),
-			ProjectPath:    cwd,
-			Title:          firstLine(body),
+			Host:        s.Host,
+			Kind:        s.Kind,
+			SourcePath:  s.Path,
+			EntryKey:    uniqueKey(seen, key),
+			ProjectPath: cwd,
+			// The block as it was written, not the indexed body:
+			// [codexBlock] has already replaced each recognised field
+			// line with its bare value, and a UUID is no better a
+			// title than the label that carried it (backlog 36).
+			Title:          firstLine(strings.Join(block, "\n")),
 			Body:           body,
 			HostModifiedMS: mod,
 		})
@@ -342,14 +346,70 @@ func splitFrontmatter(text string) (front, body string, ok bool) {
 	return rest[:end], strings.TrimPrefix(body, "\n"), true
 }
 
+// codexProseLabels is the second closed set, and it is [codexKnownFields]'s
+// opposite number: those labels are dropped from the indexed text, and these are
+// kept in it and skipped only when a *title* is being chosen.
+//
+// Measured 2026-09-05 over the 55 rollout summaries on the machine this was
+// written on, counting the files each label opens a line of: `Outcome`,
+// `Rollout context` and `Reusable knowledge` on 55 of 55, `Preference signals`,
+// `References` and `Key steps` on 54. Nothing else capitalised reaches more than
+// one file. Claude Code's 21 notes carry one candidate, `Related` on 5, which is
+// below anything that reads as a format and is left out - and costs those notes
+// nothing, because 18 of 18 take their title from the frontmatter `name`.
+//
+// Closed for [codexKnownFields]'s reason and one of its own. That set is closed
+// because dropping an unknown label was removing the word a credential rule
+// matches on; this one is closed because skipping an unknown label would be
+// skipping a sentence - `Impact: the whole of it` is a title and not a heading,
+// and nothing but the measurement can tell the two apart.
+var codexProseLabels = map[string]bool{
+	"Outcome": true, "Rollout context": true, "Reusable knowledge": true,
+	"Preference signals": true, "References": true, "Key steps": true,
+}
+
 // firstLine is the display title when the format gave none: the first line that
-// has anything on it, with markdown heading marks and bullets taken off.
+// has anything on it and is not a recognised label, with markdown heading marks
+// and bullets taken off.
+//
+// # Why a label is skipped rather than shown (backlog 36)
+//
+// Every rollout summary section opens `Outcome:`, so the title of every one of
+// them was `Outcome: success` - eight of the fourteen hits of the first live
+// search, in the one field a reader scans. Both closed sets are consulted and
+// not just the prose one: a summary's header block is field labels all the way
+// down, and this is called on the block as it was written, so `thread_id:` and
+// the rest are skipped here rather than surviving as the bare UUID that
+// [codexBlock] keeps in the indexed text. Measured over the same 55 summaries,
+// that was the title of every header block.
+//
+// A block that is nothing but labels falls back to the first of them, which is
+// the answer this function gave before and is better than no title at all.
 func firstLine(text string) string {
+	label := ""
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#-*> "))
-		if line != "" {
-			return line
+		if line == "" {
+			continue
 		}
+		if isKnownLabel(line) {
+			if label == "" {
+				label = line
+			}
+			continue
+		}
+		return line
 	}
-	return ""
+	return label
+}
+
+// isKnownLabel reports whether a line opens with a label either closed set
+// holds, with or without a value after it.
+func isKnownLabel(line string) bool {
+	i := strings.Index(line, ":")
+	if i <= 0 {
+		return false
+	}
+	name := line[:i]
+	return codexKnownFields[name] || codexProseLabels[name]
 }

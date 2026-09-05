@@ -581,3 +581,120 @@ func treeState(t *testing.T, roots ...string) []string {
 	slices.Sort(out)
 	return out
 }
+
+// TestFirstLineSkipsARecognisedLabel is backlog 36: a title is the first line
+// that is not a label this reader knows.
+//
+// The first case is the one that was observed. A Codex rollout summary's
+// section opens with `Outcome:` on every one of the 55 on the machine this was
+// measured on, so eight of the fourteen hits of the first live search were
+// titled `Outcome: success` - which is the field a reader scans and it told
+// them nothing.
+//
+// The last case is the fallback and it is not decoration: a block that is
+// nothing but labels still needs a title, and an empty one would be a worse
+// answer than the label it came from.
+func TestFirstLineSkipsARecognisedLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "a prose label with its value on the line",
+			in:   "Outcome: success\n\nPreference signals:\n- the substance\n",
+			want: "the substance",
+		},
+		{
+			name: "a field label, which is what a summary's header block is",
+			in:   "thread_id: 0198d0c4-0000-7000-8000-000000000000\nrollout_path: " + `C:\rollouts\one.jsonl` + "\nthe first sentence\n",
+			want: "the first sentence",
+		},
+		{
+			name: "an unrecognised label is text and is kept",
+			in:   "Impact: the whole of it\nOutcome: success\n",
+			want: "Impact: the whole of it",
+		},
+		{
+			name: "a heading is still stripped rather than skipped",
+			in:   "# a heading\nOutcome: success\n",
+			want: "a heading",
+		},
+		{
+			name: "nothing but labels falls back to the first of them",
+			in:   "Outcome: success\nReferences:\n",
+			want: "Outcome: success",
+		},
+		{
+			name: "no text at all is still no title",
+			in:   "\n  \n",
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstLine(tc.in); got != tc.want {
+				t.Errorf("firstLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// codexSummary is one rollout summary's shape: a header block that is field
+// labels and one prose line, then a section that opens with a prose label. Both
+// halves are what 55 of the 55 summaries on the machine this was measured on
+// look like, and both used to produce a title that told a reader nothing.
+//
+// The paths carry no backslash, which a real one does. Nothing here is about
+// path normalisation - TestACodexPathIsNormalisedPastTheExtendedLengthPrefix is
+// - and a fixture that needs one is a fixture a heredoc cannot write.
+const codexSummary = `thread_id: 0198f0c1-1111-7222-8333-444444444444
+updated_at: 2026-08-17T10:49:00+09:00
+rollout_path: D:/rollouts/one.jsonl
+cwd: D:/work/Engramux
+
+the session that closed the soak
+
+Rollout context: one developer, three days
+
+## thread 0198f0c1-1111-7222-8333-444444444444
+
+Outcome: success
+
+Preference signals:
+- the substance a reader wants
+`
+
+// TestASummarysTitleIsNeitherItsLabelNorItsThreadID is backlog 36 at the call
+// site rather than in [firstLine], and the two halves fail on different bugs.
+//
+// The section's title is the prose under the labels: a title chosen from the
+// indexed body alone would be `Outcome: success`, which is what eight of the
+// fourteen hits of the first live search showed. The header block's is the
+// prose under the *field* labels: those are stripped from the body before it is
+// indexed, so a title chosen from the body would be the bare thread id - a UUID
+// where the label at least said what it was.
+func TestASummarysTitleIsNeitherItsLabelNorItsThreadID(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "summary.md", codexSummary, Source{Host: HostCodex, Kind: KindCodexRollout})
+
+	items, _, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2: the header block and the section", len(items))
+	}
+	if want := "the session that closed the soak"; items[0].Title != want {
+		t.Errorf("the header block's title = %q, want %q", items[0].Title, want)
+	}
+	if want := "the substance a reader wants"; items[1].Title != want {
+		t.Errorf("the section's title = %q, want %q", items[1].Title, want)
+	}
+	// The title is still a line of the body it titles, and not a line this
+	// parser wrote: what changed is which line, never what the text is.
+	for _, it := range items {
+		if !strings.Contains(it.Body, it.Title) {
+			t.Errorf("the title %q is in no line of the body it titles", it.Title)
+		}
+	}
+}

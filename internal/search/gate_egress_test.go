@@ -61,8 +61,17 @@ func TestPhase4GateTheSearchEgressMasks(t *testing.T) {
 	// The window is what the paddings in [gatePayload] are measured
 	// against. If this number moves, those move with it - see that
 	// function's comment.
-	if n := utf8.RuneCountInString(hits[0].Excerpt); n != excerptWindow {
-		t.Fatalf("the excerpt is %d runes, want %d: the paddings in gatePayload are tied to this number", n, excerptWindow)
+	//
+	// A range and not the number itself since backlog 48: each edge may give
+	// back up to excerptAlign runes rather than cut a word in half, and this
+	// fixture's filler is `context ` so both edges do. What this clause
+	// needs of the width is that it is still a window - a whole document
+	// coming back, or the window collapsing, would both break the paddings'
+	// arithmetic - and the exact geometry is owned by internal/search's own
+	// excerpt tests, which can see the runes.
+	if n := utf8.RuneCountInString(hits[0].Excerpt); n > excerptWindow || n < excerptWindow-2*excerptAlign {
+		t.Fatalf("the excerpt is %d runes, want at most %d and no fewer than %d: the paddings in gatePayload are tied to those",
+			n, excerptWindow, excerptWindow-2*excerptAlign)
 	}
 
 	// Clause 2: the excerpt says what was removed and does not carry it.
@@ -93,11 +102,16 @@ func TestPhase4GateTheSearchEgressMasks(t *testing.T) {
 	assertTheRowStillHoldsIt(t, dir, id, sample)
 }
 
-// excerptWindow is internal/search's excerpt window, which this package's
-// external test cannot read. It is restated here so that a change to it fails
-// this gate loudly rather than quietly costing it the property the two
+// excerptWindow is internal/search's excerpt window and excerptAlign is how far
+// either edge of it may move rather than cut a word in half (backlog 48) -
+// which is what makes the window a ceiling and not a width. Neither is readable
+// from this package's external test. They are restated here so that a change to
+// one fails this gate loudly rather than quietly costing it the property the two
 // deliberate breaks measured.
-const excerptWindow = 240
+const (
+	excerptWindow = 240
+	excerptAlign  = 32
+)
 
 // term is the distinctive invented word the gate searches for. It is in no
 // fixture and in no payload but the one built below, and it is not the secret -

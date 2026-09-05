@@ -19,6 +19,15 @@ import (
 // it - which is the whole point of showing an excerpt rather than an id.
 const excerptRunes = 240
 
+// excerptAlign is how far a window edge may move to avoid falling inside a
+// word (backlog 48). Beyond this there is no word to be inside: a UUID, a
+// Windows path, a base64 run and a language that does not space its words all
+// look the same to a space-separated rule, and moving anyway would give runes
+// back for nothing. 32 is an eighth of the window, which is longer than any
+// English word and shorter than the shortest thing this corpus is full of -
+// events.id alone is 36 runes.
+const excerptAlign = 32
+
 // excerpt is what a hit shows of the event it matched: a window of the payload's
 // text around the first query token in it, cut from a document
 // [secret.Mask] has already been over.
@@ -81,7 +90,70 @@ func excerptText(text string, tokens []string) string {
 	// Clamped in this order: pulling the window back inside the end of the
 	// text can push it before the start, and start wins.
 	start = max(min(start, len(runes)-excerptRunes), 0)
-	return string(runes[start : start+excerptRunes])
+	end := start + excerptRunes
+
+	// Backlog 48: the window is centred on the match and was aligned to
+	// nothing, so it began in the middle of whatever word the arithmetic
+	// landed in - `lUse`, out of a `PreToolUse`, is the observation the row
+	// was opened on.
+	//
+	// Neither edge can move onto the match. The match is at least
+	// excerptRunes/2 from each edge whenever the window was centred on it at
+	// all, and excerptAlign is a quarter of that; where the clamp moved the
+	// window instead, it moved it *away* from the edge the match is near.
+	if i := alignForward(runes, start); i >= 0 && i < end {
+		start = i
+	}
+	if i := alignBack(runes, end); i > start {
+		end = i
+	}
+	return string(runes[start:end])
+}
+
+// cutsWord reports whether the window edge at i falls inside a word. i is a
+// boundary between runes and not a rune, so both of its neighbours decide it,
+// and the two ends of the text are never a cut - there is nothing outside them
+// to have cut anything off.
+func cutsWord(runes []rune, i int) bool {
+	return i > 0 && i < len(runes) &&
+		!unicode.IsSpace(runes[i-1]) && !unicode.IsSpace(runes[i])
+}
+
+// alignForward returns the boundary just past the next run of spaces at or
+// after i, or -1 when i does not cut a word or there is no space within
+// excerptAlign runes of it.
+//
+// The whole run is skipped rather than one space, so that a window opening on a
+// blank is not the thing this exists to avoid, one character over.
+func alignForward(runes []rune, i int) int {
+	if !cutsWord(runes, i) {
+		return -1
+	}
+	for j := i; j < len(runes) && j-i < excerptAlign; j++ {
+		if unicode.IsSpace(runes[j]) {
+			for j < len(runes) && unicode.IsSpace(runes[j]) {
+				j++
+			}
+			return j
+		}
+	}
+	return -1
+}
+
+// alignBack returns the boundary at the space before i, or -1 when i does not
+// cut a word or there is no space within excerptAlign runes of it. The space
+// itself is left outside the window, so the excerpt ends on the last rune of a
+// word rather than on a blank.
+func alignBack(runes []rune, i int) int {
+	if !cutsWord(runes, i) {
+		return -1
+	}
+	for j := i; j > 0 && i-j < excerptAlign; j-- {
+		if unicode.IsSpace(runes[j-1]) {
+			return j - 1
+		}
+	}
+	return -1
 }
 
 // firstFold returns the rune index of the earliest occurrence of any token in

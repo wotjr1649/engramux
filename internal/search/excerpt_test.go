@@ -140,3 +140,110 @@ func TestExcerptMasksTheWholeDocumentBeforeCutting(t *testing.T) {
 		t.Errorf("the excerpt does not carry %q", want)
 	}
 }
+
+// windowAt is [window] for a cut that is no longer excerptRunes wide, which is
+// what an aligned window is when it gave runes back at one edge or both.
+func windowAt(text string, start, end int) string {
+	return string([]rune(text)[start:end])
+}
+
+// TestExcerptStartsAndEndsAtAWordBoundary is backlog 48's display half. The
+// window is centred on the match and was aligned to nothing, so it began
+// mid-word: `lUse`, out of a `PreToolUse` the cut landed inside, is the
+// observation the row was opened on.
+//
+// The arithmetic is written out because the assertion is the exact window, the
+// way every other test here asserts one. The match is at rune 660, so the
+// unaligned window is [540, 780). 540 is the second rune of a `PreToolUse`, so
+// the start moves to 550, past the space that ends it; 780 is inside a
+// `PostToolUse`, so the end moves back to 773, the boundary before the space
+// that begins it. Both edges move, and each edge is decided from the *unaligned*
+// window - moving the start does not carry the end along with it, so the excerpt
+// gives runes back rather than sliding down the text.
+func TestExcerptStartsAndEndsAtAWordBoundary(t *testing.T) {
+	text := strings.Repeat("PreToolUse ", 60) + "NEEDLE" + strings.Repeat("PostToolUse ", 60)
+
+	got := excerpt(leafPayload(t, text), []string{"needle"})
+
+	if want := windowAt(text, 550, 773); got != want {
+		t.Errorf("excerpt =\n%q\nwant\n%q", got, want)
+	}
+	// The match is what the window exists to show, and an alignment wide
+	// enough to move past it would pass the comparison above only by
+	// agreeing with itself.
+	if !strings.Contains(got, "NEEDLE") {
+		t.Errorf("the aligned window no longer holds the match: %q", got)
+	}
+}
+
+// TestExcerptKeepsARaggedEdgeWhenThereIsNoWordBoundary is the other half of the
+// same rule, and it is why the alignment is bounded. A run of text with no space
+// in it - a UUID, a path, a language that does not space its words - has no
+// boundary to move to, and moving anyway would cut the window down for nothing.
+// The answer there is the unaligned window, unchanged.
+//
+// The filler is broken by a hyphen every second rune, which is not a space and
+// is therefore not a boundary. A plain run of letters would not do: 40 of them
+// in a row is internal/secret's opaque-token rule, and the text this cuts from
+// is the *masked* document, so the fixture would be measuring the mask.
+func TestExcerptKeepsARaggedEdgeWhenThereIsNoWordBoundary(t *testing.T) {
+	text := strings.Repeat("a-", 500) + "NEEDLE" + strings.Repeat("b-", 500)
+
+	got := excerpt(leafPayload(t, text), []string{"needle"})
+
+	if want := window(text, 880); got != want {
+		t.Errorf("excerpt =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestTheAlignmentReachesExactlyExcerptAlign pins the bound itself, which the
+// two window tests above cannot: one has a boundary within reach and the other
+// has none at all, so both pass under a budget of any size.
+//
+// The strings are built from the constant rather than from 32, so this says the
+// same thing whatever the budget is set to. What it holds is the arithmetic: a
+// space excerptAlign-1 runes from the edge is reachable and the next one out is
+// not, in both directions.
+func TestTheAlignmentReachesExactlyExcerptAlign(t *testing.T) {
+	const at = 1
+
+	t.Run("forward, the last reachable space", func(t *testing.T) {
+		runes := []rune(strings.Repeat("x", at+excerptAlign-1) + " " + "word")
+		if got, want := alignForward(runes, at), at+excerptAlign; got != want {
+			t.Errorf("alignForward = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("forward, one rune past it", func(t *testing.T) {
+		runes := []rune(strings.Repeat("x", at+excerptAlign) + " " + "word")
+		if got := alignForward(runes, at); got != -1 {
+			t.Errorf("alignForward = %d, want -1: the space is past the budget", got)
+		}
+	})
+
+	t.Run("back, the last reachable space", func(t *testing.T) {
+		const head = "word "
+		runes := []rune(head + strings.Repeat("x", excerptAlign))
+		if got, want := alignBack(runes, len(head)+excerptAlign-1), len(head)-1; got != want {
+			t.Errorf("alignBack = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("back, one rune past it", func(t *testing.T) {
+		const head = "word "
+		runes := []rune(head + strings.Repeat("x", excerptAlign+1))
+		if got := alignBack(runes, len(head)+excerptAlign); got != -1 {
+			t.Errorf("alignBack = %d, want -1: the space is past the budget", got)
+		}
+	})
+
+	t.Run("an edge that cuts no word does not move", func(t *testing.T) {
+		runes := []rune("word another")
+		if got := alignForward(runes, len("word")+1); got != -1 {
+			t.Errorf("alignForward = %d, want -1: the edge is already at a word start", got)
+		}
+		if got := alignBack(runes, len("word")); got != -1 {
+			t.Errorf("alignBack = %d, want -1: the edge is already at a word end", got)
+		}
+	})
+}
