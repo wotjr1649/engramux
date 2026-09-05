@@ -181,6 +181,7 @@ func doctorReport(ctx context.Context, db *sql.DB, dbPath, spoolPath string, sta
 		SpoolDepth:     st.SpoolDepth,
 		Errors:         st.Errors,
 		LastCheckpoint: st.LastCheckpoint,
+		Cells:          st.Cells,
 		// Not st.DatabasePath: that one is masked.
 		DatabasePath: dbPath,
 	}

@@ -130,10 +130,16 @@ func runDoctor(w io.Writer, args []string) int {
 		return 1
 	}
 
+	// One read, two sections. The installation section needs it to say what
+	// each host has actually delivered, and the service section needs it for
+	// everything it prints; asking twice would give the two sections two
+	// refusal paths and let them disagree about whether the service is up.
+	reply, replyErr := askDoctor()
+
 	r.reportTask(opt.TaskName, task, taskErr)
-	r.reportInstalled(opt.BinDir, relay, installed, hooks)
+	r.reportInstalled(opt.BinDir, relay, installed, hooks, reply, replyErr)
 	r.reportLocal()
-	r.reportService()
+	r.reportService(reply, replyErr)
 	r.reportMCP(ctx, opt.ClaudeMCP, opt.CodexConfig)
 
 	if r.failed {
@@ -419,7 +425,8 @@ func (h hostHooks) trouble() string {
 // are the installation's and that one's are whichever copy of the CLI the user
 // happened to run. Both are worth printing and only these decide whether the
 // installation works.
-func (r *report) reportInstalled(bin, relay string, installed []string, hooks []hostHooks) {
+func (r *report) reportInstalled(bin, relay string, installed []string, hooks []hostHooks,
+	reply ipc.DoctorReply, replyErr error) {
 	r.line("installation %s", bin)
 
 	for _, want := range installedNames {
@@ -443,7 +450,73 @@ func (r *report) reportInstalled(bin, relay string, installed []string, hooks []
 			r.fail(h.label, "%d of %d point at it, %s - run `engramux install --apply`",
 				len(h.wired), events, h.trouble())
 		}
+		if !h.absent {
+			r.delivered(h.label, reply, replyErr)
+		}
 	}
+}
+
+// delivered reports what one host has actually sent, beside the line that says
+// what its configuration claims.
+//
+// # Why the line above it is not enough
+//
+// [readOneHostHooks] answers by reading the host's configuration through the
+// member name the installer wrote it under, so it is this product checking its
+// own output against its own assumption. On the machine this was found on it
+// answered `codex 11 of 11 events point at the installed relay` every day for
+// nine days while that host had never delivered a single event (backlog 50).
+// Nothing static could have caught it: the file was exactly what the installer
+// meant to write, and what the host does after reading it is not in the file.
+//
+// # It is a note and never a fail
+//
+// `doctor` cannot tell a host that is broken from a host the user has not
+// opened since installing, and only the user knows which. Failing the run on
+// the second would make every single-host machine report broken - the same
+// trade [report.permissions] makes. What the line has to do is sit directly
+// under the claim it qualifies, so that the two are read together.
+func (r *report) delivered(label string, reply ipc.DoctorReply, replyErr error) {
+	field := label + " received"
+	switch {
+	case replyErr != nil:
+		r.note(field, "unknown - the service is not answering, and only it can say")
+	case reply.Events > 0 && len(reply.Cells) == 0:
+		// An old service answers a doctor request without the breakdown,
+		// and reading that absence as zero would turn "your service
+		// predates this CLI" into "this host has never captured".
+		r.note(field, "unknown - the running service does not report a per-host breakdown; "+
+			"restart it with `engramux update --from <dir>`")
+	default:
+		count, last := arrived(label, reply.Cells)
+		if count == 0 {
+			r.note(field, "nothing, ever - this host has never delivered an event. "+
+				"either it has not been used since the install, or its hooks are not running")
+			return
+		}
+		r.field(field, "%d events, the last at %s", count, stamp(last))
+	}
+}
+
+// arrived sums one host's cells: how many events it has delivered, and when the
+// most recent of them was received.
+//
+// The event name is deliberately not part of the answer. It is whatever a
+// payload's hook_event_name said, so it is untrusted bytes of untrusted width
+// on a line that goes through [report.mask]; `engramux cells` is the command
+// that prints names, and it quotes and bounds them. A count and an instant are
+// what this line needs and neither can carry a payload's text.
+func arrived(label string, cells []ipc.Cell) (count, lastMS int64) {
+	for _, c := range cells {
+		if c.Host != label {
+			continue
+		}
+		count += c.Count
+		if c.LastSeenMS > lastMS {
+			lastMS = c.LastSeenMS
+		}
+	}
+	return count, lastMS
 }
 
 // reportLocal prints what is knowable with nothing running.
@@ -674,10 +747,9 @@ func (r *report) reportPrincipal(sid string) {
 // edited in place leaves an index built by the old clause and a file claiming the
 // new one, with nothing saying so; the strings are printed only when they
 // disagree, because that is when they are worth reading.
-func (r *report) reportService() {
+func (r *report) reportService(reply ipc.DoctorReply, err error) {
 	r.line("service")
 
-	reply, err := askDoctor()
 	if err != nil {
 		// The error names the pipe, which is the whole point: it says
 		// what could not be read rather than only that something could
