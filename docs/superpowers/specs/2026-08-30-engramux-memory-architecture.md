@@ -1666,20 +1666,53 @@ path, and what a tool answered. Both arms are needed and the second is the point
 lifts prompts by burying the document that actually ran the command has not improved the ranking, it
 has moved the defect, and a gate with only the gain arm cannot see that.
 
-*The set of what counts as plumbing must be closed and derived, not listed.* `events.event_name` is
-whatever a payload said (there is no CHECK on it), so the set is drawn from the cells the corpus
-actually holds and is written into the code as a closed set, on §6.1's precedent and
-`internal/memory`'s `codexProseLabels`. `internal/inject`'s `keepable` and `InvokesEngramux` are the
-existing prior art for "this product's own machinery is not an answer" and are where the reasoning
-should be reused rather than restated.
+*What counts as plumbing is a field rule and not an event-name one, and this corrects what this
+section said on 2026-09-05.* The first draft said to close a set of `event_name` values drawn from
+the cells the corpus holds. That is a guess about what a payload said — `events.event_name` carries
+no CHECK — where the row's own words are "documents carrying prompt or reply text", and a field rule
+states exactly that: **a document is plumbing when it carries neither a non-empty `prompt` nor a
+non-empty `last_assistant_message`.** Two keys, both measured below, and no list to keep in step with
+a host's next release. `internal/inject`'s `keepable` and `InvokesEngramux` remain the prior art for
+"this product's own machinery is not an answer".
 
-*The non-vacuity arm, and it is the one that can end this row without any code.* Before a weight is
-chosen, the gate measures **how often a plumbing document outranks the human-text document a query
-was cut from, at the current weight**. If that is rare over the corpus, the first run's six hits were
-a property of a corpus of a few dozen events and not of the ranking, and the answer is to record the
-number and close the row rather than to ship a lever. §7.1's own warning is what this is guarding
-against: a figure taken over a corpus that does not resemble the real one can be correct and
-useless at once.
+*The population, measured 2026-09-06 over `.capture/fixtures-raw`.* 901 documents with §7.5's
+self-test excluded. **19** carry a non-empty `prompt` and 17 of those yield a query; **141** carry a
+non-empty `last_assistant_message` and 139 do; **741 carry neither, which is 82.2% of the corpus**.
+The two human-text sets are disjoint, so the classes are `a prompt's own words` at 17 candidates and
+`a reply's own words` at 139. Every candidate is measured rather than M4's 25 — this arm runs one
+search per document where M4 runs two, so the sample bound M4 needs does not apply. **The prompt
+class's granularity is 1 in 17, or 5.9%, and any share it reports moves in steps that size.**
+
+*The query is the longest token of the human text*, by `m4Token`'s rule — four characters or more,
+longest wins, ties to the first — so this class and M4's command-line class are held to one
+discipline rather than two. Measured, that token has a median length of 11 on both classes. A
+single-token query also makes `MatchAll` and `MatchAny` the identical FTS5 expression, so the arm
+does not have to choose between the injector's matching and the service's; and one token is what the
+first-run observation was.
+
+*The statistic is displacement, and it is pre-registered here before the arm was run.* For each
+query, **displacement** is the number of plumbing documents ranked above the target inside the top
+ten; where the target is not in the top ten at all, every plumbing document in that top ten counts,
+which is a lower bound rather than an exclusion — dropping those queries would bias the answer
+towards "nothing to fix" by dropping exactly the worst cases. Two shares are reported beside it:
+**`displaced`**, the queries with displacement of one or more, which is the size of the reordering a
+weight could produce; and **`buried`**, the queries whose target is not in the top ten at all, which
+is the harm a person would actually notice.
+
+*The bar is `buried`, not `displaced`.* **A weight is warranted only if `buried` exceeds 0.10 in at
+least one class.** Below that the ranking is putting the human-text document on the visible list more
+than nine times in ten, and reordering inside a list of ten that already holds the answer is not
+worth a lever on every search every user runs. `displaced` is recorded rather than gated on, because
+a corpus that is 82.2% plumbing puts plumbing above the target by arithmetic and not by defect.
+Beside them goes the attribution: of the buried queries, how many have a top ten that is *entirely*
+plumbing — a burial with a human-text document above it is not this row's defect. §7.1's own warning
+is what the whole arm guards against: a figure taken over a corpus that does not resemble the real
+one can be correct and useless at once.
+
+*Nothing in this arm logs a query, and here that matters more than it does in M4.* That gate's
+queries are cut from command lines and paths, which is bad enough. **Every query here is cut from a
+prompt or from an assistant's message** — the most private text the corpus holds — so the arm emits
+counts and figures only, and a query in its output is a defect in the arm.
 
 *The sweep, and the shape of the answer.* M4's weight was found by running the gate at 1, 2, 3, 4,
 5, 20 and 100 and reporting the regimes rather than a single number, and this arm follows it. What
