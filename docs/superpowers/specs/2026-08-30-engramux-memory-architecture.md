@@ -1646,7 +1646,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
 | **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
-| **M11** | Plumbing down-weight earns its place | **Designed 2026-09-05, un-run.** Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the closed set, the non-vacuity arm and the sweep; nothing here licenses a weight until it has run |
+| **M11** | Plumbing down-weight earns its place | **Designed 2026-09-05. The non-vacuity arm ran 2026-09-06 and is over its bar in both classes; the gate itself is un-run.** Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
@@ -1713,6 +1713,66 @@ one can be correct and useless at once.
 queries are cut from command lines and paths, which is bad enough. **Every query here is cut from a
 prompt or from an assistant's message** — the most private text the corpus holds — so the arm emits
 counts and figures only, and a query in its output is a defect in the arm.
+
+**The arm ran on 2026-09-06 and it does not close the row. It is over the bar in both classes, by a
+factor of six and four.** `TestGateM11PlumbingRarelyBuriesTheAnswer` in `internal/search`.
+
+| Class | Candidates | Median matches | `buried` | of those, top ten all plumbing | `displaced` | Median displacement | Rescue ceiling |
+|---|---|---|---|---|---|---|---|
+| a prompt's own words | 17 | 51 | **0.647** (11 of 17) | 11 of 11 | 0.941 | 10 of 10 | **0.412** (7 of 17) |
+| a reply's own words | 139 | 15 | **0.453** (63 of 139) | 58 of 63 | 0.799 | 6 of 10 | **0.424** (59 of 139) |
+
+**Read the first row before the numbers below it.** In the median case a prompt cannot be found by
+its own most distinctive word — the top ten is ten plumbing documents and the prompt is not among
+them. Where a prompt *is* buried, the top ten is **entirely** plumbing every single time, 11 of 11;
+for a reply, 58 of 63. So this is not a document sitting at rank 11 behind another conversation. It
+is the machinery filling the page.
+
+**The rescue ceiling is what licenses building the weight, and it is exact.** It counts the queries
+whose target is outside the top ten now and whose whole distance from it is plumbing, so that moving
+every plumbing document below it puts it inside — the best any down-weight can do, computed without
+choosing one. **41.2% and 42.4%**, which is two queries in five moving from invisible to visible. Of
+the buried ones specifically it is 7 of 11 and 59 of 63, so 94% of buried replies are buried by
+machinery alone. The remainder is out of reach of any weight: 2 prompt targets are not in the top 200
+at all, and the rest have ten or more human-text documents above them, which no plumbing rule moves.
+
+**What the match counts rule out.** A median query matches **51** documents for the prompt class and
+**15** for the reply class, against a corpus of 901. So a buried target is not a needle in a
+haystack — for replies the ranking has about fifteen documents to order and puts the human one
+below ten of them. §7.1's warning about a corpus that does not resemble the real one still applies
+to the *absolute* figures; it does not explain this shape away.
+
+**The finding survives a different query-cutting rule, and that was checked rather than assumed.**
+The obvious objection is that "the longest token" selects for paths, and a path is exactly what the
+tool calls that touched it also carry — so the arm would be measuring path-sharing rather than
+ranking. Under the *first* token instead of the longest, which is a worse rule and a different
+selection, `buried` is 0.588 and 0.388, still four to six times the bar. That figure comes from the
+arm's own break-it pass rather than from a second pre-registered class, and is recorded as the
+weaker kind of evidence it is.
+
+**What this does not license.** It says a weight has something large to win, not that winning it is
+right. A search for a file name may well *want* the tool call that edited the file rather than the
+prompt that mentioned it. That trade is the harm arm's question, over M4's three classes, whose
+targets are exactly the documents a down-weight buries. **M11 is not passed by the arm above** — the
+arm licenses building the rest of the gate, and the gate is what decides whether the weight ships.
+
+**When the weight exists, this arm keeps measuring the ranking without it**, becoming the `off` half
+of the full gate rather than a second opinion about the shipped ranking. Pointing it at a ranking
+that has the weight in it would make the figures above fall and the pin fail, and the failure would
+read as the corpus having moved when what moved is the thing the row asked for.
+
+**A weight needs no migration, and that is measured rather than assumed.** The field rule above is
+the right rule for the *gate* — it says what the row means and it does not go stale when a host
+renames an event. It is the wrong rule for the *ranking*, because `prompt` and
+`last_assistant_message` are payload keys and not columns, and a predicate over them in the inner
+query would read every matching payload — which is §7.1's four-second shape and the thing
+`TestGateTheSearchDoesNotReadPayloadsItDoesNotReturn` exists to stop. `events.event_name` is a
+column, and migration `00003`'s index already covers it. **Measured 2026-09-06 over the 901
+documents: the field rule and `event_name IN ('UserPromptSubmit', 'Stop', 'SubagentStop')` classify
+160 documents each and disagree on zero.** So the ranking may key on the column while the gate keeps
+measuring the fields, and the day a host adds a twelfth event or renames one, the gate's figures move
+and the name set is caught — which is the arrangement that makes a name set safe here rather than a
+guess.
 
 *The sweep, and the shape of the answer.* M4's weight was found by running the gate at 1, 2, 3, 4,
 5, 20 and 100 and reporting the regimes rather than a single number, and this arm follows it. What
