@@ -80,13 +80,31 @@ func printEvent(e ipc.EventDocument) {
 	_, _ = fmt.Fprintf(os.Stdout, "\n%s\n", pretty.Bytes())
 }
 
-// sessions lists one project's sessions, newest first (I-08).
+// sessions lists captured sessions, newest first (I-08): every project's, or
+// one project's when the argument names one.
+//
+// # The default is every project, and it changed
+//
+// It used to be this process's working directory, and that is backlog 47: the
+// first person to run both read commands stood below the directory the agents
+// had worked in, got hits from `search` - which has always been corpus-wide -
+// and `no sessions` from here, and read the pair as capture being broken. The
+// resolved root was printed above that line and was not read, because the
+// interesting word in a two-line answer is the second one. Making the two
+// commands agree removes the class of error; a signpost would add a third line
+// to not read.
+//
+// So an existing invocation *does* return something different, which
+// [search]'s own note says its default may not do. The difference is that
+// `search` would be changing from corpus-wide to narrow - dropping hits a
+// caller used to get - and this widens: nothing that was listed before stops
+// being listed, it is joined by the rest.
 func sessions(args []string) int {
 	if len(args) > 1 {
 		warn("usage: engramux sessions [project]")
 		return 2
 	}
-	root, err := projectArg(args)
+	root, err := sessionsScope(args)
 	if err != nil {
 		warn("sessions: %v", err)
 		return 1
@@ -97,25 +115,40 @@ func sessions(args []string) int {
 		warn("sessions: %v", err)
 		return 1
 	}
-	// The root the service resolved, masked, so it is clear which project
-	// answered - a path that is not the one you meant is the failure this
-	// line exists to make visible.
-	_, _ = fmt.Fprintf(os.Stdout, "project   %q\n", reply.ProjectRoot)
 	if len(reply.Sessions) == 0 {
 		_, _ = fmt.Fprintln(os.Stdout, "no sessions")
 		return 0
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-9s  %-19s  %-19s  %s\n",
-		"host", "status", "first seen", "ended", "session")
+	_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-9s  %-19s  %-19s  %-38s  %s\n",
+		"host", "status", "first seen", "ended", "session", "project")
 	for _, s := range reply.Sessions {
 		ended := "-"
 		if s.EndedAtMS != 0 {
 			ended = stamp(s.EndedAtMS)
 		}
-		_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-9s  %-19s  %-19s  %q\n",
-			s.Host, s.Status, stamp(s.CreatedAtMS), ended, s.HostSessionID)
+		// The project root is per row and masked by the service. It is
+		// the same thing the removed header line said - which project
+		// answered - and it says it for a listing that may span several.
+		// Both it and the session id are quoted for the reason [search]
+		// quotes its three: host_session_id is whatever a payload said,
+		// and projects.root is a path a person chose.
+		_, _ = fmt.Fprintf(os.Stdout, "%-11s  %-9s  %-19s  %-19s  %-38q  %q\n",
+			s.Host, s.Status, stamp(s.CreatedAtMS), ended, s.HostSessionID, s.ProjectRoot)
 	}
 	return 0
+}
+
+// sessionsScope turns [sessions]' optional argument into the project the
+// service will scope to: the argument made absolute, or "" for every project.
+//
+// It is [projectArg] without the working-directory default, and not a copy of
+// it: the difference between the two commands is exactly that default, and
+// `event` keeps it because an event id needs a project to be read in (I-08).
+func sessionsScope(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	return projectArg(args)
 }
 
 // projectArg turns an optional project argument into the absolute path the

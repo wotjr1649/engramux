@@ -400,8 +400,9 @@ func stubHandler() pipe.Handler {
 			}}, nil
 		},
 		ListSessions: func(context.Context, ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
-			return ipc.ListSessionsReply{ProjectRoot: `D:\work`, Sessions: []ipc.Session{{
-				ID: "codex:1", Host: "codex", HostSessionID: "1", Status: "active", CreatedAtMS: 1,
+			return ipc.ListSessionsReply{Sessions: []ipc.Session{{
+				ID: "codex:1", ProjectRoot: `D:\work`, Host: "codex",
+				HostSessionID: "1", Status: "active", CreatedAtMS: 1,
 			}}}, nil
 		},
 		GetMemory: func(_ context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error) {

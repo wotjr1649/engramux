@@ -130,15 +130,20 @@ func TestGetEventRoutesToItsOwnReply(t *testing.T) {
 // ListSessions.
 func TestListSessionsRoutesToItsOwnReply(t *testing.T) {
 	want := ipc.ListSessionsReply{
-		Version:     "not the wire version",
-		Type:        "not a list-sessions reply",
-		ProjectRoot: `d:\users\[redacted-user-path]\repo`,
+		Version: "not the wire version",
+		Type:    "not a list-sessions reply",
 		Sessions: []ipc.Session{
-			{ID: "codex:s1", Host: "codex", HostSessionID: "s1", Status: "ended", CreatedAtMS: 1, EndedAtMS: 2},
+			{ID: "codex:s1", ProjectRoot: `d:\users\[redacted-user-path]\repo`,
+				Host: "codex", HostSessionID: "s1", Status: "ended", CreatedAtMS: 1, EndedAtMS: 2},
 			// The empty host session id is the shape a payload with
 			// no session_id produces (I-04), and it has to survive
 			// the wire as itself rather than as an omitted field.
-			{ID: "unknown:", Host: "unknown", HostSessionID: "", Status: "active", CreatedAtMS: 3},
+			// The empty project root is not a shape the service can
+			// produce - projects.root is NOT NULL and the listing
+			// joins on it - but this test is about the frame rather
+			// than about the handler, and a zero field has to arrive
+			// as itself too.
+			{ID: "unknown:", ProjectRoot: "", Host: "unknown", HostSessionID: "", Status: "active", CreatedAtMS: 3},
 		},
 	}
 
@@ -160,9 +165,6 @@ func TestListSessionsRoutesToItsOwnReply(t *testing.T) {
 		}
 		if err := got.Verify(); err != nil {
 			t.Fatalf("Verify: %v", err)
-		}
-		if got.ProjectRoot != want.ProjectRoot {
-			t.Errorf("project_root = %q, want %q", got.ProjectRoot, want.ProjectRoot)
 		}
 		if len(got.Sessions) != len(want.Sessions) {
 			t.Fatalf("%d sessions, want %d", len(got.Sessions), len(want.Sessions))

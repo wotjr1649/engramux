@@ -109,11 +109,11 @@ func asJSON(b []byte) json.RawMessage {
 // root, which is the exact shape internal/secret's user-path class matches in
 // 900 of 902 captures (spec 6.1).
 //
-// The root comes from resolving the caller's own argument rather than from a
-// SELECT on projects. It is the same string either way - internal/store stores
-// what project.Identify normalised - and this way a project with no rows yet
-// answers "no sessions" instead of "no such project". Those are the same state:
-// a project is created by ingest.
+// An empty project is every project (backlog 47, spec 5.9), so it never reaches
+// project.FromArgument - which refuses "" as not absolute, and is right to for
+// the request types where a project is required. The root then comes from the
+// JOIN, one per session, because a listing spanning several projects has no
+// single one to name.
 //
 // ponytail: a session id is untrusted width, because host_session_id is
 // whatever a payload said, and nothing truncates it. Over the pipe the ceiling
@@ -122,19 +122,20 @@ func asJSON(b []byte) json.RawMessage {
 // length. Truncating is what an event name gets and an id must not: a shortened
 // name is still readable and a shortened id is not an id.
 func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) (ipc.ListSessionsReply, error) {
-	if req.Project == "" {
-		return ipc.ListSessionsReply{}, ipc.ErrNoProject
-	}
 	limit, err := req.EffectiveLimit()
 	if err != nil {
 		return ipc.ListSessionsReply{}, err
 	}
-	p, err := project.FromArgument(req.Project)
-	if err != nil {
-		return ipc.ListSessionsReply{}, err
+	var projectID string
+	if req.Project != "" {
+		p, err := project.FromArgument(req.Project)
+		if err != nil {
+			return ipc.ListSessionsReply{}, err
+		}
+		projectID = p.ID
 	}
 
-	rows, err := store.Sessions(ctx, db, p.ID, limit)
+	rows, err := store.Sessions(ctx, db, projectID, limit)
 	if err != nil {
 		return ipc.ListSessionsReply{}, err
 	}
@@ -142,6 +143,7 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 	for i, s := range rows {
 		out[i] = ipc.Session{
 			ID:            secret.MaskString(s.ID),
+			ProjectRoot:   secret.MaskString(s.Root),
 			Host:          s.Host,
 			HostSessionID: secret.MaskString(s.HostSessionID),
 			Status:        s.Status,
@@ -149,7 +151,7 @@ func listSessions(ctx context.Context, db *sql.DB, req ipc.ListSessionsRequest) 
 			EndedAtMS:     s.EndedAtMS,
 		}
 	}
-	return ipc.ListSessionsReply{ProjectRoot: secret.MaskString(p.Root), Sessions: out}, nil
+	return ipc.ListSessionsReply{Sessions: out}, nil
 }
 
 // doctorReport answers a [ipc.Doctor] request (spec 5.2, 5.5).
