@@ -1646,7 +1646,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
 | **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
-| **M11** | Plumbing down-weight earns its place | **Designed 2026-09-05. The non-vacuity arm ran 2026-09-06 and is over its bar in both classes; the gate itself is un-run.** Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
+| **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
@@ -1806,6 +1806,54 @@ divergence and gets the same kind of seam — explicit at the call site, never i
 *Nothing ships from the gate's own commit.* The sweep runs against a seam that compiles into the
 test binary and into nothing else, on `SearchUnboosted`'s precedent, and `Search` keeps today's
 ranking until the table licenses otherwise.
+
+**The gate ran on 2026-09-06 and no weight ships.** `TestGateM11TheWeightEarnsItsPlace` in
+`internal/search`. Both anchors were reproduced exactly, so weight 0 is `Search`'s own answer:
+recall@10 as a count, over each class's own population.
+
+| arm | class | n | 0 | 1 | 2 | 3 | 4 | 5 | 20 | 100 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gain | a prompt's own words | 17 | 6 | 6 | 6 | 6 | 6 | 6 | **13** | 13 |
+| gain | a reply's own words | 139 | 76 | 82 | 87 | 88 | 96 | **107** | 135 | 135 |
+| harm | a command line | 25 | 17 | 17 | 17 | 17 | 17 | 17 | **13** | 13 |
+| harm | a touched path | 25 | 13 | **12** | 12 | 12 | 12 | 12 | 10 | 10 |
+| harm | an error message | 25 | 19 | 19 | 19 | 19 | 19 | 19 | **17** | 17 |
+
+**It fails on one document, and that is the sentence to read slowly.** `a touched path` drops from
+13 to 12 of 25 at weight 1 and never comes back, so the condition — improves recall@10 in a gain
+class, regresses it in none of the five — is met at no weight in the sweep. Weight 5 would have
+bought **+31 replies of 139**, from 0.547 to 0.770, for that one document. The condition was
+registered before the gate existed precisely so that this trade would not be made by whoever
+happened to be looking at the number, and **it is not being made here**: the pre-registered answer
+is that no weight ships.
+
+**The one document is not a boundary artefact, and that was checked rather than assumed.** A
+supplementary run over *every* candidate instead of M4's 25 — 534, 120 and 96 — is not the
+pre-registered arm and did not change its verdict, but it settles what the sample of 25 could not:
+`a command line` 0.629 → 0.629 → 0.627 → 0.627 → 0.627 → **0.599** at weight 5 → 0.496 at 20; `a
+touched path` 0.467 → **0.458** → 0.450 → 0.450 → 0.450 → 0.442 → 0.375; `an error message` 0.823
+flat to weight 3 → **0.802** at 4 and 5 → 0.708 at 20. **The harm is monotone and reaches all three
+classes by weight 5** — sixteen command lines of 534 — so the sampled arm's single document was
+representative and not a rounding accident.
+
+**What the two arms say together, which is the finding.** A person's prompt is genuinely buried:
+64.7% of them are not in the top ten of a search for their own most distinctive word, and every one
+of those is under a top ten of pure machinery. But the machinery is not there by mistake. The
+document that ran the command genuinely contains the path, and lifting the prompt above it costs the
+command line its own place — at every weight, in every class, and by more as the weight grows. **The
+first-run experience backlog 48 describes is real, and a uniform event-class weight is not the
+instrument for it.** What might be is something the corpus cannot answer today: a signal that
+separates "this document *is about* the query" from "this document *contains* the query", which is a
+retrieval question rather than a re-weighting one.
+
+**The seam and the gate stay, and that is a deliberate departure from the sentence above.** This
+section said the seam comes out if no weight ships. It does not, and the reason is this repository's
+own standard rather than a preference: deleting it would leave the table above as a measurement
+nothing re-runs, which is exactly the `[unverified]` claim §8 forbids — where keeping it makes M11 a
+gate whose answer is *pinned*, in gate M3's shape, so a corpus or a ranking that moves says so
+instead of going quiet. What is at stake is one `float64` parameter through three unexported
+functions, which `Search` passes 0 for. **The verdict did not move; a sentence about housekeeping
+did, and this records that it did.**
 
 **A weight needs no migration, and that is measured rather than assumed.** The field rule above is
 the right rule for the *gate* — it says what the row means and it does not go stale when a host

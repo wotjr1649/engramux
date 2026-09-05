@@ -116,3 +116,12 @@ func TestQueryBounds(t *testing.T) {
 		}
 	})
 }
+
+// TestTheHumanTextListIsTheSetItComesFrom holds the one thing
+// [humanTextEventList]'s concatenation can get wrong: the quoting. The set is
+// gate M11's to measure; this is about the spelling reaching SQL.
+func TestTheHumanTextListIsTheSetItComesFrom(t *testing.T) {
+	if want := `('UserPromptSubmit', 'Stop', 'SubagentStop')`; humanTextEventList != want {
+		t.Errorf("humanTextEventList = %s, want %s", humanTextEventList, want)
+	}
+}

@@ -100,26 +100,31 @@ type Hit struct {
 // it costs nothing the ORDER BY was not already paying: ranking needs every
 // matching row in hand before the first one can be returned.
 func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match) (hits []Hit, total int64, err error) {
-	return searchWith(ctx, db, text, projectID, limit, true, m)
+	return searchWith(ctx, db, text, projectID, limit, true, 0, m)
 }
 
-// searchWith is [Search] with the derived-field boost made explicit, so that
-// gate M4 can run the same query both ways over one corpus and report the
-// difference (memory spec 5). It is unexported and has exactly two callers:
-// [Search], which passes true, and the alias in this package's export_test.go,
-// which passes false.
+// searchWith is [Search] with both of its ranking terms made explicit, so that a
+// gate can run one corpus every way and report the difference (memory spec 5).
+// It is unexported, and every caller is either [Search] or an alias in this
+// package's export_test.go.
 //
-// A parameter rather than a package variable, because a variable a test sets is
-// a variable two parallel tests fight over, and because "the production path is
+// boost is gate M4's: the derived-field boost off and on. human is gate M11's:
+// what a document carrying a person's prompt or a model's reply is worth, in the
+// same units, with 0 leaving the ordering exactly as it was. **[Search] passes
+// 0**, so nothing a caller of this package receives is ranked by a term the
+// gate has not licensed yet.
+//
+// Parameters rather than package variables, because a variable a test sets is a
+// variable two parallel tests fight over, and because "the production path is
 // the one with the constant written into it" is a property worth having at the
 // call site rather than in a comment.
-func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool, m Match) (hits []Hit, total int64, err error) {
+func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool, human float64, m Match) (hits []Hit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query, args := matchQuery(tokens, projectID, limit, boost, m)
+	query, args := matchQuery(tokens, projectID, limit, boost, human, m)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search: match: %w", err)
@@ -210,7 +215,7 @@ func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit i
 // a subquery's ORDER BY decides which rows the LIMIT keeps and not what order
 // they arrive in. `rank` is not available outside the query holding the MATCH
 // either, which is the same reason.
-func matchQuery(tokens []string, projectID string, limit int, boost bool, m Match) (string, []any) {
+func matchQuery(tokens []string, projectID string, limit int, boost bool, human float64, m Match) (string, []any) {
 	const (
 		inner = `
 		SELECT events_fts.rowid AS rid, count(*) OVER () AS total, `
@@ -220,7 +225,7 @@ func matchQuery(tokens []string, projectID string, limit int, boost bool, m Matc
 		WHERE events_fts MATCH ?`
 	)
 
-	score, scoreArgs := orderExpr(tokens, boost)
+	score, scoreArgs := orderExpr(tokens, boost, human)
 	// The score's own arguments come first: it is in the SELECT list, which
 	// SQLite binds before the WHERE below it.
 	args := append([]any{}, scoreArgs...)
@@ -308,26 +313,66 @@ const boostPerDerivedToken = 5.0
 // concatenating builds a new string per row per token - the same allocation in a
 // different place - and because OR short-circuits: a query that matches the
 // command line never looks at the output.
-func orderExpr(tokens []string, boost bool) (string, []any) {
-	if !boost {
-		return `rank`, nil
-	}
+// # The human-text term, and why it is a column rather than the payload
+//
+// `human` is what a document carrying a person's prompt or a model's reply is
+// worth against bm25, and 0 leaves the expression exactly as it was. The test is
+// `events.event_name`, which is a column migration `00003` already indexes.
+// The rule this stands for is about two payload *keys*, and testing those here
+// would read every matching payload inside the inner query - which is §7.1's
+// four-second shape and what
+// [TestGateTheSearchDoesNotReadPayloadsItDoesNotReturn] exists to stop. Gate
+// M11 is what holds the two together: it classifies by the keys, ranks by the
+// column, and asserts they agree on every document in the corpus.
+func orderExpr(tokens []string, boost bool, human float64) (string, []any) {
 	var b strings.Builder
-	b.WriteString(`rank - ? * (`)
-	args := []any{boostPerDerivedToken}
-	for i, tok := range tokens {
-		if i > 0 {
-			b.WriteString(` + `)
+	var args []any
+	b.WriteString(`rank`)
+	if boost {
+		b.WriteString(` - ? * (`)
+		args = append(args, boostPerDerivedToken)
+		for i, tok := range tokens {
+			if i > 0 {
+				b.WriteString(` + `)
+			}
+			b.WriteString(`(events.derived_cmd LIKE ? ESCAPE '\'` +
+				` OR events.derived_paths LIKE ? ESCAPE '\'` +
+				` OR events.derived_output LIKE ? ESCAPE '\')`)
+			pattern := likeContains(tok)
+			args = append(args, pattern, pattern, pattern)
 		}
-		b.WriteString(`(events.derived_cmd LIKE ? ESCAPE '\'` +
-			` OR events.derived_paths LIKE ? ESCAPE '\'` +
-			` OR events.derived_output LIKE ? ESCAPE '\')`)
-		pattern := likeContains(tok)
-		args = append(args, pattern, pattern, pattern)
+		b.WriteString(`)`)
 	}
-	b.WriteString(`)`)
+	if human > 0 {
+		b.WriteString(` - ? * (events.event_name IN ` + humanTextEventList + `)`)
+		args = append(args, human)
+	}
 	return b.String(), args
 }
+
+// humanTextEvents is the closed set of hook events whose payload carries text a
+// person wrote or a model wrote back: `prompt` on one, `last_assistant_message`
+// on the other two.
+//
+// Closed and measured, on `internal/memory`'s `codexProseLabels` precedent.
+// Over the 902-capture corpus on 2026-09-06, this set and the rule it stands
+// for - a non-empty `prompt` or a non-empty `last_assistant_message` -
+// classify **160 documents each and disagree on zero**. `events.event_name`
+// carries no CHECK, so a set of names is a statement about what the hosts write
+// today rather than a guarantee; gate M11 re-measures the agreement over the
+// whole corpus every run, which is what makes the shortcut safe rather than a
+// guess.
+var humanTextEvents = []string{"UserPromptSubmit", "Stop", "SubagentStop"}
+
+// humanTextEventList is [humanTextEvents] as the SQL list [orderExpr] tests
+// against, built once rather than written a second time - two spellings of one
+// set is one of them going stale.
+//
+// Concatenated into the statement rather than bound, because a bound list needs
+// a placeholder per element and this is a compile-time constant of this
+// package's own Go literals: there is no input here to inject with, and
+// [TestTheHumanTextListIsTheSetItComesFrom] holds the spelling.
+var humanTextEventList = "('" + strings.Join(humanTextEvents, "', '") + "')"
 
 // likeContains turns a query token into the LIKE pattern that matches any text
 // containing it.
