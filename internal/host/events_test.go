@@ -131,14 +131,44 @@ func TestCodexEntryShape(t *testing.T) {
 	}
 	// command is set to the same value so the entry is not Windows-only by
 	// accident on a host that reads the portable key.
-	if strings.Count(s, `"\"C:/x/engramux.exe\""`) != 2 {
-		t.Errorf("command and commandWindows should both be the quoted path\ngot: %s", s)
+	if strings.Count(s, `"C:/x/engramux.exe"`) != 2 {
+		t.Errorf("command and commandWindows should both be the plain path\ngot: %s", s)
 	}
 	if !strings.Contains(s, `"timeout":3`) {
 		t.Errorf("Codex SessionEnd is clamped to 3 and this entry is not\ngot: %s", s)
 	}
 	if s := string(CodexEntry("PreToolUse", relay)); !strings.Contains(s, `"timeout":5`) {
 		t.Errorf("every Codex event but SessionEnd takes TimeoutSeconds\ngot: %s", s)
+	}
+}
+
+// TestCodexTakesThePathWithItsOwnQuotesStrippedOut is backlog 50, and it is a
+// measurement rather than a preference.
+//
+// Until 2026-09-05 [CodexEntry] wrapped the relay path in quotes *inside* the
+// value, so the file held a command whose every character including the first
+// was one quoted token. Codex did not execute it: it echoed it. Measured on the
+// owner's machine, where the echoed path arrived back as the hook's own stdout
+// - `hook context: C:/.../engramux.exe` - while `readOneHostHooks` went on
+// answering `11 of 11 events point at the installed relay` for nine days and
+// not one Codex event was ever captured. The same file with the quotes removed
+// delivered a `codex UserPromptSubmit` on the first prompt.
+//
+// # What this test cannot see
+//
+// A relay path containing a space. This spelling is measured on a path with
+// none, and the quotes it drops are what a path with a space would have needed
+// - that is backlog 51 and it is open. The assertion here is deliberately about
+// the quotes and not about spaces, so that whatever answers 51 does not have to
+// argue with a test that pinned the wrong half.
+func TestCodexTakesThePathWithItsOwnQuotesStrippedOut(t *testing.T) {
+	for _, event := range EventNames() {
+		s := string(CodexEntry(event, `C:/x/engramux.exe`))
+		if strings.Contains(s, `\"`) {
+			t.Errorf("%s: the entry carries an escaped quote, so the host is handed a command "+
+				"whose program token is quoted and it echoes the line instead of running it\ngot: %s",
+				event, s)
+		}
 	}
 }
 
