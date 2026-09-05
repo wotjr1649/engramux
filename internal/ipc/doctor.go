@@ -62,6 +62,24 @@ type DoctorReply struct {
 	// is also why adding it does not move ipc.Version: an optional field an
 	// old peer omits is not a compatibility event.
 	Product string `json:"product,omitempty"`
+	// Cells is [StatusReply.Cells], repeated here for the reason the three
+	// numbers above are: `doctor` asks one question.
+	//
+	// It is what makes the host lines above it answerable from something
+	// other than the file this product wrote. `readOneHostHooks` reads a
+	// host's configuration through the member name the installer wrote it
+	// under and answers `11 of 11 events point at the installed relay` - a
+	// sentence that was true and useless for nine days while one host had
+	// never delivered an event (backlog 50). A count and a last-seen per
+	// host is the evidence that did not come from this product's own
+	// assumption.
+	//
+	// `omitempty`, and nothing verifies it, for [DoctorReply.Product]'s
+	// reason: a service built before this field existed answers without it,
+	// and `doctor` says so rather than reading the absence as zero. Events
+	// is what tells those two apart - a service with rows and no cells is
+	// an old one, and a service with neither is an empty database.
+	Cells []Cell `json:"cells,omitempty"`
 	// TokenizerLive is the tokenizer the live search index was created
 	// with, read out of sqlite_schema; TokenizerExpected is the one the
 	// embedded migration declares. Both are empty when the index carries no

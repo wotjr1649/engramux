@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/wotjr1649/engramux/internal/host"
+	"github.com/wotjr1649/engramux/internal/ipc"
 	"github.com/wotjr1649/engramux/internal/schedule"
 )
 
@@ -315,7 +316,11 @@ func TestReportInstalledFailsOnlyOnTheInstallationsOwnFaults(t *testing.T) {
 		},
 	} {
 		r := &report{w: &bytes.Buffer{}}
-		r.reportInstalled(`C:\Local\engramux\bin`, `C:\Local\engramux\bin\engramux.exe`, tc.bins, tc.hooks)
+		// A reply with no cells, so the delivery line under each host is a
+		// note: this test is about which faults move the exit code, and a
+		// host that has delivered nothing must not be one of them.
+		r.reportInstalled(`C:\Local\engramux\bin`, `C:\Local\engramux\bin\engramux.exe`, tc.bins, tc.hooks,
+			ipc.DoctorReply{}, nil)
 		if r.failed != tc.want {
 			t.Errorf("%s: failed = %v, want %v", tc.name, r.failed, tc.want)
 		}
