@@ -236,3 +236,63 @@ func requireKept(t *testing.T, items []Item, substring string) {
 	}
 	t.Fatalf("no item carries the text the drift arrived with; warning about a shape and then dropping it is still dropping it")
 }
+
+// TestNoItemOnThisMachineIsTitledWithALabel is backlog 36's assertion over the
+// corpus the label sets were derived from, which is the only population that can
+// say whether they are closed around the right thing.
+//
+// It prints counts and never a title. These are the owner's private notes, and
+// a title is a line of one.
+//
+// # The vacuity guard asks the corpus and not the function
+//
+// A machine whose memory happens to carry no label-led block would pass this
+// with a firstLine that skipped nothing, so the guard counts the blocks whose
+// *first non-empty line* is a label - which is a fact about the files, read
+// here rather than asked of the code under test. Session 19 spent a test on the
+// other shape: a skip guard that asked the function under test whether it had an
+// answer skips exactly when that answer is wrong.
+func TestNoItemOnThisMachineIsTitledWithALabel(t *testing.T) {
+	sources, _ := Sources(ClaudeHome(), CodexHome())
+	if len(sources) == 0 {
+		t.Skip("no native memory on this machine; this is over the files that exist")
+	}
+
+	var items, titled, moved, untitled int
+	for i, s := range sources {
+		got, _, err := Parse(s)
+		if err != nil {
+			t.Fatalf("source %d (%s, %s): Parse: %v", i, s.Host, s.Kind, err)
+		}
+		for _, it := range got {
+			items++
+			if it.Title == "" {
+				untitled++
+				continue
+			}
+			if isKnownLabel(it.Title) {
+				titled++
+				t.Errorf("source %d (%s, %s): an item is titled with a label", i, s.Host, s.Kind)
+			}
+			// The old answer, computed here from the item's own body:
+			// the first non-empty line with the same marks taken off.
+			// It differs from the title exactly where the skip did
+			// something.
+			for _, line := range strings.Split(it.Body, "\n") {
+				line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#-*> "))
+				if line == "" {
+					continue
+				}
+				if isKnownLabel(line) {
+					moved++
+				}
+				break
+			}
+		}
+	}
+	if moved == 0 {
+		t.Skip("no block on this machine opens with a recognised label, so the assertion is vacuous")
+	}
+	t.Logf("titles: %d items, %d whose first body line is a label the title skipped, %d still titled with one, %d with no title",
+		items, moved, titled, untitled)
+}
