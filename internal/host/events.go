@@ -132,15 +132,17 @@ func ClaudeEntry(name, relay string) jsontext.Value {
 // relay` throughout, because it read the file this product had written.
 // Removing the quotes delivered a `codex UserPromptSubmit` on the first prompt.
 //
-// # What this spelling has not been measured on
+// # A path with a space carries no quotes either
 //
-// A relay path containing a space, which is what the quotes would have been
-// for. `%LOCALAPPDATA%` carries the Windows account name, so it is reachable -
-// and there is no machine here with one. It is backlog 51, open, and a fix for
-// it must not be a quote put back without a measurement: that is the spelling
-// this comment exists to record as broken.
+// It carries no space instead. **Measured 2026-09-05**, over cmd.exe,
+// powershell.exe and pwsh.exe: no quoting of a path with a space in it runs
+// under both shells Codex can hand a hook to, and which one a user gets is not
+// this product's decision. [spaceFree] answers the one spelling that ran in all
+// six, and answers the path unchanged for every path that has no space - so the
+// spelling this comment records as measured is still the one every machine
+// measured so far receives.
 func CodexEntry(name, relay string) jsontext.Value {
-	command := quote(forwardSlashes(relay))
+	command := quote(forwardSlashes(spaceFree(relay)))
 	return buildEntry(name, `"type":"command",`+
 		`"command":`+command+`,`+
 		`"commandWindows":`+command+`,`+
