@@ -238,17 +238,17 @@ func parseCodex(s Source, text string) ([]Item, []Warning, error) {
 		}
 		warns = append(warns, w...)
 		items = append(items, Item{
-			Host:           s.Host,
-			Kind:           s.Kind,
-			SourcePath:     s.Path,
-			EntryKey:       uniqueKey(seen, key),
-			ProjectPath:    cwd,
+			Host:        s.Host,
+			Kind:        s.Kind,
+			SourcePath:  s.Path,
+			EntryKey:    uniqueKey(seen, key),
+			ProjectPath: cwd,
 			// The block as it was written, not the indexed body:
 			// [codexBlock] has already replaced each recognised field
 			// line with its bare value, and a UUID is no better a
 			// title than the label that carried it (backlog 36).
-			Title: firstLine(strings.Join(block, "\n")),
-			Body:  body,
+			Title:          firstLine(strings.Join(block, "\n")),
+			Body:           body,
 			HostModifiedMS: mod,
 		})
 	}

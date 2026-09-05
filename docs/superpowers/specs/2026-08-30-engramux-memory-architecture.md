@@ -1646,7 +1646,49 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
 | **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
+| **M11** | Plumbing down-weight earns its place | **Designed 2026-09-05, un-run.** Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the closed set, the non-vacuity arm and the sweep; nothing here licenses a weight until it has run |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
+
+**What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
+is a design and nothing in it has been run.
+
+Backlog 48 observed a first run on a fresh corpus: six hits for one probe word, two carrying human
+text and four hook plumbing, two of the four being the `PreToolUse` and `PostToolUse` of the MCP
+search call that was looking for the word. **That is one observation of six hits, and it is not a
+measurement of the ranking.** Down-weighting plumbing is a lever on every search every user ever
+runs; this repository does not pull one on an anecdote, which is what M4 exists to say.
+
+*The population and the classes.* The corpus is `.capture/`'s, the one M4 and §8's Phase 4 gate
+already run over. The **gain arm** is known-item classes cut from documents carrying human text — a
+prompt's own words and a reply's own words — where the wanted document is the human-text event the
+query was cut from. The **harm arm** is M4's three classes unchanged: a command line, a touched
+path, and what a tool answered. Both arms are needed and the second is the point. A weight that
+lifts prompts by burying the document that actually ran the command has not improved the ranking, it
+has moved the defect, and a gate with only the gain arm cannot see that.
+
+*The set of what counts as plumbing must be closed and derived, not listed.* `events.event_name` is
+whatever a payload said (there is no CHECK on it), so the set is drawn from the cells the corpus
+actually holds and is written into the code as a closed set, on §6.1's precedent and
+`internal/memory`'s `codexProseLabels`. `internal/inject`'s `keepable` and `InvokesEngramux` are the
+existing prior art for "this product's own machinery is not an answer" and are where the reasoning
+should be reused rather than restated.
+
+*The non-vacuity arm, and it is the one that can end this row without any code.* Before a weight is
+chosen, the gate measures **how often a plumbing document outranks the human-text document a query
+was cut from, at the current weight**. If that is rare over the corpus, the first run's six hits were
+a property of a corpus of a few dozen events and not of the ranking, and the answer is to record the
+number and close the row rather than to ship a lever. §7.1's own warning is what this is guarding
+against: a figure taken over a corpus that does not resemble the real one can be correct and
+useless at once.
+
+*The sweep, and the shape of the answer.* M4's weight was found by running the gate at 1, 2, 3, 4,
+5, 20 and 100 and reporting the regimes rather than a single number, and this arm follows it. What
+gets written down is the table — class, candidates, recall@10 off → on, MRR off → on — so that a
+later revision deciding whether to keep the code is arguing with a figure.
+
+**M11 gates the change and not a feature.** M5, M6, M9, M10 and M7 gate whether injection turns on;
+not running those leaves a feature off, which is safe. Not running M11 leaves the ranking exactly as
+it is today, which is also safe — so this arm blocks a ranking change and blocks nothing else.
 
 **What cannot be measured here, stated so nobody claims it.** Whether injection improves task
 outcomes needs paired runs over hundreds of tasks, which is what SWE Context Bench did with 399. One
