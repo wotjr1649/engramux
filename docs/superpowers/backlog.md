@@ -223,9 +223,18 @@ find this defect compared detection against that label, came back clean, and pro
 zero, which is the assertion that would have caught this had the corpus held one Claude Code
 `SessionStart`.
 
+**47 closed on 2026-09-05**, on its own branch and merged `--no-ff`. `sessions` with no argument is
+corpus-wide and `[project]` narrows it, matching `search`; spec 5.9 carries the decision and why the
+"an existing CLI invocation must not change what it returns" clause is withdrawn for this command
+and kept for its sibling. `ListSessionsReply.ProjectRoot` was singular and could not survive the
+change, so **the root travels per session**: a listing spanning projects has no single one, and the
+per-row field still does the job the reply-level one had. `TestListSessionsWithNoProjectIsCorpusWide`
+in `internal/service` and `TestSessionsScopeDefaultsToEveryProject` in `cmd/engramux` are what own
+it now — the first over the handler, the second over the argument, because a handler that answers
+corpus-wide is not the same claim as a command that asks corpus-wide.
+
 | # | Where | What |
 |---|---|---|
-| 47 | `cmd/engramux`'s `sessions` and `search` | **Two sibling read commands have opposite defaults, and the first person to run both concluded that nothing had been captured.** `search` is corpus-wide unless `--project` narrows it; `sessions` with no argument resolves the *working directory* as the project (`projectArg`). On the first clean-profile install the operator stood in a directory below the one the agents had worked in, ran `search` for a probe word and got six hits, then ran `sessions` and got `no sessions` - and read the pair as capture being broken. **The mitigation for exactly this already exists and was not enough**: `sessions` prints the root the service resolved, with a comment saying that line exists so "a path that is not the one you meant" is visible. It was visible and it was not read, because the interesting word in a two-line answer is the second one. What a fix is, is a decision rather than a bug: make `sessions` corpus-wide and let `[project]` narrow it, matching its sibling; or keep the default and make the empty answer a signpost rather than a dead end, which needs the service to say whether sessions exist anywhere else and so moves an ipc reply. The cheap half of the second - saying that a project can be named - is not the same as the useful half. No test owns it because no test can say which default is right |
 | 48 | `internal/search`'s ranking, and what a first run returns | **A new user's first search returns the product's own machinery, and on a fresh corpus that is most of the answer.** Measured on the first clean-profile install: six hits for one probe word, of which two carried human text - the prompt and the reply - and four were hook plumbing, including the `PreToolUse` and `PostToolUse` of the MCP search call that was looking for the word. The product found its own act of looking. Each excerpt is a rune window centred on the match (`excerpt.go`), so on those four it centres inside a run of UUIDs, a permission mode and a tool name, and it begins mid-word because the window is not aligned to anything - `lUse` was the first observation anyone got of it. None of this is wrong: every one of the six genuinely contains the term, the window is rune-safe, and on a corpus of any size the ranking is a different question. **What it is, is the first-run experience, and nobody had seen one.** Whether tool-plumbing events should be weighted below documents carrying prompt or reply text is the decision; backlog 36 is the same shape one layer up, about titles rather than excerpts, and the two probably want answering together |
 
 ## Raised by closing 50, 2026-09-05

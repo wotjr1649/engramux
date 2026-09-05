@@ -8,10 +8,13 @@ import (
 // ListSessionsRequest is what a [ListSessions] envelope carries in its Payload:
 // which project, and how many sessions.
 //
-// Project is a path and is required, for the reason [GetEventRequest]'s is: a
-// caller knows where its own worktree is, internal/project turns that into the
-// derived id, and a request with no project would be a request about every
-// project at once.
+// Project scopes the listing to one project, by path. **Empty means every
+// project**, which is [SearchRequest.Project]'s meaning and now this one's
+// (backlog 47): the two are the read commands a person runs next to each other,
+// and opposite defaults had the first person to run both read "six hits" and
+// "no sessions" as capture being broken. The MCP tool schema still requires one,
+// where the caller is a model with no working directory - spec 5.9 states that
+// rule at the level each surface can enforce it.
 type ListSessionsRequest struct {
 	Project string `json:"project"`
 	Limit   int    `json:"limit"`
@@ -39,15 +42,6 @@ type ListSessionsReply struct {
 	// Type is always [ListSessions]. It is the discriminator that separates
 	// this document from an [Ack].
 	Type RequestType `json:"type"`
-	// ProjectRoot is projects.root for the project the request named,
-	// **masked**: the column holds a normalised worktree root, which is the
-	// exact shape internal/secret's user-path class matches in 900 of 902
-	// captures (spec 6.1).
-	//
-	// It is on the wire so a caller can see which project the service
-	// resolved its path to. It is one field for the whole reply rather than
-	// one per session, because every session in it belongs to that project.
-	ProjectRoot string `json:"project_root"`
 	// Sessions are the project's sessions, newest first. An empty slice is
 	// a project with no sessions - including a project nothing has ever
 	// ingested into, which is the same state - and is only distinguishable
@@ -60,6 +54,17 @@ type ListSessionsReply struct {
 type Session struct {
 	// ID is sessions.id: spec 6's host joined to the host session id.
 	ID string `json:"id"`
+	// ProjectRoot is projects.root for the project this session belongs to,
+	// **masked**: the column holds a normalised worktree root, which is the
+	// exact shape internal/secret's user-path class matches in 900 of 902
+	// captures (spec 6.1).
+	//
+	// It is per session and not one field for the whole reply, and that is
+	// backlog 47's other half: an empty project lists every project, and a
+	// listing spanning several has no single root to name. It is still what
+	// makes "a path that is not the one you meant" visible when a project
+	// *was* named - the same job the reply-level field had.
+	ProjectRoot string `json:"project_root"`
 	// Host is sessions.host, one of internal/host.Detect's three values.
 	Host string `json:"host"`
 	// HostSessionID is sessions.host_session_id - the id the host itself

@@ -158,9 +158,10 @@ func TestPhase6RedactionAudit(t *testing.T) {
 		if len(ls.Sessions) != 1 {
 			t.Fatalf("list_sessions returned %d sessions, want the 1 that was ingested", len(ls.Sessions))
 		}
-		// The field this reply exists in the audit for. Empty, there is
-		// nothing in it to have masked.
-		if ls.ProjectRoot == "" {
+		// The field this reply exists in the audit for, which since
+		// backlog 47 is on the session rather than on the reply. Empty,
+		// there is nothing in it to have masked.
+		if ls.Sessions[0].ProjectRoot == "" {
 			t.Fatal("list_sessions answered an empty project root, so the sweep does not reach one")
 		}
 		auditClean(t, "the list_sessions reply", samples, ls)

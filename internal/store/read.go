@@ -86,14 +86,20 @@ type Session struct {
 	Host          string
 	HostSessionID string
 	Status        string
-	CreatedAtMS   int64
+	// Root is projects.root for the project this session belongs to, joined
+	// on rather than assumed: a listing may span every project (backlog 47),
+	// and then the caller has no one root to attribute the rows to.
+	Root        string
+	CreatedAtMS int64
 	// EndedAtMS is 0 for a session that has not ended. sessions.ended_at is
 	// the one nullable column in the table, and 0 is how its NULL is
 	// carried: an epoch millisecond of 0 is 1970, which no row holds.
 	EndedAtMS int64
 }
 
-// Sessions returns up to limit of a project's sessions, newest first.
+// Sessions returns up to limit of a project's sessions, newest first, or of
+// every project's when projectID is empty (backlog 47). That is
+// [Search]'s meaning for an empty project id, and this reads it the same way.
 //
 // The order is created_at descending, then id descending. The tiebreak is not
 // decoration: created_at is milliseconds and the service stamps every row of one
@@ -110,12 +116,26 @@ type Session struct {
 // limit". [github.com/wotjr1649/engramux/internal/ipc.ListSessionsRequest.EffectiveLimit]
 // is what bounds it before it gets here.
 func Sessions(ctx context.Context, db *sql.DB, projectID string, limit int) ([]Session, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, host, host_session_id, status, created_at, coalesce(ended_at, 0)
+	// An INNER JOIN and not a LEFT one: sessions.project_id is NOT NULL and
+	// REFERENCES projects, so a session with no project row is a broken
+	// database rather than a listing that should show a blank root.
+	stmt := `
+		SELECT sessions.id, sessions.host, sessions.host_session_id, sessions.status,
+		       projects.root, sessions.created_at, coalesce(sessions.ended_at, 0)
 		FROM sessions
-		WHERE project_id = ?
-		ORDER BY created_at DESC, id DESC
-		LIMIT ?`, projectID, limit)
+		JOIN projects ON projects.id = sessions.project_id`
+	var args []any
+	if projectID != "" {
+		stmt += `
+		WHERE sessions.project_id = ?`
+		args = append(args, projectID)
+	}
+	stmt += `
+		ORDER BY sessions.created_at DESC, sessions.id DESC
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list sessions: %w", err)
 	}
@@ -125,7 +145,7 @@ func Sessions(ctx context.Context, db *sql.DB, projectID string, limit int) ([]S
 	for rows.Next() {
 		var s Session
 		if err := rows.Scan(&s.ID, &s.Host, &s.HostSessionID, &s.Status,
-			&s.CreatedAtMS, &s.EndedAtMS); err != nil {
+			&s.Root, &s.CreatedAtMS, &s.EndedAtMS); err != nil {
 			return nil, fmt.Errorf("store: scan a session: %w", err)
 		}
 		out = append(out, s)

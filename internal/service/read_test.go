@@ -256,10 +256,10 @@ func TestListSessionsMasksTheProjectRootAndScopesToIt(t *testing.T) {
 
 	// The root is the one the caller asked about, resolved and masked -
 	// not the raw path, and not the other project's.
-	if want := project.Identify(a.root).Root; got.ProjectRoot == want {
+	if want := project.Identify(a.root).Root; got.Sessions[0].ProjectRoot == want {
 		t.Errorf("project_root is the unmasked root")
 	}
-	if strings.Contains(got.ProjectRoot, filepath.Base(b.root)) {
+	if strings.Contains(got.Sessions[0].ProjectRoot, filepath.Base(b.root)) {
 		t.Errorf("project_root names the other project")
 	}
 
@@ -341,5 +341,45 @@ func ingestOne(t *testing.T, db *sql.DB, id string, payload []byte) {
 	}, store.SourcePipe, time.Now())
 	if err != nil || ack != ipc.Committed {
 		t.Fatalf("ingest %s: status %q, err %v", id, ack, err)
+	}
+}
+
+// TestListSessionsWithNoProjectIsCorpusWide is backlog 47's decision made
+// checkable: no project means every project, the way an empty project already
+// means every project to a search (spec 5.9), and every session carries the
+// root it belongs to because a corpus-wide listing has no single one.
+//
+// The two halves fail on different bugs. A handler that kept refusing an empty
+// project fails the count; one that answered corpus-wide but left the root off
+// the session fails the second loop, which is the half that makes the answer
+// readable rather than merely non-empty.
+func TestListSessionsWithNoProjectIsCorpusWide(t *testing.T) {
+	db, a, b := twoProjects(t)
+
+	got, err := listSessions(t.Context(), db, ipc.ListSessionsRequest{})
+	if err != nil {
+		t.Fatalf("list every project's sessions: %v", err)
+	}
+	if len(got.Sessions) != 2 {
+		t.Fatalf("the corpus-wide listing holds %d sessions, want the 2 that were ingested", len(got.Sessions))
+	}
+	requireNoSecretSurvives(t, "the corpus-wide list-sessions reply", got)
+
+	// Each session names its own project, masked, and the pair is what
+	// separates "both projects answered" from "one answered twice".
+	roots := map[string]string{}
+	for _, s := range got.Sessions {
+		if s.ProjectRoot == "" {
+			t.Fatalf("session %q carries no project root", s.HostSessionID)
+		}
+		roots[s.HostSessionID] = s.ProjectRoot
+	}
+	if roots[a.session] == roots[b.session] {
+		t.Errorf("both sessions name the same project root %q", roots[a.session])
+	}
+	for _, p := range []fixtureProject{a, b} {
+		if want := project.Identify(p.root).Root; roots[p.session] == want {
+			t.Errorf("session %q carries the unmasked root", p.session)
+		}
 	}
 }
