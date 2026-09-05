@@ -192,8 +192,38 @@ have to be re-run against it.
 
 ## Raised by the first install on a machine that had never run these binaries, 2026-09-04
 
+**49 closed on 2026-09-05**, on its own branch and merged `--no-ff`. Spec 4.3 now reads
+`transcript_path` first and the key rules only where it does not answer, and migration `00006`
+re-judges every stored event against that order, moves the ones whose transcript names a different
+host, and deletes the sessions it empties. **The fix is written as the rule and not as the symptom**
+- `PreCompact` and `PostCompact` are two more cells the corpus has no Claude Code capture of and may
+carry the same keys, so repairing only `SessionStart` would have left them. The payload is stored
+verbatim and never rewritten (I-10), which is what makes a re-scan a computation rather than a
+guess, and `00001`'s own CHECK comment says the schema was shaped for exactly this.
+
+**Reordering was not a preference between two defensible rules.** Claude Code's `SessionStart` key
+set is a strict subset of Codex's, so no ordering of key rules could have separated that cell; only
+the value of `transcript_path` can. And the count could not have told anyone which order was right:
+the path resolves for 900 of 902 captures and agrees with the host in all 900, so 4.3 scores
+900/900 under either.
+
+**Three counts written down as literals broke when the fifth fixture arrived, and that is the part
+worth keeping.** `internal/spool`'s Phase 1 gate reserved ingest id 5 for its secret clause, which
+became the new fixture's own id; `Ingest` ACKs a duplicate as committed (I-05), so the clause read
+the fixture's row instead of its own and asserted the wrong `privacy_class` for an event it had
+never written. `internal/store`'s desync test collided at the same number and was therefore
+asserting nothing at all. Both now derive from the fixture count. A literal that happens to equal a
+collection's size is a coupling nothing declares.
+
+`TestTheCorpusCoverageIsWhatIsRecorded` is what outlives the defect: the corpus holds **13 of the 22
+host x event cells**, it names the nine that are empty, and it reads the host out of
+`transcript_path` rather than out of each capture's recorded label - because the first attempt to
+find this defect compared detection against that label, came back clean, and proved nothing.
+`TestDetectCorpusMeasurement` now counts the captures where the two halves disagree and asserts
+zero, which is the assertion that would have caught this had the corpus held one Claude Code
+`SessionStart`.
+
 | # | Where | What |
 |---|---|---|
 | 47 | `cmd/engramux`'s `sessions` and `search` | **Two sibling read commands have opposite defaults, and the first person to run both concluded that nothing had been captured.** `search` is corpus-wide unless `--project` narrows it; `sessions` with no argument resolves the *working directory* as the project (`projectArg`). On the first clean-profile install the operator stood in a directory below the one the agents had worked in, ran `search` for a probe word and got six hits, then ran `sessions` and got `no sessions` - and read the pair as capture being broken. **The mitigation for exactly this already exists and was not enough**: `sessions` prints the root the service resolved, with a comment saying that line exists so "a path that is not the one you meant" is visible. It was visible and it was not read, because the interesting word in a two-line answer is the second one. What a fix is, is a decision rather than a bug: make `sessions` corpus-wide and let `[project]` narrow it, matching its sibling; or keep the default and make the empty answer a signpost rather than a dead end, which needs the service to say whether sessions exist anywhere else and so moves an ipc reply. The cheap half of the second - saying that a project can be named - is not the same as the useful half. No test owns it because no test can say which default is right |
 | 48 | `internal/search`'s ranking, and what a first run returns | **A new user's first search returns the product's own machinery, and on a fresh corpus that is most of the answer.** Measured on the first clean-profile install: six hits for one probe word, of which two carried human text - the prompt and the reply - and four were hook plumbing, including the `PreToolUse` and `PostToolUse` of the MCP search call that was looking for the word. The product found its own act of looking. Each excerpt is a rune window centred on the match (`excerpt.go`), so on those four it centres inside a run of UUIDs, a permission mode and a tool name, and it begins mid-word because the window is not aligned to anything - `lUse` was the first observation anyone got of it. None of this is wrong: every one of the six genuinely contains the term, the window is rune-safe, and on a corpus of any size the ranking is a different question. **What it is, is the first-run experience, and nobody had seen one.** Whether tool-plumbing events should be weighted below documents carrying prompt or reply text is the decision; backlog 36 is the same shape one layer up, about titles rather than excerpts, and the two probably want answering together |
-| 49 | `internal/host`'s `Detect`, and 1.0 spec §4.3 | **Every Claude Code session mints a phantom Codex session, and §4.3's 900/900 could not have caught it.** Measured 2026-09-04 on two machines. Claude Code's `SessionStart` payload carries exactly `cwd`, `hook_event_name`, `model`, `session_id`, `source` and `transcript_path` - no `prompt_id` and no `effort`, so step 1 misses; `model` present, so **step 2 answers Codex**; and `transcript_path` under `.claude`, which step 3 would have read correctly and never runs. `SessionEnd` carries no `model` and falls through to step 3, so it lands as Claude Code - which is why the phantom session is created at the real session-start time and then **never ends**, standing `active` forever. On the machine this was found on, this project holds nine `codex` sessions and **all nine share a `host_session_id` with a `claude-code` session**; the schema permits it because the key is the pair. What it costs is not a row in a table: on the first install on a machine that had never run these binaries, `sessions` listed a `codex` session that had never existed, and both the operator and an agent read it as Codex capturing when nothing had established that. **Why the corpus did not catch it, and this is the part worth more than the defect**: §4.3 records the ordered rule as 900/900 over the 902-capture corpus, and that corpus contains **zero** `claude-code SessionStart` and **zero** `claude-code SessionEnd` captures - 783 Claude Code captures across seven other event names, and the two that would have produced the counter-example are the two it does not have. A rule measured against evidence that cannot contain its counter-example reads as verified and is not. A first check of `Detect` against the corpus label reproduces the same blind spot and looks like a clean result, because the filenames were labelled by the same function. **What a fix is, is a decision rather than a repair**: consult `transcript_path` before the key heuristics wherever it answers, since a transcript under `.claude` is a stronger signal than the presence of a key both hosts may carry; or give step 1 a Claude-Code-only key that `SessionStart` actually has. Either is a change to §4.3's rule and to the count recorded beside it, which would have to be re-derived over a corpus that includes the two missing event names. Gate M7 is unaffected and that is checked, not assumed: it reads `UserPromptSubmit` only |
