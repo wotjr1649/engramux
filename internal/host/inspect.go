@@ -90,9 +90,14 @@ func commandsIn(entries jsontext.Value) []string {
 //   - [forwardSlashes] rewrites the separator on the way in, so the file holds
 //     a path spelled differently from the one a caller computes with
 //     filepath.Join.
-//   - Codex takes its command as one string rather than an argument vector, so
-//     [CodexEntry] quotes the path inside the value and the quotes come back
-//     out with it.
+//   - A Codex entry written before 2026-09-05 carries the path wrapped in
+//     quotes inside the value, and the quotes come back out with it. That
+//     spelling is the defect backlog 50 turned out to be and [CodexEntry] no
+//     longer writes it - but it is still in the file on every machine that has
+//     not re-run the installer, and reading it as "points somewhere else" would
+//     make `doctor` red on all of them at once. The trim is therefore an
+//     upgrade path rather than dead code, and
+//     TestAnEntryFromBeforeTheQuotingFixStillReadsAsWired is what says so.
 //   - Windows paths are case-insensitive, and the two spellings that reach here
 //     come from different places - one from an installer's filepath.Join, one
 //     out of a file a person may have edited.
