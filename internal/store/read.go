@@ -98,8 +98,9 @@ type Session struct {
 }
 
 // Sessions returns up to limit of a project's sessions, newest first, or of
-// every project's when projectID is empty (backlog 47). That is
-// [Search]'s meaning for an empty project id, and this reads it the same way.
+// every project's when projectID is empty (backlog 47). An empty project id
+// already meant every project to internal/search, and this reads it the same
+// way - spec 5.9 is where the two are one rule.
 //
 // The order is created_at descending, then id descending. The tiebreak is not
 // decoration: created_at is milliseconds and the service stamps every row of one

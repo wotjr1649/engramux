@@ -23,9 +23,12 @@ const excerptRunes = 240
 // word (backlog 48). Beyond this there is no word to be inside: a UUID, a
 // Windows path, a base64 run and a language that does not space its words all
 // look the same to a space-separated rule, and moving anyway would give runes
-// back for nothing. 32 is an eighth of the window, which is longer than any
-// English word and shorter than the shortest thing this corpus is full of -
-// events.id alone is 36 runes.
+// back for nothing.
+//
+// 32 sits between the two things it has to separate: longer than an ordinary
+// word, and shorter than the runs this corpus is full of - events.id alone is
+// 36 runes. It is 13% of the window, so an excerpt that gives back the most it
+// can at both edges still carries 176 of its 240 runes.
 const excerptAlign = 32
 
 // excerpt is what a hit shows of the event it matched: a window of the payload's
@@ -97,10 +100,11 @@ func excerptText(text string, tokens []string) string {
 	// landed in - `lUse`, out of a `PreToolUse`, is the observation the row
 	// was opened on.
 	//
-	// Neither edge can move onto the match. The match is at least
-	// excerptRunes/2 from each edge whenever the window was centred on it at
-	// all, and excerptAlign is a quarter of that; where the clamp moved the
-	// window instead, it moved it *away* from the edge the match is near.
+	// The match survives both moves. Where the window was centred on it, it
+	// begins excerptRunes/2 runes inside each edge and an edge moves at most
+	// excerptAlign, so 88 of those 120 are left. Where the clamp applied
+	// instead, the edge it clamped to is an end of the text - and an end of
+	// the text is never a cut, so that edge does not move at all.
 	if i := alignForward(runes, start); i >= 0 && i < end {
 		start = i
 	}
