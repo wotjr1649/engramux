@@ -106,8 +106,17 @@ func commandsIn(entries jsontext.Value) []string {
 // expansion, no relative path. Both sides are absolute paths this product
 // wrote, and a spelling neither of those produces reads as "points somewhere
 // else", which sends the user to `install --apply` rather than to silence.
+//   - A relay path with a space in it is written in the spelling [spaceFree]
+//     answers, so the file holds a path that is not the one a caller computes
+//     with filepath.Join at all. The second comparison is that same function
+//     and not a second rule: the writer and the reader agree because they are
+//     one line apart. It costs nothing on a path without a space, which is
+//     where [spaceFree] returns before it touches the disk.
 func PointsAt(command, relay string) bool {
-	return normalizeCommand(command) == normalizeCommand(relay)
+	if normalizeCommand(command) == normalizeCommand(relay) {
+		return true
+	}
+	return normalizeCommand(command) == normalizeCommand(spaceFree(relay))
 }
 
 func normalizeCommand(v string) string {
