@@ -116,15 +116,34 @@ func ClaudeEntry(name, relay string) jsontext.Value {
 // CodexEntry is the entry installed for one event in a Codex configuration.
 //
 // Two differences from Claude Code's, both spec 4.2's. Codex takes
-// commandWindows as a single string rather than an argument vector, so the path
-// is quoted inside the value. And `command` is set to the same string rather
-// than left out, so the entry is not Windows-only by accident on a host that
-// reads the portable key.
+// commandWindows as a single string rather than an argument vector. And
+// `command` is set to the same string rather than left out, so the entry is not
+// Windows-only by accident on a host that reads the portable key.
+//
+// # The path carries no quotes of its own, and that is measured
+//
+// Until 2026-09-05 it did: the value was the path wrapped in quotes, so the
+// whole command line was one quoted token from its first character. **Codex did
+// not run it. It echoed it** - the path came back as the hook's own stdout,
+// which is how it was found, because this relay writes nothing on stdout on any
+// event (spec 4.5) and something else had to have produced that line. Every
+// Codex hook reported `completed` while nothing ran, no event was captured in
+// nine days, and `doctor` answered `11 of 11 events point at the installed
+// relay` throughout, because it read the file this product had written.
+// Removing the quotes delivered a `codex UserPromptSubmit` on the first prompt.
+//
+// # What this spelling has not been measured on
+//
+// A relay path containing a space, which is what the quotes would have been
+// for. `%LOCALAPPDATA%` carries the Windows account name, so it is reachable -
+// and there is no machine here with one. It is backlog 51, open, and a fix for
+// it must not be a quote put back without a measurement: that is the spelling
+// this comment exists to record as broken.
 func CodexEntry(name, relay string) jsontext.Value {
-	quoted := quote(`"` + forwardSlashes(relay) + `"`)
+	command := quote(forwardSlashes(relay))
 	return buildEntry(name, `"type":"command",`+
-		`"command":`+quoted+`,`+
-		`"commandWindows":`+quoted+`,`+
+		`"command":`+command+`,`+
+		`"commandWindows":`+command+`,`+
 		`"timeout":`+strconv.Itoa(CodexTimeout(name))+`,`+
 		`"statusMessage":"engramux capture"`)
 }
