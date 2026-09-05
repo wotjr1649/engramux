@@ -24,7 +24,8 @@ like from the inside; **do not act on it** — its §2 and the first half of its
 
 | | |
 |---|---|
-| `main` | Session 17's three commits on top of `65a76ba`: the brief it was handed, the record correction, and the doctor guard merged `--no-ff`. `origin` is public |
+| `main` | Session 17 left four commits and one merge on top of `65a76ba`: the brief it was handed, the record correction, the doctor guard on `backlog-50-doctor-reports-what-arrived` merged `--no-ff`, and this brief. **Not pushed.** `origin` is public |
+| Installed | Rebuilt from `dist/` and reinstalled through `scripts/reinstall.sh` after the merge, so the running service sends the per-host breakdown and `doctor` reports it. Before that it answered `unknown`, which is the branch that says a service predates the field rather than reading its silence as zero |
 | Checks | Suite 21 packages exit 0, pinned linter `0 issues.` exit 0, `scripts/race.sh` 21 packages and no data race — in that order and not concurrently |
 | Gates | M1–M6, M9, M10 pass. **M7 is still un-run**: `prompts.tsv` is 150 of 150 `TODO` and `blocks.tsv` does not exist |
 | Publication | 1, 2 and 4 closed. **3 stays open** — Defender never fired on the clean profile, so nobody walked the exclusion procedure |
