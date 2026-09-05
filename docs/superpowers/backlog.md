@@ -248,9 +248,36 @@ in `internal/service` and `TestSessionsScopeDefaultsToEveryProject` in `cmd/engr
 it now — the first over the handler, the second over the argument, because a handler that answers
 corpus-wide is not the same claim as a command that asks corpus-wide.
 
-| # | Where | What |
-|---|---|---|
-| 48 | `internal/search`'s ranking, and what a first run returns | **A new user's first search returns the product's own machinery, and it is not a small effect.** The row was filed on one observation - six hits for one probe word on a fresh corpus, of which four were hook plumbing including the `PreToolUse` and `PostToolUse` of the search call that was looking for the word. **Measured 2026-09-06 over the 901-document corpus, memory spec 5's M11 non-vacuity arm: 82.2% of documents carry neither a prompt nor an assistant message, and a human-text document is outside the top ten for 64.7% of prompts and 45.3% of replies - with the top ten *entirely* plumbing in 11 of those 11 prompt cases and 58 of those 63 reply cases.** The display half is closed: the excerpt began mid-word because the window was aligned to nothing, and both edges now move to a word boundary; backlog 36 landed beside it, because they are the title and the body of the same hit. What is left is the weight. **The arm licenses building the rest of the gate and licenses no weight**: it also measured the exact ceiling of one, 41.2% and 42.4% of queries moving from invisible to visible, and the trade against M4's three classes - whose targets are the documents a down-weight buries - is unmeasured. A search for a file name may well want the tool call that edited it rather than the prompt that mentioned it. Spec M11 carries the figures, the pre-registered bar, the field rule and what the arm does not say; none of it is repeated here |
+**48 closed on 2026-09-06**, on two branches merged `--no-ff`, and the ranking half closed on a
+measurement rather than on a change. The display half closed the day before, beside backlog 36 -
+*Raised by Step 3's first live install* carries it, because the title and the excerpt were one piece
+of work.
+
+**The complaint is real and larger than the row knew.** Memory spec 5's M11, over the 901-document
+corpus: 82.2% of documents carry neither a prompt nor an assistant message, and a human-text
+document is outside the top ten for **64.7% of prompts and 45.3% of replies** searched by their own
+most distinctive word - with the top ten *entirely* plumbing in 11 of those 11 prompt cases and 58
+of those 63 reply cases. The row was filed on one observation of six hits; the corpus says the shape
+holds. A perfect down-weight would move 41.2% and 42.4% of queries from invisible to visible, which
+is the exact ceiling and was computed without choosing a weight.
+
+**And no weight ships.** The gate swept 0, 1, 2, 3, 4, 5, 20 and 100 over five classes - two gain,
+and M4's three unchanged as the harm arm, whose targets are exactly what a weight buries. The
+condition, registered before the gate existed, was: improves recall@10 in a gain class, regresses it
+in none of the five. **`a touched path` loses one document of 25 at weight 1 and never recovers**, so
+nothing in the sweep qualifies - and weight 5 would have bought 31 replies of 139 for that one
+document. A supplementary run over every candidate rather than 25 confirmed the single document was
+representative: the harm is monotone and reaches all three harm classes by weight 5.
+
+**What that means, and it is the useful part.** The machinery is not in the way by mistake. The
+document that ran the command genuinely contains the path, so lifting the prompt above it costs the
+command line its own place. A uniform event-class weight is not the instrument for this. What might
+be is a signal separating "this document is *about* the query" from "this document *contains* it",
+which is a retrieval question and not a re-weighting one, and which this corpus cannot answer today.
+That is a new question rather than this row, so this row closes rather than being reworded into it.
+
+`TestGateM11PlumbingRarelyBuriesTheAnswer` and `TestGateM11TheWeightEarnsItsPlace` in
+`internal/search` own both halves, each with every figure pinned rather than only its verdict.
 
 ## Raised by closing 50, 2026-09-05
 

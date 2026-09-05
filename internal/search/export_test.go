@@ -38,5 +38,26 @@ var (
 // off, so no reply anybody receives was ranked by a path the gate did not
 // measure.
 func SearchUnboosted(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match) ([]Hit, int64, error) {
-	return searchWith(ctx, db, text, projectID, limit, false, m)
+	return searchWith(ctx, db, text, projectID, limit, false, 0, m)
 }
+
+// SearchAtHumanWeight is [Search] with gate M11's human-text weight made
+// explicit, so that the gate can run one corpus at every weight of its sweep.
+//
+// The derived-field boost is left on, which is what makes the sweep's weight-0
+// column [Search]'s own answer rather than a second ranking that happens to
+// agree with it - and it is why the gate's baseline can be pinned against
+// figures M4 and M11's non-vacuity arm measured through [Search] itself.
+//
+// It is deliberately not a flag on the exported surface. Nothing a caller of
+// this package can do turns this term on, so no reply anybody receives was
+// ranked by a weight the gate has not licensed.
+func SearchAtHumanWeight(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match, human float64) ([]Hit, int64, error) {
+	return searchWith(ctx, db, text, projectID, limit, true, human, m)
+}
+
+// HumanTextEvents is the closed set [orderExpr] tests `events.event_name`
+// against, reachable from the gate so that it can assert the set agrees with the
+// payload-key rule it classifies documents by. Without it the gate would be
+// measuring one rule and the ranking obeying another, and nothing would say so.
+var HumanTextEvents = humanTextEvents
