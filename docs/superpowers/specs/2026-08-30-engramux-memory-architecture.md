@@ -1761,6 +1761,52 @@ of the full gate rather than a second opinion about the shipped ranking. Pointin
 that has the weight in it would make the figures above fall and the pin fail, and the failure would
 read as the corpus having moved when what moved is the thing the row asked for.
 
+**What the gate itself measures, pre-registered 2026-09-06 before it was built.**
+
+Five classes in one run over one corpus, at each of eight weights — **0, 1, 2, 3, 4, 5, 20 and
+100**, with 0 the baseline the rest are read against. The sweep is M4's, at M4's numbers, because
+the two questions have the same shape and a second set of weights would be a second thing to
+explain. Every class's query is a single token, so `MatchAll` and `MatchAny` build the identical
+expression and the gate does not have to pick one.
+
+*The gain arm* is M11's two classes, measured as recall@10 and MRR. Recall@10 is one minus the
+`buried` share above, so the baseline column is already known and the gate must reproduce it:
+**0.353 and 0.547**.
+
+*The harm arm* is M4's three classes unchanged — a command line, a touched path, an error message,
+over `m4Sample`'s same 25 per class — and it is the point of the gate rather than a formality. Their
+targets are exactly the documents the weight pushes down. A weight that lifts a prompt by burying
+the document that actually ran the command has moved the defect rather than fixed it. **At weight 0
+the harm arm must reproduce M4's own recorded recall@10 with the boost on — 0.680, 0.520 and
+0.760** — and a run that does not has a defect in the new gate rather than a finding.
+
+*What the harm arm is expected to show, written down so that the result can contradict it.* A
+uniform weight applied to every plumbing document does not reorder plumbing among itself, so a harm
+class can only lose rank to human-text documents that were below it — and a command line's longest
+token rarely appears in a prompt. Small harm is therefore the expectation. If it is large the
+expectation was wrong, and nothing in this paragraph makes that outcome less likely to be reported.
+
+*The condition, and it can end the ranking half with nothing built.* A weight ships only if, against
+weight 0, **recall@10 improves in at least one of the two gain classes and regresses in none of the
+five.** Recall is gated on its own and not traded against MRR, which is M4's rule and is here for
+M4's reason: a ranking change that loses a document it used to find is a defect whatever the
+averages say. If no weight in the sweep meets it, the down-weight is not built, backlog 48's ranking
+half closes on the table, and what comes out is a test-only seam rather than a shipped feature.
+Among the weights that meet it the smallest that reaches the plateau is the one taken, which is how
+`boostPerDerivedToken` reached 5.
+
+*The weight does not reach the injector, and that is a decision rather than an omission.*
+`internal/inject` calls `search.Search` too, so a weight on that function alone would change what
+gets injected — and M7 is un-run against a frozen snapshot, so it would move the treatment M7 has
+yet to measure. It is also wrong on the merits: the injector's reader is a model asking what
+happened, and a command line or an error message is often exactly the answer. The two callers
+already need different *matching* and say so on `search.Match`; ranking is the same kind of
+divergence and gets the same kind of seam — explicit at the call site, never inherited by default.
+
+*Nothing ships from the gate's own commit.* The sweep runs against a seam that compiles into the
+test binary and into nothing else, on `SearchUnboosted`'s precedent, and `Search` keeps today's
+ranking until the table licenses otherwise.
+
 **A weight needs no migration, and that is measured rather than assumed.** The field rule above is
 the right rule for the *gate* — it says what the row means and it does not go stale when a host
 renames an event. It is the wrong rule for the *ranking*, because `prompt` and
