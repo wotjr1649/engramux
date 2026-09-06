@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/wotjr1649/engramux/internal/memory"
@@ -543,15 +544,92 @@ func m8FixtureHeader(pairs, labels int) []string {
 	}
 }
 
-// m8Field makes one text safe to put in a TSV cell: masked, flattened onto one
-// line, and trimmed. [m3TrimToWord] is the trim gate M3's candidates use, so a
-// line that has a word boundary to cut at is cut the same way in both fixtures -
-// but it answers "" for a run with no space in it, and half of what this fixture
-// carries is a path or a single long command. So a text that survives masking
-// and loses everything to the trim falls back to a rune-safe cut rather than to
-// an empty cell the labeller cannot judge.
+// TestM8FieldIsSomethingAPersonCanLabel holds the three ways a fixture cell goes
+// wrong: a byte that makes the file unprintable, a tab that invents a column,
+// and a trim that either empties the cell or cuts a rune in half.
+func TestM8FieldIsSomethingAPersonCanLabel(t *testing.T) {
+	t.Run("nothing unprintable survives", func(t *testing.T) {
+		// The residue is the point of the assertion rather than a
+		// tolerated wart: the rule removes the ESC *byte*, so an ANSI
+		// sequence loses what made it a sequence and leaves `[31m`
+		// standing as ordinary text. That is printable, carries no tab
+		// and cannot make grep call the file binary, which is all this
+		// cell has to be - stripping the sequence would be a parser for
+		// a cosmetic gain in a file 94 rows long.
+		got := m8Field("go build\x00 ./cmd\x1b[31m/x\x07")
+		if want := "go build ./cmd [31m/x"; got != want {
+			t.Errorf("m8Field = %q, want %q", got, want)
+		}
+		for _, r := range got {
+			if !unicode.IsPrint(r) {
+				t.Errorf("m8Field kept the unprintable %U", r)
+			}
+		}
+	})
+	t.Run("a tab or a newline cannot invent a column", func(t *testing.T) {
+		got := m8Field("go\ttest\n-p 1\r\n./...")
+		if want := "go test -p 1 ./..."; got != want {
+			t.Errorf("m8Field = %q, want %q", got, want)
+		}
+		if strings.ContainsAny(got, "\t\n\r") {
+			t.Errorf("m8Field kept a TSV separator in %q", got)
+		}
+	})
+	t.Run("a run with no space is cut at a rune boundary, not to nothing", func(t *testing.T) {
+		// Hangul is three bytes a syllable, so a byte cut lands
+		// mid-rune two times in three.
+		got := m8Field(strings.Repeat("코퍼스", 100))
+		if got == "" {
+			t.Fatal("m8Field emptied a cell the labeller has to read")
+		}
+		if len(got) > m8MaxField {
+			t.Errorf("m8Field returned %d bytes, cap %d", len(got), m8MaxField)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("m8Field cut a rune in half")
+		}
+	})
+}
+
+// m8Field makes one text safe to put in a TSV cell: masked, stripped of what is
+// not printable, flattened onto one line, and trimmed.
+//
+// # strings.Fields is not enough, and the corpus is what says so
+//
+// A tool's output is arbitrary bytes and this corpus holds some: measured
+// 2026-09-06, the first fixture written without this carried **63 control
+// characters over two of its 281 rows, 36 of them NUL**. Fields splits on
+// Unicode whitespace, and NUL is not whitespace - so it survived, the file was
+// valid UTF-8 with embedded NULs, and grep called the whole thing a binary file
+// and answered `Binary file ... matches` instead of the rows. `grep -c` kept
+// counting correctly, so the two disagreed and the fixture read as malformed
+// when it was the tool refusing to print it. A file a person labels by hand and
+// a parser reads by tab may not contain either.
+//
+// So anything [unicode.IsPrint] rejects becomes a space *before* Fields, which
+// then collapses the run - one rule covering NUL, a stray carriage return and
+// the ESC of an ANSI sequence alike, rather than a list of the ones this corpus
+// happened to hold. It removes the ESC and not the sequence: `[31m` is left
+// standing as printable text, which is not pretty and is all this cell has to
+// be. TestM8FieldIsSomethingAPersonCanLabel asserts that residue by value so
+// that a later reader knows it was decided rather than missed.
+//
+// # The trim
+//
+// [m3TrimToWord] is the trim gate M3's candidates use, so a line with a word
+// boundary to cut at is cut the same way in both fixtures - but it answers "" for
+// a run with no space in it, and half of what this fixture carries is a path or a
+// single long command. So a text that survives masking and loses everything to
+// the trim falls back to a rune-safe cut rather than to an empty cell the
+// labeller cannot judge.
 func m8Field(s string) string {
-	flat := strings.Join(strings.Fields(secret.MaskString(s)), " ")
+	printable := strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return ' '
+	}, secret.MaskString(s))
+	flat := strings.Join(strings.Fields(printable), " ")
 	if trimmed := m3TrimToWord(flat, m8MaxField); trimmed != "" || flat == "" {
 		return trimmed
 	}
