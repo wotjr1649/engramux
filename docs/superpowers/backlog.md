@@ -338,6 +338,24 @@ because nothing had asked the host.
 
 ## Raised by closing 48, 2026-09-06
 
+**One of 53's candidates closed on 2026-09-06, and it closed on a measurement rather than an
+argument.** The row names a second FTS column over the human-authored leaves — rank on *where* the
+match fell rather than on what event the document is. Gate M12 asked whether that is a different
+instrument from the one M11 had just rejected, because 82.2% of the corpus has no human half and a
+column weight is a uniform multiplier over all of it. **It is different, and it is better, and it is
+useless here.** Over 534 command lines it recovers eleven of the sixteen M11 lost, with 310 of 530 of
+the documents lifted past them matching outside their own human text. Over 120 touched paths it
+recovers none, and **0 of 130** of the documents above them are machine-only: a person typed that
+file name into a prompt, or a model wrote it back, so there is nothing spurious there to demote. The
+class that vetoed M11 is exactly the class the signal cannot reach.
+
+**What generalises out of it is the sentence the two gates now force together.** A file name is the
+one thing a person and a tool both write, and when a prompt contains a path the prompt genuinely is
+about that path — so no rule that separates *human text from machine text* can separate *a document
+that is about a path from another document that is also about it*. That is a constraint on every
+remaining candidate and not only on the one it closed. Memory spec 5's M12 carries both tables and
+the subset argument; nothing is repeated here.
+
 | # | Where | What |
 |---|---|---|
-| 53 | `internal/search`'s ranking, and what the corpus cannot tell it | **A search cannot tell a document that is *about* the query from one that merely *contains* it, and gate M11 is what established that this is the actual problem rather than a weighting one.** Measured over the 901-document corpus: a person's prompt is outside the top ten for its own most distinctive word 64.7% of the time, and every one of those sits under a top ten of pure machinery - so backlog 48's first-run complaint is real and larger than the six hits it was filed on. But the machinery is not there by mistake. The document that ran the command genuinely contains the path, which is why a uniform event-class down-weight fails M11 at every weight in the sweep: it buys the prompt its place by taking the command line's. **What is missing is a signal, not a coefficient**, and naming one is the work: how much of a document the query accounts for, where in it the match falls, whether the match is in text a person wrote or in a field a tool filled. None of those is in the index today - `events_fts` holds string leaves and nothing about their provenance - so this is a schema and indexing question before it is a ranking one, and it is a genuinely open one rather than a deferred fix. Memory spec 5's M11 carries the two arms' figures and the delete condition that closed 48; nothing is repeated here. **Not blocking, and no test owns it because there is nothing yet to hold to** |
+| 53 | `internal/search`'s ranking, and what the corpus cannot tell it | **A search cannot tell a document that is *about* the query from one that merely *contains* it, and gate M11 is what established that this is the actual problem rather than a weighting one.** Measured over the 901-document corpus: a person's prompt is outside the top ten for its own most distinctive word 64.7% of the time, and every one of those sits under a top ten of pure machinery - so backlog 48's first-run complaint is real and larger than the six hits it was filed on. But the machinery is not there by mistake. The document that ran the command genuinely contains the path, which is why a uniform event-class down-weight fails M11 at every weight in the sweep: it buys the prompt its place by taking the command line's. **What is missing is a signal, not a coefficient**, and naming one is the work: how much of a document the query accounts for, where in it the match falls, whether the match is in text a person wrote or in a field a tool filled. None of those is in the index today - `events_fts` holds string leaves and nothing about their provenance - so this is a schema and indexing question before it is a ranking one, and it is a genuinely open one rather than a deferred fix. Memory spec 5's M11 carries the two arms' figures and the delete condition that closed 48; nothing is repeated here. **Not blocking. One candidate is now closed and one test owns that much** - `TestGateM12TheSignalIsWhereTheMatchFell` in `internal/search`, and the paragraphs above this table say what it removed. What is left of the row is the two candidates nothing has measured: how much of a document the query accounts for, and reserving places in the visible list rather than reordering it. Neither has a test, because there is still nothing to hold to |
