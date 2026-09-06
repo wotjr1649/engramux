@@ -177,6 +177,8 @@ process, which the Windows thesis forbids, or an API key and an outbound call, w
 that verbatim retrieval cannot reach at all — the shape is "why did we choose X", scattered over
 many sessions with no literal span to match — then summarisation is back on the table. Even then the
 first move is **M-2**, reading a summary someone else already paid for, not writing one.
+**Checked 2026-09-06 and not met**: M8's P1 half puts verbatim retrieval at 1.000 in all three
+classes, so there is no class of question it cannot reach — see *P1's half, measured 2026-09-06*.
 
 ### Why the hosts' own memory gets indexed (M-2)
 
@@ -1033,10 +1035,10 @@ is not the installed 227 MB one, which no test may open (I-07).
 | **M9** | 16 of 16 fenced, **0** bodies carrying their own nonce | — |
 | **M10** | no injection over budget, on the injector's own clock; **32** runs across two shortened budgets did exceed and all emitted zero bytes; 16 of 16 zero bytes under a budget behind the clock | worst **29.19 ms**, p95 **29.19 ms**, median **3.11 ms** against **500 ms**; **0 of 16** abstained on time |
 
-**M8 is not reported and nothing here should be read as it.** M8 is native memory's coverage of P1
-and P5 against verbatim retrieval's, and it needs the labelled questions of both — P5's fixture does
-not exist at all. What the run reports instead, under its own name, is where an injection's content
-came from.
+**M8 is not in this table and nothing here should be read as it.** M8 is native memory's coverage of
+P1 and P5 against verbatim retrieval's; **P1's half ran on 2026-09-06 and is reported in *What M8
+will measure*** below, and P5's waits on the labels its fixture was written for the same day. What
+the run above reports instead, under its own name, is where an injection's content came from.
 
 **The one over-budget reading that exists is the race run's, and it is the abstention path working.**
 `./scripts/race.sh` puts the same gate over the same corpus at a median of **124.13 ms** against
@@ -1644,7 +1646,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
-| **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"**. **Un-run, and its rule is pre-registered** — *What M8 will measure* below carries what counts as answering, why P1 needs no label at all, why the verbatim side of P1 is near-tautological and reported anyway, and the one thing left open on purpose |
+| **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"**. **P1 ran 2026-09-06 and P5 is un-run**, and the rule for both was pre-registered before either. P1 needs no label anywhere: over M4's own classes and sample, verbatim answers **25 of 25 in all three** and native answers **4, 1 and 11 of 25** — 0.160 on a command line, 0.040 on a touched path, 0.440 on an error message. The section below carries the rule, the two things the run added to it, and the one thing left open on purpose, which is the verdict |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
 | **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
@@ -2049,12 +2051,12 @@ arrived and changed nothing.
 
 ### What M8 will measure, pre-registered before a number exists (M-2, M-4)
 
-`[unverified]` throughout — **no figure exists for M8 and nothing below is one.** This section is the
-rule, written down on 2026-09-06 while the P5 fixture was still empty, and it is registered for the
-reason M11's condition and M12's were: M8 is *reported* rather than gated, so there is no bar anyone
-could lower — which leaves its **rule** as the thing that gets tuned to the answer once a figure is
-visible. §1's publication sentence hangs on this pair of numbers, which makes that the expensive
-place for it to happen.
+**P1 ran 2026-09-06 and its figures are below; P5 is un-run and its fixture carries no label yet.**
+The rule was written down before either, while the P5 fixture was still empty, and it is registered
+for the reason M11's condition and M12's were: M8 is *reported* rather than gated, so there is no bar
+anyone could lower — which leaves its **rule** as the thing that gets tuned to the answer once a
+figure is visible. §1's publication sentence hangs on this pair of numbers, which makes that the
+expensive place for it to happen.
 
 **The rule is one sentence and it is the same one for both indexes and both capabilities.** An index
 **answers** a question when its own top ten for that question carries text containing the question's
@@ -2108,6 +2110,49 @@ judgement being asked for is *"did this resolve that"* and not *"was the ranking
 and it stays with the owner rather than being fixed by a session that has not seen one. This is the
 single place §7's own warning about a rule tuned to its answer still applies, and it is written down
 so that it is ruled on rather than inherited.
+
+#### P1's half, measured 2026-09-06
+
+`TestGateM8NativeCoverageOfP1` in `internal/search`, over the **901** documents `.capture/fixtures-raw`'s
+902 captures leave once §7.5's self-test is excluded, with this machine's **303** native memory items
+indexed beside them, at k = 10, over gate M4's own
+three classes and its own 25-per-class sample. **This is the first figure ever produced for §1's
+publication gate, and there is no label anywhere in it.**
+
+| Class | Candidates | Verbatim answers | Native answers |
+|---|---|---|---|
+| a command line | 534 | 25 of 25, **1.000** | 4 of 25, **0.160** |
+| a touched path | 120 | 25 of 25, **1.000** | 1 of 25, **0.040** |
+| an error message | 96 | 25 of 25, **1.000** | 11 of 25, **0.440** |
+
+**The registered prediction held exactly rather than approximately.** The verbatim side was written
+down as *near* 1.00 before the run because a prefix-phrase match already implies containment; it came
+out **1.000 in all three classes**. So the row is reported and it is not the interesting one, and M4's
+known-item recall@10 beside it — 0.680, 0.520 and 0.760 — remains what says how hard these questions
+are for retrieval that has to return *the* document.
+
+**What the run adds to the rule, and it is stronger than what was registered.** Of the 75 sampled
+queries, **18 returned any native item at all**, and **16 of those 18 carried the literal**. So the
+native side is near-tautological *conditional on matching* in the same way the verbatim side is
+unconditionally: when the memory index matches, it almost always matches because the literal is
+there. What M8's P1 pair therefore measures is **what each index holds**, not how either ranks — the
+event index holds every literal by construction and native memory holds between 4% and 44% of them.
+That is the honest reading and it was not predicted; the ranking question stays M4's.
+
+**The spread across the three classes is the shape §3 predicted.** Native covers error messages best
+and touched paths worst, and the gap is 11× — a person writing a note records what went wrong in
+prose they wrote, and does not record which file a tool opened. *"Those three classes are the ones
+native declines to store"* is P1's own sentence and this is the first measurement of how much it
+declines.
+
+**M-1's reopen condition is not met and this run is what checks it.** M-1 says to reopen the
+summariser *"if §5's M8 shows a class of question that verbatim retrieval cannot reach at all"*.
+Verbatim reaches all three classes at 1.000. **The summariser stays closed**, now for a second reason
+independent of the one rev.11 recorded.
+
+**P5 is un-run.** Its fixture was written the same day by `TestWriteM8Pairs` — **94 failures anchored
+of 901 documents, 281 candidate rows**, every label `TODO`. The population figures registered above
+are that run's. Nothing about P5 is reported until those labels exist, and they are the owner's.
 
 ---
 
