@@ -119,7 +119,7 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, 
 // [humanTextEvents], which is a property of the document - and a non-nil slice
 // replaces it with those exact event ids. A non-nil empty slice therefore lifts
 // nothing, which is not the same thing as nil and is what
-// [TestAnEmptyHumanIDSetLiftsNothing] holds. See [orderExpr] for why an id set
+// [TestTheHumanIDSetReachesTheStatement] holds. See [orderExpr] for why an id set
 // is a measuring instrument and can never be a shipped one.
 //
 // Parameters rather than package variables, because a variable a test sets is a
