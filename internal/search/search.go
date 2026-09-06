@@ -100,7 +100,7 @@ type Hit struct {
 // it costs nothing the ORDER BY was not already paying: ranking needs every
 // matching row in hand before the first one can be returned.
 func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match) (hits []Hit, total int64, err error) {
-	return searchWith(ctx, db, text, projectID, limit, true, 0, m)
+	return searchWith(ctx, db, text, projectID, limit, true, 0, nil, m)
 }
 
 // searchWith is [Search] with both of its ranking terms made explicit, so that a
@@ -114,17 +114,25 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, 
 // 0**, so nothing a caller of this package receives is ranked by a term the
 // gate has not licensed yet.
 //
+// humanIDs is gate M12's, and it decides what the human term keys on rather than
+// how much it is worth. **nil is the shipped rule** - the closed event-name set
+// [humanTextEvents], which is a property of the document - and a non-nil slice
+// replaces it with those exact event ids. A non-nil empty slice therefore lifts
+// nothing, which is not the same thing as nil and is what
+// [TestAnEmptyHumanIDSetLiftsNothing] holds. See [orderExpr] for why an id set
+// is a measuring instrument and can never be a shipped one.
+//
 // Parameters rather than package variables, because a variable a test sets is a
 // variable two parallel tests fight over, and because "the production path is
 // the one with the constant written into it" is a property worth having at the
 // call site rather than in a comment.
-func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool, human float64, m Match) (hits []Hit, total int64, err error) {
+func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit int, boost bool, human float64, humanIDs []string, m Match) (hits []Hit, total int64, err error) {
 	tokens, err := queryTokens(text)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	query, args := matchQuery(tokens, projectID, limit, boost, human, m)
+	query, args := matchQuery(tokens, projectID, limit, boost, human, humanIDs, m)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search: match: %w", err)
@@ -215,7 +223,7 @@ func searchWith(ctx context.Context, db *sql.DB, text, projectID string, limit i
 // a subquery's ORDER BY decides which rows the LIMIT keeps and not what order
 // they arrive in. `rank` is not available outside the query holding the MATCH
 // either, which is the same reason.
-func matchQuery(tokens []string, projectID string, limit int, boost bool, human float64, m Match) (string, []any) {
+func matchQuery(tokens []string, projectID string, limit int, boost bool, human float64, humanIDs []string, m Match) (string, []any) {
 	const (
 		inner = `
 		SELECT events_fts.rowid AS rid, count(*) OVER () AS total, `
@@ -225,7 +233,7 @@ func matchQuery(tokens []string, projectID string, limit int, boost bool, human 
 		WHERE events_fts MATCH ?`
 	)
 
-	score, scoreArgs := orderExpr(tokens, boost, human)
+	score, scoreArgs := orderExpr(tokens, boost, human, humanIDs)
 	// The score's own arguments come first: it is in the SELECT list, which
 	// SQLite binds before the WHERE below it.
 	args := append([]any{}, scoreArgs...)
@@ -324,7 +332,20 @@ const boostPerDerivedToken = 5.0
 // [TestGateTheSearchDoesNotReadPayloadsItDoesNotReturn] exists to stop. Gate
 // M11 is what holds the two together: it classifies by the keys, ranks by the
 // column, and asserts they agree on every document in the corpus.
-func orderExpr(tokens []string, boost bool, human float64) (string, []any) {
+//
+// # An id set is a measuring instrument and can never be a shipped one
+//
+// humanIDs replaces that column test with `events.id IN (…)`, and it exists
+// because gate M12 asks a question the column cannot express: whether the term
+// should key on *where the match fell* rather than on what event the document
+// is. A second FTS column over the human-authored leaves is what would express
+// that in the index; an id set computed in Go per query is what measures
+// whether building the column is worth it, before anything is migrated. It is
+// not a candidate implementation - the set has to be known before the search
+// runs, which means reading every matching payload outside the query, which is
+// §7.1's four-second shape twice over. **nil is the shipped rule** and every
+// caller outside this package's own tests passes it.
+func orderExpr(tokens []string, boost bool, human float64, humanIDs []string) (string, []any) {
 	var b strings.Builder
 	var args []any
 	b.WriteString(`rank`)
@@ -344,8 +365,22 @@ func orderExpr(tokens []string, boost bool, human float64) (string, []any) {
 		b.WriteString(`)`)
 	}
 	if human > 0 {
-		b.WriteString(` - ? * (events.event_name IN ` + humanTextEventList + `)`)
+		b.WriteString(` - ? * (`)
 		args = append(args, human)
+		switch {
+		case humanIDs == nil:
+			b.WriteString(`events.event_name IN ` + humanTextEventList)
+		case len(humanIDs) == 0:
+			// `IN ()` is a syntax error, and a caller that
+			// classified nothing means the term lifts nothing.
+			b.WriteString(`0`)
+		default:
+			b.WriteString(`events.id IN (?` + strings.Repeat(`, ?`, len(humanIDs)-1) + `)`)
+			for _, id := range humanIDs {
+				args = append(args, id)
+			}
+		}
+		b.WriteString(`)`)
 	}
 	return b.String(), args
 }
