@@ -14,7 +14,11 @@ Read the memory spec's **What M8 will measure** — the rule, then *P1's half, m
 before anything else. It is the section session 23 wrote and it is where the numbers below live.
 Session 23's work order is superseded by this document.
 
-**Written 2026-09-06 by session 23.** A brief is a record and is not updated by a later session.
+**Written 2026-09-06 by session 23, and corrected twice by it before the hand-off.** The state row
+first named the commit before its own, and the fix for that was wrong the moment it was committed
+for the same reason — so the row now names no hash at all. A brief is a record and is not updated by
+a *later* session; this is the session that wrote it fixing its own arithmetic, and it is marked so
+nobody reads it as the other thing.
 
 ---
 
@@ -22,8 +26,8 @@ Session 23's work order is superseded by this document.
 
 | | |
 |---|---|
-| `main` | `2c188af`, tree clean. **Thirty commits are unpushed**; three are session 23's and the other twenty-seven were already ahead. `origin` is `github.com/wotjr1649/engramux` and is public |
-| The push | **Not authorised, and the owner is reviewing the diff themselves first.** Unchanged from session 23, and their answer rather than a deferral. Session 23's own three commits add 676 lines and were scanned on their own: **0 hits** for a drive-letter path, a `Users\` fragment, a SID or an email address. That is a scan of three commits and not of the thirty |
+| `main` | Tree clean. **Thirty-two commits are unpushed as of this document's own commit**; five are session 23's and the other twenty-seven were already ahead. No hash is named for the tip on purpose — a document that names its own commit is wrong the moment it is committed, and correcting it costs another commit that makes it wrong again. `git log origin/main..main` is the answer that stays true. `origin` is `github.com/wotjr1649/engramux` and is public |
+| The push | **Not authorised, and the owner is reviewing the diff themselves first.** Unchanged from session 23, and their answer rather than a deferral. Session 23's three code-and-spec commits — `8ec6ba8..2c188af`, 754 added lines — were scanned on their own: **0 hits** for a drive-letter path, a `Users\` fragment or a SID. Its documentation commits after that add prose only and carry two hits, both benign and both quoted in this row's own vocabulary: a generic `C:/Program Files/Git/…` in an AGENTS.md row that already existed, and the word `Users\` in the sentence you are reading. **That is a scan of session 23's commits and not of the thirty-two**; `git log -p origin/main..main` is the one that covers the batch, and it is the owner's to read |
 | Checks | Suite **exit 0, 21 packages**; pinned linter **`0 issues.` exit 0**; `scripts/race.sh` **exit 0, 21 packages, 0 data races** — in that order, not concurrently, all three on the final tree. The first two were run twice: once before the last commit and once after it, because a fix landed after the first pass and a check on a superseded tree is not evidence. **In the race run two packages re-ran and the rest came from the content-addressed cache** — `internal/search` at **2,110.8 s** and `internal/inject` at 94.9 s. A cached `ok` under `-race` is a result for that package's exact inputs, and nothing outside `internal/search`'s own test files changed, so the cached rows hold on this tree; they are not a fresh execution and are written down as what they are |
 | Installed | **`0.0.0-dev+60339da107a9`**, unchanged. Nothing was reinstalled and nothing needed to be: **no shipped behaviour changed this session** — every line is a test file or a document |
 | Gates | M1–M6, M9, M10 pass. M11 ran and no weight ships. M12 ran and no schema change is licensed. **M8's P1 half is reported** — §2. **M8's P5 half is un-run and its fixture now exists**, 94 failures and 281 candidate rows, every label `TODO`. **M7 is un-run** — 150 of 150 `TODO` |
