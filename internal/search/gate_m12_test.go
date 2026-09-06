@@ -320,16 +320,21 @@ func m12Measure(t *testing.T, db *sql.DB, k m12Class, docs []doc, humanText map[
 				"token of its own human text. The derivation and the classification disagree.", k.name)
 		}
 
-		base := m12Rank(t, db, c, 0, nil)
-		doc := m12Rank(t, db, c, m12Weight, nil)
-		loc := m12Rank(t, db, c, m12Weight, lifted)
-		if base >= 0 {
+		// Three searches per candidate and not four. The mechanism
+		// figure below is read off the same ranking `doc` is counted
+		// from, and running that query twice is a quarter of this gate's
+		// wall clock - which under -race is the difference between the
+		// package fitting scripts/race.sh's budget and not.
+		baseHits := m12Hits(t, db, c, 0, nil)
+		docHits := m12Hits(t, db, c, m12Weight, nil)
+		locHits := m12Hits(t, db, c, m12Weight, lifted)
+		if m12Holds(baseHits, c.id) {
 			r.base++
 		}
-		if doc >= 0 {
+		if m12Holds(docHits, c.id) {
 			r.doc++
 		}
-		if loc >= 0 {
+		if m12Holds(locHits, c.id) {
 			r.loc++
 		}
 
@@ -337,7 +342,7 @@ func m12Measure(t *testing.T, db *sql.DB, k m12Class, docs []doc, humanText map[
 		// location rule's: what M11's weight lifted into this class's
 		// visible list, and how much of it matched somewhere other than
 		// the human text it was lifted for.
-		for _, h := range m12Hits(t, db, c, m12Weight, nil) {
+		for _, h := range docHits {
 			if humanText[h.ID] == "" {
 				continue
 			}
@@ -350,11 +355,10 @@ func m12Measure(t *testing.T, db *sql.DB, k m12Class, docs []doc, humanText map[
 	return r
 }
 
-// m12Rank is the target's rank in the top [m11K], or -1 when it is not there.
-func m12Rank(t *testing.T, db *sql.DB, c m4Candidate, human float64, lifted []string) int {
-	t.Helper()
-	hits := m12Hits(t, db, c, human, lifted)
-	return slices.IndexFunc(hits, func(h search.Hit) bool { return h.ID == c.id })
+// m12Holds reports whether the target is in the top [m11K], which is what
+// recall@k counts.
+func m12Holds(hits []search.Hit, id string) bool {
+	return slices.ContainsFunc(hits, func(h search.Hit) bool { return h.ID == id })
 }
 
 // m12Hits is one search at the top [m11K], under M11's rule when lifted is nil

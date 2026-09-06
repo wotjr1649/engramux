@@ -58,5 +58,16 @@ echo "race.sh: using $cc"
 "$cc" --version | head -1
 
 # -p 1 for the same reason as an ordinary run: tests share one database file and
-# fixed pipe names. -race adds 5-15x, so the timeout is generous.
-CGO_ENABLED=1 CC="$cc" exec go test -race -p 1 -timeout 30m "$@" ./...
+# fixed pipe names.
+#
+# The timeout is per test binary and not for the run, and 30m was not generous
+# enough. Measured 2026-09-06: internal/search alone is **2521 s, or 42 minutes**
+# under -race - it is the corpus gates, which are one package's share of the tree
+# and most of its wall clock - and at 30m the package died with
+# `panic: test timed out after 30m0s` naming whichever test happened to be
+# running, which reads like that test hanging rather than like the budget. The
+# figure it replaces came from an estimate ("-race adds 5-15x") rather than from
+# a stopwatch; 90m is that measurement with room for a loaded machine, and it is
+# still a hang guard rather than a performance budget. Re-measure it when a gate
+# is added, and raise it here rather than skipping the gate.
+CGO_ENABLED=1 CC="$cc" exec go test -race -p 1 -timeout 90m "$@" ./...
