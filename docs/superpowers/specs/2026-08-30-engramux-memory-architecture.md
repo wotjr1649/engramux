@@ -1644,7 +1644,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M5** | Hard cap | The whole corpus through the injector, zero replies over the byte cap, which is **5,000 B**. The cap comes from the hosts' documented budget rather than an observed p95, and M-4 below records which host documented one and how it became bytes |
 | **M6** | Zero-byte abstention | Prompts with no relevant history emit zero bytes, **100%**. One failure fails the gate. This is the direct defence against SWE-ContextBench's free-summary regression |
 | **M7** | Precision at budget | **The precision of the excerpt blocks the injector emitted, under the 5,000 B cap. Relevant history that was not emitted is not measured** - the narrowing is recorded rather than hidden. Measured over a frozen snapshot of the installed database, from prompts drawn out of that same snapshot, with the statistic, the bar, the reported figures and three non-vacuity arms all pre-registered on 2026-09-04 before a label existed. The gate is the **relevant-byte share, strictly above 0.50**. Below threshold the feature does not ship enabled, and above it what is licensed is an owner pilot rather than a release default. *What M7 will measure* carries all of it |
-| **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"** |
+| **M8** | Native coverage, reported | For P1 and P5, how many questions native memory alone could answer against how many verbatim retrieval can. **This pair of numbers is the honest form of "native-grade or better"**. **Un-run, and its rule is pre-registered** — *What M8 will measure* below carries what counts as answering, why P1 needs no label at all, why the verbatim side of P1 is near-tautological and reported anyway, and the one thing left open on purpose |
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
 | **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
@@ -2046,6 +2046,68 @@ It stays for the reason M11's seam stayed — a measurement nothing re-runs is t
 §8 forbids — and `TestTheHumanIDSetReachesTheStatement` is what says the predicate reaches the
 statement at all, since no figure in either table could tell a term that never arrived from one that
 arrived and changed nothing.
+
+### What M8 will measure, pre-registered before a number exists (M-2, M-4)
+
+`[unverified]` throughout — **no figure exists for M8 and nothing below is one.** This section is the
+rule, written down on 2026-09-06 while the P5 fixture was still empty, and it is registered for the
+reason M11's condition and M12's were: M8 is *reported* rather than gated, so there is no bar anyone
+could lower — which leaves its **rule** as the thing that gets tuned to the answer once a figure is
+visible. §1's publication sentence hangs on this pair of numbers, which makes that the expensive
+place for it to happen.
+
+**The rule is one sentence and it is the same one for both indexes and both capabilities.** An index
+**answers** a question when its own top ten for that question carries text containing the question's
+**answer literal**. k is 10, which is M3's and M4's. The native side is searched unscoped by project,
+which is what the events side already is, so neither is given a narrower haystack than the other.
+
+**P1 needs no label anywhere, and that is the point of registering it here.** The questions are gate
+M4's own three classes over M4's own candidates and M4's own 25-per-class sample — a command line, a
+touched path, an error message, each query derived mechanically with no human judgement in the
+derivation. The answer literal is **the query itself**: P1 is exact-span recall, so the literal a
+query was cut from is the thing an answer has to carry. Native memory is read through the same
+collector gate M1 walks and gate M3 measures over. So the first number ever produced for §1's
+publication gate comes out of a run with no labelling in it.
+
+**The verbatim side of P1 is close to tautological, and that is registered rather than discovered
+afterwards.** The match expression is a prefix phrase per token, so a document that matches at all
+already carries text beginning with the query's token; verbatim's P1 coverage is therefore bounded
+below by "the query matched anything" and should be expected to read near 1.00. It is reported anyway
+— a comparison is only honest under one rule, and weakening the native side to make the pair look
+closer would be the tuning this section exists to prevent. **M4's known-item recall@10 is reported
+beside it as the figure that is not tautological**: 0.680, 0.520 and 0.760 over the three classes,
+already measured on 2026-09-04. A reader asking how hard these questions are for verbatim retrieval
+reads that row, not the coverage one.
+
+**P5 is not tautological on either side.** Its questions are the labelled failure-fix pairs of
+`.capture/m8/`. The **query** is the first failure-shaped line of the failure event's own tool
+output, truncated to the 32 whitespace-separated tokens the query bounds allow and joined with the
+OR selector — the AND returns an empty match set for a sentence, which M3 already measured and which
+would make P5 report that failure a second time under a different name. The **answer literal** is
+derived from the **labelled** fix event by M4's own token rule. So the query is the failure's text
+and the literal is the fix's, and neither index gets the answer handed to it by the match expression.
+The verbatim side additionally reports the **known-item** form — the labelled fix event's own id in
+the top ten — which is the strictest reading of P5's sentence and the number that says whether this
+product returns *the* fix rather than something that mentions it.
+
+**The population, and what leaves it.** Measured 2026-09-06 over the 901 captures of
+`.capture/fixtures-raw`: **96** carry a failure-shaped output line and **94** of those have at least
+one later event in the same session that ran or edited something. Each of the 94 is offered with its
+next **three** such events, 281 candidates over 94 decisions. A failure the owner marks as resolved
+by none of its candidates **leaves P5's population and its count is reported**, on gate M3's own
+distinction between a fixture line the gate cannot measure and a result — a recall figure over
+questions with no answer in the corpus measures the corpus, not the retrieval.
+
+**The labeller is not shown what either index returns.** That is M7's discipline and it is inherited
+before the fixture has a row: a label written with the answer visible measures the answer. The
+candidate pairs are produced by the mechanical rule above and never by a search result, so the
+judgement being asked for is *"did this resolve that"* and not *"was the ranking right"*.
+
+**What is deliberately not registered here is the verdict, and that is the owner's decision of
+2026-09-06.** M8 reports a pair of numbers; §1's *"native-grade or better"* is a reading of that pair
+and it stays with the owner rather than being fixed by a session that has not seen one. This is the
+single place §7's own warning about a rule tuned to its answer still applies, and it is written down
+so that it is ruled on rather than inherited.
 
 ---
 
