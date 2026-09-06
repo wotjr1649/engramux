@@ -1648,6 +1648,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M9** | Data fence | Every injected payload sits inside a per-injection nonce delimiter, and the delimiter never appears unescaped inside the payload. Asserted over the whole corpus, zero occurrences |
 | **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
+| **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
@@ -1885,6 +1886,166 @@ falsifiable things. Chasing a LoCoMo or LongMemEval score is explicitly out: bot
 gold-label defects, small per-category samples, and a plain full-context baseline that beats most
 published memory systems; two vendors have publicly contradicted each other's numbers on the same
 benchmark. This project already owns a better instrument in its own known-item gate.
+
+**What M12 measured, and it is one question rather than a design.** **It ran 2026-09-06, and the
+signal it asks about turns out to be real and absent exactly where it is needed.** Everything down
+to the run is what was registered before it; the table and the finding are at the end of the
+section.
+
+M11's answer was that no uniform down-weight ships, and the sentence its two arms force is that the
+machinery is not in the way by mistake: the document that ran the command genuinely contains the
+path. Backlog 53 turned that into a question — how to tell a document that is *about* the query from
+one that merely *contains* it — and named candidate signals, none of which is in the index today.
+This gate asks the smallest thing that can be asked before any of them is built, because **the first
+candidate may not be a different instrument at all.**
+
+*The candidate.* M11's term keys on the **document**: `events.event_name IN (…)`, which is the column
+form of "this document carries a prompt or a reply". It lifts a `UserPromptSubmit` whether the query
+matched the person's prompt or the `cwd` beside it. A signal that keys on **where the match fell**
+lifts only the first. In an index that is one FTS column of string leaves there is nothing to key on;
+the schema change row 53 asks about — a second column holding only the human-authored leaves, scored
+with bm25 column weights — is what would put it there.
+
+*Why it might be the same instrument, which is the whole reason for this gate.* 82.2% of the corpus
+carries no human text at all, and for those documents every match is in the machine half by
+construction, so a column weight is a uniform multiplier on their score — exactly the term M11
+rejected. The two instruments can differ **only** on the 160 documents that carry both halves, and
+only on the queries whose match falls in the machine half of one. If that set is empty, or if the
+harm M11 measured came from documents whose match was in the human half after all, then the second
+column is a second spelling of the coefficient that already failed and the schema change buys
+nothing.
+
+*What separates them, exactly.* Call a hit **machine-only** when the document carries human text and
+the query token does not occur in that text — the match is real and it is somewhere else in the
+payload. The location rule lifts a strict **subset** of what M11's document rule lifts: the
+human-text documents whose match is not machine-only.
+
+*Occurrence is a case-insensitive substring and not a token-start test, and that is the conservative
+choice rather than the accurate one.* FTS5 anchors a prefix query at a token start, so a substring
+rule counts a document as human-matched that the index would not have reached — which lifts more
+documents, which is the direction that makes this candidate **harder** to license. It also makes a
+gain class's target a member of the subset by construction rather than by measurement, since its
+query is the longest token cut out of its own human text: the token-start rule would drop a handful
+of targets out of their own subset for a reason that is about the derivation and not about the
+signal.
+
+Two consequences follow from the subset relation, and they are arithmetic rather than expectations:
+
+- A gain class's target is always lifted by both rules, so its rank under the location rule is no
+  worse than under the document rule.
+- A harm class's target is lifted by neither, **provided no harm candidate is itself a human-text
+  document**. `store.Derive` reads only `tool_input` and `tool_response`, which the three human-text
+  events do not carry, so it holds today — and the gate asserts it rather than resting on it, because
+  it is a property of a host's payload shape and not a law.
+
+**So M12 cannot come out worse than M11 in any of the five classes, and that is not the finding.**
+The finding is whether it comes out better by enough to clear M11's own condition, which M11 missed
+by one document of 25.
+
+*The arm.* M11's five classes over M11's populations, unchanged — the two gain classes over every
+candidate, the three harm classes over `m4Sample`'s 25 — measured three ways in one run over one
+corpus: weight 0, M11's document rule at weight 5, and the location rule at weight 5. Weight 5 and
+not the sweep, because 5 is where M11's gain was largest before the term begins to dominate bm25
+(20 and 100 move nothing further), and because a sweep is what the real gate runs once a column
+exists. The first two columns must reproduce M11's own table — **6, 76, 17, 13, 19** at weight 0 and
+**6, 107, 17, 12, 19** at weight 5 — and a run that does not has a defect in this gate rather than a
+finding.
+
+*The location rule is measured through the same query builder and not through a second one.* The term
+is `events.id IN (…)` over the per-query set of documents whose match is not machine-only, carried in
+on the same test-only seam `SearchAtHumanWeight` uses. **That is a stand-in for the column and not a
+proposal**: an id set computed in Go is §7.1's four-second shape and can never ship. What it measures
+faithfully is the *signal* — whether keying on where the match fell changes the answer — which is the
+only thing that decides whether the schema change is worth building.
+
+*The condition, registered before the gate exists.* **A match-location signal is licensed only if,
+against weight 0, the location rule at weight 5 improves recall@10 in at least one of the two gain
+classes and regresses it in none of the five.** That is M11's condition unchanged, over M11's classes
+and M11's populations; the only thing that moves is the predicate the term keys on. If it fails, the
+location rule is the instrument M11 already rejected and row 53 does not get a second coefficient —
+what would be licensed then is looking at row 53's other candidates, not tuning this one. If it
+passes, what is licensed is **the schema change and nothing else**: a human-text column, its index,
+and a migration. The ranking still has to be measured through a full sweep once that column exists,
+and this gate is not that sweep.
+
+*Two figures are reported beside the verdict and neither is gated on.* **`machine-only`** is the
+share of the human-text documents appearing in the harm classes' top tens whose match is machine-only,
+and it is the mechanism behind whatever the verdict turns out to be: a "no" with `machine-only` near
+zero says the two rules are the same instrument on this corpus, and a "no" with it near one says the
+signal is real and weight 5 is not where it pays. And a **supplementary run** over every harm
+candidate rather than 25 — 534, 120 and 96 — is what M11 needed to establish that its own single lost
+document was not a boundary artefact; it is here for the same reason and with the same standing: not
+pre-registered, reported, and unable to change the verdict.
+
+*Nothing here logs a query.* Two of the five classes cut theirs from a prompt or an assistant
+message, which is M11's stricter rule, and it governs the whole file.
+
+**The gate ran on 2026-09-06 and the signal is not licensed.**
+`TestGateM12TheSignalIsWhereTheMatchFell` in `internal/search`, 50 s over the 901-document corpus.
+Both anchors reproduced exactly in all five classes, so weight 0 is `Search`'s own answer and the
+weight-5 column is M11's own table: recall@10 as a count, over each class's own population.
+
+| arm | class | n | weight 0 | M11's document rule at 5 | the location rule at 5 | machine-only |
+|---|---|---|---|---|---|---|
+| gain | a prompt's own words | 17 | 6 | 6 | 6 | 17 of 41 |
+| gain | a reply's own words | 139 | 76 | 107 | **109** | 53 of 409 |
+| harm | a command line | 25 | 17 | 17 | 17 | 11 of 21 |
+| harm | a touched path | 25 | 13 | **12** | **12** | **0 of 31** |
+| harm | an error message | 25 | 19 | 19 | 19 | 4 of 17 |
+
+**The signal is real, and the last column is where to read that.** Across the five classes 85 of the
+519 human-text documents M11's weight lifted into a top ten matched somewhere other than their own
+human text — a `cwd`, a `transcript_path`, a tool field — and the location rule leaves every one of
+them where it found it. That is not nothing: it buys **two more replies of 139** at the same weight,
+and the supplementary run below is where it is much larger than that.
+
+**And it changes nothing at all in the one class that vetoed M11.** `a touched path` loses the same
+document at weight 5 under both rules, and the `machine-only` column says why: **0 of 31**. Every
+human-text document that M11's weight lifted into a touched-path query's top ten matched *inside its
+own prompt or reply*. A person typed that file name, or a model wrote it back. There is nothing
+there for a match-location signal to demote, because nothing there is spuriously matched.
+
+**The supplementary run, over every candidate rather than 25, and it is the sharper half.** Reported
+and not gated on, on M11's precedent and for M11's reason — its own verdict turned on a single
+document of 25.
+
+| class | n | weight 0 | M11's rule at 5 | the location rule at 5 | machine-only |
+|---|---|---|---|---|---|
+| a command line | 534 | 336 | 320 | **331** | 310 of 530 |
+| a touched path | 120 | 56 | 53 | **53** | **0 of 130** |
+| an error message | 96 | 79 | 77 | 77 | 20 of 100 |
+
+**Over 534 command lines the location rule recovers eleven of the sixteen M11 lost**, and 310 of 530
+of the documents lifted past them were machine-only — so on that class the two rules are plainly
+different instruments and the location one is better. **Over 120 touched paths it recovers none, and
+`machine-only` is 0 of 130.** The sampled arm's single document was not a boundary artefact and
+neither is its cause: the immunity is a property of the class, not of the sample.
+
+**What the run says, which is narrower than "no" and more useful.** The location signal and the
+event-class weight are *not* the same instrument — that was the question, and the answer is no on
+three of the five classes. But the class that vetoes M11 is exactly the class the signal cannot
+reach, because a file name is the one thing a person and a tool both write, and when a prompt
+contains a path the prompt genuinely is about that path. **A signal that separates human text from
+machine text cannot separate a document that is about a path from another document that is also
+about it.** So the condition is not met, the schema change is not licensed, and what M12 removes
+from row 53 is one candidate rather than the row.
+
+**What it leaves.** Row 53's remaining candidates are not weights and not provenance: how much of a
+document the query accounts for — a path in a two-line prompt is a larger share of it than the same
+path in a 40 KB tool output — and reserving places in the visible list rather than reordering it,
+which demotes nothing and so has no harm arm of this shape at all. Neither is measured, and the M11
+and M12 harness measures either one in an afternoon: five classes, two arms, every figure pinned.
+**The `machine-only` column is what a later run has to beat**, because it is the exact size of what a
+location signal was worth: 85 of 519 sampled, and 330 of 760 over every harm candidate.
+
+**M12 is not a sweep and the seam it added does not ship.** `Search` passes nil, which is M11's
+event-name rule at weight 0 — the ranking is exactly what it was before this gate existed. The
+`events.id IN (…)` predicate is a measuring instrument and cannot be anything else: knowing the set
+means reading every matching payload outside the query, which is §7.1's four-second shape twice over.
+It stays for the reason M11's seam stayed — a measurement nothing re-runs is the `[unverified]` claim
+§8 forbids — and `TestTheHumanIDSetReachesTheStatement` is what says the predicate reaches the
+statement at all, since no figure in either table could tell a term that never arrived from one that
+arrived and changed nothing.
 
 ---
 
