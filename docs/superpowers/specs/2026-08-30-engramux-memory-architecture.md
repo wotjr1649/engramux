@@ -1667,7 +1667,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
-| **M13** | The query's share of the document | **Un-run, and the rule is registered.** Backlog 53's third and last candidate, and the one neither M11 nor M12 has the shape of: coverage is a property of the *pair*, where an event class and a match location are properties of the document. The same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and M11's populations for the third time, weight fixed at 5 and the **threshold** swept instead, against **M11's own condition unchanged**: improve recall@10 in a gain class and regress it in none of the five. The section below carries the rule, the population it chose its ladder from, what it expects to find, and the measured reason it is not simply bm25's own length normalisation spelled twice |
+| **M13** | The query's share of the document | **Ran 2026-09-07, and it is the first of backlog 53's candidates to clear M11's condition — on the sample, and on no threshold over the full populations.** Coverage is a property of the *pair*, which is the shape neither M11 nor M12 has: the same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and populations for the third time, the weight fixed at 5 and the **threshold** swept, against **M11's own condition unchanged**. Three of five rungs clear it; at 5,000 ppm `a reply's own words` goes 76 to **92 of 139** — the **weakest** gain of the three, against M11's thirty-one and M12's thirty-three — and `a command line` **gains** one rather than holding level, which neither of the others managed. Both of those lost a touched path and this one loses none of the five, which is the whole distance between a number and a licence. The supplementary run over every harm candidate is where it stops being tidy: **not one rung regresses none of the three**, `an error message` losing five of 96 at the licensing threshold. The condition is not moved for that. What is licensed is a length column and a migration; **what is not is a shipped term**, which needs a sweep over the full populations first. The section below carries both tables |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
@@ -2068,11 +2068,11 @@ arrived and changed nothing.
 
 ### What M13 will measure, pre-registered before a number exists (M-2)
 
-**`[unverified]` throughout — nothing in this section has been run.** It is written before the gate
-exists, on M11's precedent and M12's, and the two things it fixes in advance are the rule and the
-condition. The population figures below and the two orderings in *Why it might already be there* are
-measured and are marked where they are; every recall figure this section will one day carry is
-absent on purpose.
+**It ran on 2026-09-07 and the tables are at the end of this section.** Everything down to *The
+gate ran* was registered before the gate existed, on M11's precedent and M12's, and the two things
+it fixed in advance are the rule and the condition. The population figures and the two orderings in
+*Why it might already be there* were measured before the ladder was chosen and are marked where they
+are; no recall figure existed anywhere until the run.
 
 Backlog 53 named three candidate signals for telling a document that is *about* the query from one
 that merely *contains* it. M11 rejected a weight keyed on the document. M12 asked whether a weight
@@ -2183,6 +2183,83 @@ gate is not that sweep.
 
 *Nothing here logs a query.* Two of the five classes cut theirs from a prompt or an assistant message,
 which is M11's stricter rule, and it governs the whole file: counts and figures only.
+
+**The gate ran on 2026-09-07 and three thresholds of five clear the condition.**
+`TestGateM13TheQueryShareOfTheDocument` in `internal/search`, 58 s over the 901-document corpus, six
+searches per candidate. The weight-0 column is `Search`'s own answer and reproduces M11's committed
+baseline in all five classes, which is what says the gate is measuring the arm it is comparing
+against. **This is the first of backlog 53's three candidates to clear M11's bar.**
+
+| arm | class | n | weight 0 | 1,000 | 2,000 | 5,000 | 10,000 | 20,000 | demoted at 5,000 |
+|---|---|---|---|---|---|---|---|---|---|
+| gain | a prompt's own words | 17 | 6 | 6 | 6 | 6 | 6 | 6 | 23 of 153 |
+| gain | a reply's own words | 139 | 76 | 83 | 86 | **92** | **92** | 82 | 427 of 1,136 |
+| harm | a command line | 25 | 17 | 17 | 17 | **18** | **15** | 17 | 81 of 210 |
+| harm | a touched path | 25 | 13 | **12** | 13 | 13 | **14** | 13 | 82 of 227 |
+| harm | an error message | 25 | 19 | 19 | 19 | 19 | **18** | 19 | 123 of 173 |
+
+**5,000 ppm is where it is largest, and the comparison that matters is not the one it looks like.** A
+reply's own words goes from 76 of 139 to **92**: sixteen documents that were outside their own top
+ten and are now inside it. **M11's document rule bought thirty-one on that class at the same weight
+and M12's location rule thirty-three** — so on the gain class alone this is the weakest of the three.
+Both of those lost a touched path, which is what vetoed them; this one loses none of the five. **That
+is the whole distance between a number and a licence**, and it is the reason a gain figure quoted
+without its harm arm says nothing. And a command line **gains** one rather than holding level, which
+neither of the others managed: the term is not trading the harm classes for the gain ones, because a
+command line in a small `PreToolUse` payload is a document its own query is a large share of.
+
+**A prompt's own words does not move at any threshold, and it has not moved for any candidate yet.**
+6 of 17 at weight 0, 6 under M11's rule at 5, 6 under M12's, and 6 at every rung of this ladder. The
+eleven buried prompts of M11's non-vacuity arm are buried by more than one weight can lift; that is
+now three instruments agreeing, and it is the sharpest thing any of them has said about that class.
+
+**What the supplementary run says, and it is the sentence that has to travel with the licence.**
+Reported and not gated on, registered as such before the gate was built, over every harm candidate
+rather than `m4Sample`'s 25. Its weight-0 column reproduces M12's own supplementary table — 336, 56
+and 79 — which is the second anchor.
+
+| class | n | weight 0 | 1,000 | 2,000 | 5,000 | 10,000 | 20,000 | demoted at 5,000 |
+|---|---|---|---|---|---|---|---|---|
+| a command line | 534 | 336 | 336 | 336 | **342** | **345** | **349** | 1,108 of 4,627 |
+| a touched path | 120 | 56 | **54** | **54** | 56 | 56 | **55** | 350 of 1,046 |
+| an error message | 96 | 79 | **76** | **73** | **74** | **75** | **78** | 555 of 776 |
+
+**Not one threshold in the ladder regresses none of the three over their full populations.** `an
+error message` loses documents at all five — five of 96 at the licensing threshold — and `a touched
+path` at three. The sampled 25 shows neither. **M11's own verdict turned on a single document of 25
+and its supplementary run confirmed the sample; this one contradicts it**, which is the other thing a
+supplementary run is for and the reason it was inherited rather than dropped.
+
+**The condition is not moved to account for that, and this is the paragraph that says why.** It was
+registered in this section before the gate existed and the supplementary arm was registered as
+reported, not pre-registered, and unable to change the verdict. Rewriting the condition now to take
+the larger populations in would be choosing a rule after seeing which answer it gives, which is
+exactly what §7's warning is about and what the pre-registration exists to make impossible. So the
+verdict stands as the gate reports it — **licensed at 2,000, 5,000 and 20,000 ppm** — and the pair of
+tables is the finding rather than the first table alone.
+
+**What is therefore licensed, exactly.** The schema change and nothing else: an integer column
+holding the indexed text's byte length, and a migration. **What is not licensed is a shipped term.**
+The sweep that decides one has to be over the full populations, because that is where the harm this
+gate's sample cannot see already is — and the first question it has to answer is whether a threshold
+between 5,000 and 20,000 exists that keeps the reply gain without the error-message loss, which is a
+question the five rungs registered here were never spaced to answer. `Search` still passes 0 and nil;
+the ranking is exactly what it was before this gate existed.
+
+**One thing the break-it pass measured that the gate does not report.** Mutating the denominator so
+that coverage is the query's length alone — a property of the query and not of the pair — leaves `a
+reply's own words` at 78 of 139 where the pair rule reaches 92, and takes `a command line` back to 17
+from 18. **So it is the document's length that is earning the gain and not the query's**, which is
+the claim the candidate rests on and the one thing no column of either table above states. The
+mutation is not committed; the figure is recorded because nothing else in the repository would say
+it.
+
+**What this leaves of backlog 53.** Nothing that is unmeasured. All three candidates now have a
+number: M11 rejected the document rule, M12 found the location rule real and powerless where it
+matters, and this one clears the sampled condition and does not clear the full-population one. The
+row's question — how to tell a document that is *about* the query from one that merely *contains* it
+— has an answer worth building on for the first time, and what it needs next is the sweep above
+rather than another candidate.
 
 ### What M8 will measure, pre-registered before a number exists (M-2, M-4)
 
