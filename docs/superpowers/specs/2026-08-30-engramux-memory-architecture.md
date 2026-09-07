@@ -1668,7 +1668,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
 | **M13** | The query's share of the document | **Ran 2026-09-07, and it is the first of backlog 53's candidates to clear M11's condition — on the sample, and on no threshold over the full populations.** Coverage is a property of the *pair*, which is the shape neither M11 nor M12 has: the same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and populations for the third time, the weight fixed at 5 and the **threshold** swept, against **M11's own condition unchanged**. Three of five rungs clear it; at 5,000 ppm `a reply's own words` goes 76 to **92 of 139** — the **weakest** gain of the three, against M11's thirty-one and M12's thirty-three — and `a command line` **gains** one rather than holding level, which neither of the others managed. Both of those lost a touched path and this one loses none of the five, which is the whole distance between a number and a licence. The supplementary run over every harm candidate is where it stops being tidy: **not one rung regresses none of the three**, `an error message` losing five of 96 at the licensing threshold. The condition is not moved for that. What is licensed is a length column and a migration; **what is not is a shipped term**, which needs a sweep over the full populations first. The section below carries both tables |
-| **M14** | The threshold M13 left open | **Registered 2026-09-07, un-run.** M13 licensed a length column and no shipped term, and its five rungs were never spaced to answer the question a sweep has to start from: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the `an error message` loss. This asks it, under M13's rule and at M13's weight, over **every candidate of every class** rather than over `m4Sample`'s 25 — M11's own condition over the populations where M13's supplementary run says the harm already is, which makes it strictly harder to pass rather than differently scoped. Nine rungs: M13's five, retired into this gate, and the 2,500 ppm grid filling the interval M13's spacing left open. It needs none of what M13 licensed — the id-set seam carries any per-query set at any weight — so it is **test-only and licenses no term either way**; what a pass buys is a threshold for the sweep to be built around, and what a no says is that there is none at this weight. The section below carries the ladder, the three anchors and the condition |
+| **M14** | The threshold M13 left open | **Registered and ran 2026-09-07, and there is no threshold.** M13 licensed a length column and no shipped term, and its five rungs were never spaced to answer the question a sweep has to start from: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the `an error message` loss. This asked it, under M13's rule and at M13's weight, over **every candidate of every class** rather than over `m4Sample`'s 25 — M11's own condition over the populations where M13's supplementary run said the harm already is, which makes it strictly harder to pass rather than differently scoped. Nine rungs: M13's five, retired into this gate, and the 2,500 ppm grid filling the interval M13's spacing left open. **The interval holds a better rung and no clean one.** At 7,500 ppm four of the five classes are at or above baseline — `a reply's own words` at **93 of 139**, and `a touched path` at **57 of 120**, the first document any of row 53's candidates has lifted on the class that vetoed the other two — and `an error message` is 74 of 96 against 79, short of its baseline at every rung in the ladder and best where the gain has already gone. All three anchors reproduced, the third of them sixty of M13's own counts. It is **test-only and licensed no term either way**: what the no says is that backlog 53's third candidate is measured out **at this weight**, and the length column stays licensed and unspent. The section below carries the table |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
@@ -2231,6 +2231,14 @@ path` at three. The sampled 25 shows neither. **M11's own verdict turned on a si
 and its supplementary run confirmed the sample; this one contradicts it**, which is the other thing a
 supplementary run is for and the reason it was inherited rather than dropped.
 
+**That arm is no longer in this gate, and this paragraph is the record of the move rather than a
+table left behind by one.** M14 measures the same three populations at these same five rungs and four
+more, and on 2026-09-07 its first run reproduced every one of these figures — recall and `demoted`,
+sixty counts including the two gain rows above — which is the condition M14's own section registered
+for taking the arm out. The table stays here as the finding it is; what moved is which gate
+re-measures it, and if that reproduction ever fails the arm comes back rather than the figures being
+corrected. What it bought is the room M14 costs: this gate goes from **63.2 s to 16.3 s**.
+
 **The condition is not moved to account for that, and this is the paragraph that says why.** It was
 registered in this section before the gate existed and the supplementary arm was registered as
 reported, not pre-registered, and unable to change the verdict. Rewriting the condition now to take
@@ -2244,8 +2252,10 @@ holding the indexed text's byte length, and a migration. **What is not licensed 
 The sweep that decides one has to be over the full populations, because that is where the harm this
 gate's sample cannot see already is — and the first question it has to answer is whether a threshold
 between 5,000 and 20,000 exists that keeps the reply gain without the error-message loss, which is a
-question the five rungs registered here were never spaced to answer. `Search` still passes 0 and nil;
-the ranking is exactly what it was before this gate existed.
+question the five rungs registered here were never spaced to answer. **M14 asked it on 2026-09-07 and
+the answer is that no such threshold exists at this weight**, which leaves the column licensed and
+unspent rather than owed a sweep. `Search` still passes 0 and nil; the ranking is exactly what it was
+before this gate existed.
 
 **One thing the break-it pass measured that the gate does not report.** Mutating the denominator so
 that coverage is the query's length alone — a property of the query and not of the pair — leaves `a
@@ -2355,6 +2365,66 @@ corrected.
 
 *Nothing here logs a query.* Class names, counts and threshold arrays only, which is M13's rule and
 governs this gate's file the same way.
+
+**The gate ran on 2026-09-07 and no threshold is licensed.**
+`TestGateM14TheThresholdM13LeftOpen` in `internal/search`, **79.1 s** over the 901-document corpus,
+ten searches over each of 906 candidates. All three anchors reproduced — which for the third of them
+is sixty of M13's own figures over these same populations coming back unchanged, recall and `demoted`
+alike.
+
+| arm | class | n | weight 0 | 1,000 | 2,000 | 5,000 | 7,500 | 10,000 | 12,500 | 15,000 | 17,500 | 20,000 | demoted at 7,500 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gain | a prompt's own words | 17 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 58 of 153 |
+| gain | a reply's own words | 139 | 76 | 83 | 86 | 92 | **93** | 92 | 90 | 86 | 79 | 82 | 511 of 1,136 |
+| harm | a command line | 534 | 336 | 336 | 336 | 342 | **346** | 345 | 347 | 347 | 348 | 349 | 1,423 of 4,627 |
+| harm | a touched path | 120 | 56 | **54** | **54** | 56 | **57** | 56 | **55** | **55** | **55** | **55** | 460 of 1,046 |
+| harm | an error message | 96 | 79 | **76** | **73** | **74** | **74** | **75** | **76** | **78** | **78** | **78** | 627 of 776 |
+
+**The interval holds a better rung and it does not hold a clean one.** At 7,500 ppm — a value M13's
+spacing could not see — `a reply's own words` reaches **93 of 139**, one above what 5,000 and 10,000
+both reached; `a command line` reaches 346 of 534; and `a touched path` reaches **57 of 120**, which
+is **the first document any of backlog 53's three candidates has lifted on the class that vetoed the
+other two**. Four of the five classes are at or above their weight-0 baseline there. The fifth is the
+veto, and it is 74 of 96 against 79.
+
+**The veto is one class and it never comes back.** `an error message` is short of 79 at every rung in
+the ladder. Its best is 78, at 15,000, 17,500 and 20,000 — and by 15,000 the reply class has fallen
+to 86 and `a touched path` to 55, so the rungs where the harm is smallest are the rungs where the
+gain is already going. The mechanism is the coverage distribution recorded above before the ladder
+was chosen: that class's own targets have a median coverage of **3,100 ppm** against the gain
+classes' 13,953 and 23,026, because a failure line is cut out of tool output and tool output is what
+the long documents are. Every rung high enough to lift a reply is far above an error message's own
+share of its document, so what the term lifts past it is everything shorter that carries the same
+token.
+
+**What that settles, and it is the question M13 left rather than the row.** The first thing the sweep
+M13 owed had to answer is answered: **there is no threshold at weight 5**, anywhere from 1,000 to
+20,000 ppm, over the populations where the harm actually is. Backlog 53's third candidate is measured
+out at that weight and the row's three named candidates are now all measured with nothing shipped.
+What is untried is **the weight** — M12 and M13 both fixed it at 5 and only M11 ever swept one — and
+the reserved-slot candidate that demotes nothing and so has no harm arm of M11's shape at all.
+
+**The length column stays licensed and is now unspent.** M13 licensed it and this gate cannot take
+that back; what this removes is the reason to spend it today. A column exists to make a sweep
+possible, and the sweep this one was licensed for has its answer.
+
+**What it cost, against what was registered.** 9,060 searches at 79.1 s against M13's 5,886 at
+63.2 s: **1.54× the searches for 1.34× the wall**, which is the one-scan set builder paying for the
+longer ladder. M13's supplementary arm retired into this gate on the condition registered above, met
+in full — so **M13 now runs in 16.3 s and the pair in 95.4 s**, against 63.2 s for M13 alone before.
+The harm populations are measured at nine rungs instead of five and the package pays 32 s for it.
+
+**One thing the break-it pass measured that the gate does not report.** Relaxing the condition from
+*improves one and regresses none* to *improves one or regresses none* licenses **all nine rungs**,
+not some of them. Since every rung regresses a harm class, the second half of that disjunction is
+false everywhere, so what the mutant is reporting is that **every rung in the ladder improves a gain
+class** — the verdict is decided entirely by the harm arm, at every threshold, and there is no rung
+whose gain is the thing that fails. That is the sharpest form of what both tables say and no column
+of either states it. The mutation is not committed; the figure is recorded because nothing else in
+the repository would say it.
+
+**Its output is safe to paste.** Twelve `-v` lines, class names, counts and threshold arrays;
+measured, **0 of the twelve** carry a query, a body or a path.
 
 ### What M8 will measure, pre-registered before a number exists (M-2, M-4)
 
