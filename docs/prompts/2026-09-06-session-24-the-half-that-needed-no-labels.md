@@ -34,7 +34,7 @@ nobody reads it as the other thing.
 | Publication | 1, 2 and 4 closed. **3 is open and is one paragraph** — the Defender exclusion walked through the Windows Security UI once and recorded |
 | Backlog | **37, 38, 40, 46, 51, 52, 53** open. Nothing closed and nothing opened |
 | Injection | Built, off, untouched |
-| Open question, unanswered | Whether 1.0 ships unsigned with signatures from 1.0.1. It follows from SignPath's own bars, it is a public-facing promise, and session 22 wrote it down so it is ruled on rather than inherited. **Still unruled** |
+| The signing question | **Ruled 2026-09-07: 1.0 ships unsigned and 1.0.1 onwards carry a signature.** Session 22 wrote it down so it would be ruled rather than inherited, and it was inherited through two further sessions before it was — an open question travels in a brief exactly as well as a settled one. It is recorded in the memory spec beside the SignPath paragraph, which is the document that owns decisions. **What it now obliges is one sentence in the `README`**, and that is Phase D's to write |
 
 ---
 
@@ -97,8 +97,10 @@ tuned to its answer still applies, and it is left open on purpose.
 | **C** | agent | M7 pass 2, and M8's P5 half against the committed rule. **This is where the native-grade verdict's second number comes from** |
 | **D** | agent, then owner | CI and the release process → the 1.0 release → SignPath Foundation → signed releases |
 
-**If you open into Phase B with no labels yet, take backlog 53 and not Phase C.** That is session
-23's own reading of session 22's order and it has not changed: 53's two remaining candidates are
+**Take backlog 53's first candidate. The owner chose it on 2026-09-07**, over the second and over
+taking nothing, so this is a decision rather than this document's reading of an order. What follows
+is why it is the one worth taking and what the other one would have cost: 53's two remaining
+candidates are
 real, off the critical path, and the harness measures either in an afternoon. *How much of the
 document the query accounts for* is the one shape neither M11 nor M12 has tried — it is a property
 of the **pair** rather than of the document. *Reserving places in the visible list* demotes nothing
@@ -208,5 +210,13 @@ commits need the owner's own review and authorisation. M7's 150 labels and M8's 
 theirs by decision. Condition 3 needs the Defender exclusion walked through the Security UI once and
 recorded. Backlog 52 needs one Codex turn.
 
-**One question is still written down unanswered**: whether 1.0 ships unsigned with signatures from
-1.0.1. It is the owner's to rule on.
+**The question session 22 left open is closed.** 1.0 ships unsigned, 1.0.1 onwards signed, ruled by
+the owner on 2026-09-07 and recorded in the memory spec rather than in a hand-off. Nothing else is
+waiting on a ruling.
+
+**What this session was told to take, and it is not the critical path.** Backlog 53's **first**
+candidate — *how much of the document the query accounts for* — decided by the owner on 2026-09-07
+over the reserved-slot candidate and over taking nothing. It is a property of the **pair** rather
+than of the document, which is the one shape neither M11 nor M12 has tried, and the harness measures
+it in an afternoon. It buys nothing that publication is waiting on, and that was priced before it was
+chosen rather than discovered afterwards.

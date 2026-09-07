@@ -1552,6 +1552,22 @@ project must **already be released in the form to be signed**, and it must build
 system**. Both are exactly what the release decision above creates. So signing is not rejected, it is
 **sequenced**, and what unblocks it is a release process rather than a purchase.
 
+**And the sequence is decided: 1.0 ships unsigned and 1.0.1 onwards carry a signature. Ruled by the
+owner on 2026-09-07.** It follows from SignPath's own first bar rather than from a preference — the
+project must *already be released in the form to be signed*, so whatever the first release is, it
+cannot be signed. The alternative was a pre-release that exists only to clear that bar, with 1.0
+itself signed from the start; it is declined because it buys nothing the bar does not already force
+and costs a public "this is not the publication" caveat on an artefact strangers can download.
+**What it obliges is one sentence in the `README`**: that 1.0 is unsigned, that this is why, and that
+later releases will not be. A stranger meeting an unsigned binary having been told is publication
+condition 4's own standard; one meeting it in silence is not.
+
+Session 22 wrote this down on 2026-09-06 as an open question **so that it would be ruled on rather
+than inherited**, and it was then inherited through two further sessions before it was. That is the
+mechanism §7's third item describes, arriving on a decision rather than on a stale sentence: an open
+question travels in a brief exactly as well as a settled one, and nothing in a hand-off distinguishes
+them. It is recorded here, in the document that owns decisions, for that reason.
+
 **The false-positive submission is not adopted, and §8's fourth condition is carried by documentation
 instead.** This clause said the opposite when it was written hours earlier — every release submitted,
 on the argument that it is free and fixes the detection for everyone rather than for one machine. The
