@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "engramux",
+  "description": "One GitHub Release zip per version. The same archive is what a Codex user unpacks by hand.",
+  "owner": {
+    "name": "wotjr1649",
+    "url": "https://github.com/wotjr1649"
+  },
+  "plugins": [
+    {
+      "name": "engramux",
+      "description": "Delivers the two Engramux binaries. It configures nothing: hooks and the MCP endpoint stay `engramux install`'s to write, so disabling this plugin cannot stop capture.",
+      "category": "productivity",
+      "homepage": "https://github.com/wotjr1649/engramux",
+      "version": "0.0.0",
+      "source": {
+        "source": "archive",
+        "url": "https://github.com/wotjr1649/engramux/releases/download/v0.0.0/engramux-0.0.0-windows-amd64.zip"
+      }
+    }
+  ]
+}
