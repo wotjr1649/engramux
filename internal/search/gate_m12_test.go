@@ -291,7 +291,7 @@ func m12HumanText(docs []doc) map[string]string {
 // signal.
 //
 // The result is never nil, because nil is the shipped event-name rule and
-// [search.SearchAtHumanTextMatch] refuses it. It is built in document order, so
+// [search.SearchLiftingIDs] refuses it. It is built in document order, so
 // a run is reproducible.
 func m12Lifted(docs []doc, humanText map[string]string, query string) []string {
 	lowered := strings.ToLower(query)
@@ -374,7 +374,7 @@ func m12Hits(t *testing.T, db *sql.DB, c m4Candidate, human float64, lifted []st
 	if lifted == nil {
 		hits, _, err = search.SearchAtHumanWeight(t.Context(), db, c.query, "", m11K, search.MatchAll, human)
 	} else {
-		hits, _, err = search.SearchAtHumanTextMatch(t.Context(), db, c.query, "", m11K, search.MatchAll, human, lifted)
+		hits, _, err = search.SearchLiftingIDs(t.Context(), db, c.query, "", m11K, search.MatchAll, human, lifted)
 	}
 	if err != nil {
 		t.Fatalf("a derived query was refused: %v", err)
@@ -459,7 +459,7 @@ func TestTheHumanIDSetReachesTheStatement(t *testing.T) {
 	// Empty, and not nil. The weight is [m12Weight]'s own so that a term
 	// that ignored the set would show up as M11's rule instead of as
 	// nothing.
-	empty, _, err := search.SearchAtHumanTextMatch(t.Context(), db, query, "", m11K, search.MatchAll, m12Weight, []string{})
+	empty, _, err := search.SearchLiftingIDs(t.Context(), db, query, "", m11K, search.MatchAll, m12Weight, []string{})
 	if err != nil {
 		t.Fatalf("an empty human-text id set was refused: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestTheHumanIDSetReachesTheStatement(t *testing.T) {
 	// the matched set, so the lifted document is first or the predicate
 	// never reached the statement.
 	want := baseline[1].ID
-	lifted, _, err := search.SearchAtHumanTextMatch(t.Context(), db, query, "", m11K, search.MatchAll, 100, []string{want})
+	lifted, _, err := search.SearchLiftingIDs(t.Context(), db, query, "", m11K, search.MatchAll, 100, []string{want})
 	if err != nil {
 		t.Fatalf("a human-text id set was refused: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestTheHumanIDSetReachesTheStatement(t *testing.T) {
 
 	// nil is the shipped rule and this seam must refuse it rather than
 	// quietly measuring it.
-	if _, _, err := search.SearchAtHumanTextMatch(t.Context(), db, query, "", m11K, search.MatchAll, m12Weight, nil); err == nil {
+	if _, _, err := search.SearchLiftingIDs(t.Context(), db, query, "", m11K, search.MatchAll, m12Weight, nil); err == nil {
 		t.Errorf("a nil human-text id set was accepted; nil is the event-name rule and this seam exists " +
 			"to be compared against it")
 	}

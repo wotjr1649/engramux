@@ -114,13 +114,15 @@ func Search(ctx context.Context, db *sql.DB, text, projectID string, limit int, 
 // 0**, so nothing a caller of this package receives is ranked by a term the
 // gate has not licensed yet.
 //
-// humanIDs is gate M12's, and it decides what the human term keys on rather than
-// how much it is worth. **nil is the shipped rule** - the closed event-name set
-// [humanTextEvents], which is a property of the document - and a non-nil slice
-// replaces it with those exact event ids. A non-nil empty slice therefore lifts
-// nothing, which is not the same thing as nil and is what
-// [TestTheHumanIDSetReachesTheStatement] holds. See [orderExpr] for why an id set
-// is a measuring instrument and can never be a shipped one.
+// humanIDs is gate M12's and gate M13's, and it decides what the term keys on
+// rather than how much it is worth: M12 passes the documents whose match is not
+// machine-only, M13 the documents the query is a large enough share of, and the
+// weight and the expression are the same for both. **nil is the shipped rule** -
+// the closed event-name set [humanTextEvents], which is a property of the
+// document - and a non-nil slice replaces it with those exact event ids. A
+// non-nil empty slice therefore lifts nothing, which is not the same thing as
+// nil and is what [TestTheHumanIDSetReachesTheStatement] holds. See [orderExpr]
+// for why an id set is a measuring instrument and can never be a shipped one.
 //
 // Parameters rather than package variables, because a variable a test sets is a
 // variable two parallel tests fight over, and because "the production path is
@@ -340,11 +342,14 @@ const boostPerDerivedToken = 5.0
 // should key on *where the match fell* rather than on what event the document
 // is. A second FTS column over the human-authored leaves is what would express
 // that in the index; an id set computed in Go per query is what measures
-// whether building the column is worth it, before anything is migrated. It is
-// not a candidate implementation - the set has to be known before the search
-// runs, which means reading every matching payload outside the query, which is
-// §7.1's four-second shape twice over. **nil is the shipped rule** and every
-// caller outside this package's own tests passes it.
+// whether building the column is worth it, before anything is migrated. Gate
+// M13 reuses it for the same reason and a different rule - how much of the
+// document the query accounts for, which the index cannot express either
+// because it holds no per-row length. It is not a candidate implementation - the
+// set has to be known before the search runs, which means reading every matching
+// payload outside the query, which is §7.1's four-second shape twice over.
+// **nil is the shipped rule** and every caller outside this package's own tests
+// passes it.
 func orderExpr(tokens []string, boost bool, human float64, humanIDs []string) (string, []any) {
 	var b strings.Builder
 	var args []any

@@ -57,27 +57,33 @@ func SearchAtHumanWeight(ctx context.Context, db *sql.DB, text, projectID string
 	return searchWith(ctx, db, text, projectID, limit, true, human, nil, m)
 }
 
-// SearchAtHumanTextMatch is [SearchAtHumanWeight] with the same weight keyed on
-// a set of event ids rather than on the event-name column, so that gate M12 can
-// run one corpus under M11's rule and under a rule that asks where the match
-// fell instead of what the document is.
+// SearchLiftingIDs is [SearchAtHumanWeight] with the same weight keyed on a set
+// of event ids rather than on the event-name column, so that a gate can run one
+// corpus under M11's rule and under a rule the index cannot express yet.
 //
-// ids is the per-query set of documents whose match is not machine-only. It must
-// be non-nil: nil is the shipped event-name rule, and passing it here by
+// ids is the per-query set of documents the candidate rule lifts, and what
+// decides membership belongs to the gate rather than to this seam. Gate M12
+// passes the documents whose match is not machine-only; gate M13 passes the
+// documents the query is a large enough share of. It was called
+// SearchAtHumanTextMatch while M12 was the only caller, and the name moved when
+// the second one arrived - a set that is not about human text carried by a
+// function that says it is would be one of the two going stale.
+//
+// It must be non-nil: nil is the shipped event-name rule, and passing it here by
 // accident would measure M11 twice and report it as a difference.
 //
 // It ships nothing and cannot: [orderExpr]'s doc comment says why an id set is a
 // measuring instrument rather than a candidate implementation.
-func SearchAtHumanTextMatch(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match, human float64, ids []string) ([]Hit, int64, error) {
+func SearchLiftingIDs(ctx context.Context, db *sql.DB, text, projectID string, limit int, m Match, human float64, ids []string) ([]Hit, int64, error) {
 	if ids == nil {
-		return nil, 0, errNilHumanIDs
+		return nil, 0, errNilLiftedIDs
 	}
 	return searchWith(ctx, db, text, projectID, limit, true, human, ids, m)
 }
 
-// errNilHumanIDs is what [SearchAtHumanTextMatch] refuses a nil set with, rather
+// errNilLiftedIDs is what [SearchLiftingIDs] refuses a nil set with, rather
 // than silently measuring the rule it is there to be compared against.
-var errNilHumanIDs = errors.New("search: the human-text id set is nil, which is the event-name rule and not a location rule")
+var errNilLiftedIDs = errors.New("search: the lifted id set is nil, which is the event-name rule and not a candidate rule")
 
 // HumanTextEvents is the closed set [orderExpr] tests `events.event_name`
 // against, reachable from the gate so that it can assert the set agrees with the
