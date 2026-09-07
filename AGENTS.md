@@ -264,6 +264,11 @@ row on its own, delete the row — the test is the better owner.
 Write Go source and any file containing backslashes with a file-write tool, not a shell heredoc.
 Heredocs collapse `\\` to `\`, which corrupts Windows path literals and Go rune literals.
 
+A heredoc carrying a **backtick** does not run at all: a guard reads it as an unclosed command
+substitution and refuses the command before the shell sees it, however the body is quoted. Prose
+about this codebase is mostly backticks, so an edit to a document is where this lands. Use the
+file-edit tool for that text — it is the same edit and it is what the refusal is asking for.
+
 ## Documents
 
 - `docs/superpowers/specs/` — **owns decisions, invariants, budgets, and measurements**, and the
