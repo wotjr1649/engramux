@@ -321,6 +321,40 @@ rather than in place**, because the paragraph is a dated record of what was open
 2026-09-07: `3d9f49b` wrote it at 04:39 and `499026b` added `.github/ISSUE_TEMPLATE/bug_report.yml`
 at 12:26 the same day, so it was true when written. What it should have named is the `workflows/`
 directory, and that is what session 27's first commit created.
+
+**The local half done: 2026-09-07**, on `step-6-packaging`, merged `--no-ff`. **The step is still
+not closed, and what is left of it is a publication act rather than work.**
+
+*What is built and verified.* `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`,
+both validated by the installed Claude Code's own `plugin validate`. `scripts/mkzip`, a
+deterministic archive writer, with a test that reads the timestamps back out rather than comparing
+two hashes — this machine's clock moves about every 15.6 ms, so a two-hash comparison can pass with
+a wall-clock mutation in place. `scripts/package.sh`, which builds, checks the built binary's own
+reported version, stages, archives and writes the catalogue. Two workflows: the three checks on
+push and pull request, and a tag that builds, verifies and releases. `doctor`'s third version, read
+out of the plugin cache, with the layout measured off this machine's cache rather than taken from a
+reference.
+
+*The one decision that was the owner's and is recorded in the spec rather than here.* M-7's
+sentence about the marketplace entry being updated in the commit that carries the version has two
+readings and they differ on **authority** — one of them gives a workflow standing write access to a
+public repository's `main`. Put to the owner on 2026-09-07 and ruled: the owner commits the hash and
+CI verifies. That is what forced the archive to be reproducible, and `-buildvcs=false` with it.
+
+*Evidence.* The archive hashed identically across five runs and two commits, one of them on a dirty
+tree — which is the property the release procedure needs, because the owner builds before committing
+the hash. Eight break-it mutations, every one changing an answer rather than removing a reference,
+all eight killed and none reported `NOOP` or `BUILD`. `doctor`'s new line was read off the **real
+installation** with the release archive unpacked into a plugin-cache-shaped directory, and again
+against the real cache where it says there is nothing there. actionlint at exit 0 over both
+workflows. Suite, pinned linter and race script green in that order on the handed-over tree.
+
+*What is open, and both are the owner's.* **A release exists that the channel can serve** — the tag,
+the release page and the archive on it are publication acts, and `git tag` is still empty. And
+neither workflow has ever run, because nothing has been pushed: `[unverified]` that the runner
+image's `gcc` is on `PATH` where `scripts/race.sh` looks for it, read from actions/runner-images'
+own Windows readme rather than observed. If it is not, the race step fails loudly with the script's
+own message and the fix is one `ENGRAMUX_CC` line.
 The remaining clause is met in the narrower form the spec now uses: `update` restarts the service on
 a failed copy and says which destinations it replaced, rather than restoring what was there, because
 nothing copies the previous bytes aside and claiming a rollback this product does not have would be

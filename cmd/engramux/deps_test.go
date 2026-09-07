@@ -48,9 +48,10 @@ var suspectRoutes = []string{
 // spool.Dir() rather than importing internal/store *because* that would link the
 // driver, two hundred lines below an import that did.
 //
-// Nothing in this repository could see it. There is no CI, no size budget, and
-// a human reading an import block cannot see three packages downstream. This is
-// the check that can.
+// Nothing in this repository could see it. There is no size budget, and a human
+// reading an import block cannot see three packages downstream; CI would not
+// have helped either, because it runs this same suite. This is the check that
+// can.
 func TestTheRelayDoesNotLinkTheSQLiteDriver(t *testing.T) {
 	// The module root, from this package's own directory. The context is
 	// the test's own, so a `go list` that hangs is killed when the test

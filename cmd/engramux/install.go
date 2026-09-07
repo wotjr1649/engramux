@@ -124,6 +124,7 @@ func resolvePaths(local, home string, args []string) (host.Options, error) {
 		CodexHooks:  envOr("ENGRAMUX_CODEX_HOOKS", filepath.Join(home, ".codex", "hooks.json")),
 		CodexConfig: envOr("ENGRAMUX_CODEX_CONFIG", filepath.Join(home, ".codex", "config.toml")),
 		ClaudeMCP:   envOr("ENGRAMUX_CLAUDE_MCP", filepath.Join(home, ".claude.json")),
+		PluginCache: envOr("ENGRAMUX_CLAUDE_PLUGINS", filepath.Join(home, ".claude", "plugins", "cache")),
 		MCPJSON:     filepath.Join(data, "mcp.json"),
 		TaskName:    taskName(withoutFlags(args)),
 	}, nil
@@ -140,10 +141,10 @@ func currentPaths(args []string) (host.Options, error) {
 	return resolvePaths(os.Getenv("LOCALAPPDATA"), home, args)
 }
 
-// envOr is the override seam the tests use. The three host files are the only
-// paths that can move, because they are the only ones this product does not
-// own - and a test that wrote a developer's real settings.json would be a test
-// nobody could run twice.
+// envOr is the override seam the tests use. Only paths this product does not
+// own can move - the three host files and Claude Code's plugin cache - and a
+// test that wrote a developer's real settings.json would be a test nobody could
+// run twice.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

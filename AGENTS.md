@@ -35,6 +35,7 @@ go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # b
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
 bash scripts/soak-summary.sh docs/evidence/soak/soak.tsv                     # reduces a soak series to the figures spec §7.1 records
 bash scripts/reinstall.sh                                                    # update --from dist/, then doctor and status
+bash scripts/package.sh 0.1.0    # the release build, the plugin archive, and the hash on stdout
 ```
 
 `TestPhase1Gate` runs Phase 1's four gate clauses in one pass over one database it builds from
@@ -79,19 +80,30 @@ which is how the soak is actually run — does not. It dies with the shell that 
 surviving a logoff needs a scheduled task, which is the user's to create. A missing prerequisite,
 a bad `--every`, or a log it cannot append to are all exits rather than a loop that writes nothing.
 
-A release build adds one flag and nothing else:
+A release build is `scripts/package.sh`'s and not one you type. It is two flags rather than the one
+this paragraph used to name:
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wotjr1649/engramux/internal/version.linked=0.1.0" -o dist/engramux.exe ./cmd/engramux
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/wotjr1649/engramux/internal/version.linked=0.1.0" -o dist/engramux.exe ./cmd/engramux
 ```
+
+**`-buildvcs=false` is load-bearing and looks like tidiness.** The owner commits the archive's
+SHA-256 beside the version it names and the release workflow re-builds and refuses a mismatch, so
+two builds of one commit have to agree byte for byte — and without that flag the binary records
+`vcs.revision`, which the release order guarantees will differ. Measured 2026-09-07: with it, `go
+version -m` reports **0** `vcs.` lines and the binary hashes to `aa926cfa…`; without it, three
+lines naming the commit, its time and a dirty flag, and `8688cda8…`. Build a release by hand
+without it and the workflow will refuse what you tag. Use the script.
 
 **Check it by running the binary — `engramux doctor` prints the version — and not by re-reading the
 command line you meant to type.** `-X` sets a package-level string **variable**, and against a
 `const`, a mistyped import path, or a non-constant initializer it does **nothing at all and reports
 nothing**: there is no linker error. The obvious symbol to copy, `ipc.Version`, is a `const` for
-exactly the reason `version.linked` is not. Nothing in this repository can catch a flag that silently
-no-opped — there is no CI, and a test cannot see release ldflags — so the shipped surface is the
-check.
+exactly the reason `version.linked` is not. A test cannot see release ldflags and neither can CI, so
+the shipped surface is the check — and `scripts/package.sh` is where it now happens: it runs the
+binary it just built and refuses to package one that reports a version other than the one asked for.
+That is also why `doctor` prints the version on a machine with nothing installed, which is the state
+a freshly built binary is in by definition.
 
 **`go version -m` is not that check on a release build, and it looks like it should be.** It does
 print the ldflags a build used, through `-s -w`, because build information is not a symbol table.

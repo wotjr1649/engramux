@@ -1524,6 +1524,36 @@ describes, so a version and the hash of the artefact it names cannot be committe
 `-trimpath` over the pinned toolchain with `CGO_ENABLED=0`, which is what makes an artefact
 attributable to a commit.
 
+**Who commits the hash. Ruled by the owner on 2026-09-07, and the paragraph above did not settle
+it.** That sentence has two readings and they differ on **authority** rather than on mechanism. One
+has the workflow commit the hash to `main` after the release, which is standing write access to a
+public repository's default branch and a commit nobody reviewed. The other has the **owner** run the
+packaging locally, commit the version, the URL and the hash together, and tag that commit; the
+workflow then re-builds and **refuses the release when the hash it gets is not the one the tagged
+commit already names**. The owner chose the second. The clause it was written to protect is better
+served by it — a version and a hash that reach one commit by the same hand cannot be committed apart
+— and the workflow keeps write access for the release page and for nothing else.
+
+**What that costs is a reproducibility requirement, and one flag nobody would guess is what meets
+it.** Two builds of one commit have to agree byte for byte, so the archive is written by a program
+that sorts its entries and stamps every one with the zip epoch rather than by `tar`, which stamps
+real modification times, or `Compress-Archive`, which has shipped versions writing backslash
+separators. And the build line adds **`-buildvcs=false`**. Without it the binary records
+`vcs.revision`, and the release order is build, then commit the hash, then tag — so the owner's build
+would carry the parent commit and the workflow's would carry the tag, two different binaries from one
+source tree. **Measured 2026-09-07**: the same package built twice, with the flag and without,
+reports 0 and 3 `vcs.` lines and two different hashes. What is lost is the commit stamp `-trimpath`
+otherwise leaves behind; the tag replaces it, and a release page names its tag.
+
+**[verified] 2026-09-07, off the installed host rather than a reference: the update signal is the
+version string and it has a precedence.** Claude Code reads it from the plugin manifest's `version`,
+else the marketplace entry's, else the archive's digest — and changing only the digest while a
+version is declared does **not** trigger an update. So the manifest carries no `version` field and
+the entry carries it. One place to bump is the smaller reason; the load-bearing one is that an
+archive whose manifest is rewritten at packaging time would have bytes depending on whichever `jq`
+was on the machine, and two that indent differently would give one commit two hashes. `claude plugin
+validate` warns about the absent field and passes.
+
 **A green CI is a weaker statement than a green local run, and the tagging rule is what that buys.**
 **[verified] 2026-09-03**: a runner has no `.capture/` and no native memory, so **M1**, **M3**, the
 Phase 4 gate's corpus mode and the Phase 6 audit's masked half all skip there, each by its own
