@@ -139,7 +139,7 @@ func runDoctor(w io.Writer, args []string) int {
 	r.reportTask(opt.TaskName, task, taskErr)
 	r.reportInstalled(opt.BinDir, relay, installed, hooks, reply, replyErr)
 	r.reportLocal()
-	r.reportService(reply, replyErr)
+	r.reportService(reply, replyErr, opt.PluginCache)
 	r.reportMCP(ctx, opt.ClaudeMCP, opt.CodexConfig)
 
 	if r.failed {
@@ -318,6 +318,13 @@ func nothingIsInstalled(taskErr error, hooks []hostHooks, installed []string) bo
 // that. It replaces four red sections that were each individually true.
 func (r *report) reportNotInstalled(opt host.Options, relay string) {
 	r.line("engramux is not installed for this user.")
+	// The one thing this machine can still answer, and the only place a
+	// release build's link-time version can be read at all: `go tool link -X`
+	// no-ops silently against a const or a mistyped path, and -trimpath
+	// removes the recorded -ldflags line that would otherwise show it. So
+	// scripts/package.sh checks a freshly built binary by running it, and
+	// that binary is on a machine with nothing installed by definition.
+	r.field("version", "%s", version.Product())
 	r.field("logon task", "%s is not registered", opt.TaskName)
 	r.field("binaries", "neither is in %s", opt.BinDir)
 	r.field("hook entries", "none in either host configuration")
@@ -747,7 +754,7 @@ func (r *report) reportPrincipal(sid string) {
 // edited in place leaves an index built by the old clause and a file claiming the
 // new one, with nothing saying so; the strings are printed only when they
 // disagree, because that is when they are worth reading.
-func (r *report) reportService(reply ipc.DoctorReply, err error) {
+func (r *report) reportService(reply ipc.DoctorReply, err error, cacheRoot string) {
 	r.line("service")
 
 	if err != nil {
@@ -757,7 +764,7 @@ func (r *report) reportService(reply ipc.DoctorReply, err error) {
 		r.fail("not answering", "%v", err)
 		return
 	}
-	r.reportVersions(reply.Product)
+	r.reportVersions(version.Product(), reply.Product, cacheRoot)
 	r.field("uptime", "%s", (time.Duration(reply.UptimeMS) * time.Millisecond).Round(time.Millisecond))
 	r.field("events", "%d", reply.Events)
 	r.field("spool", "%d", reply.SpoolDepth)
@@ -783,21 +790,21 @@ func (r *report) reportService(reply ipc.DoctorReply, err error) {
 	}
 }
 
-// reportVersions is M-7's three versions, and it prints the two that can be
-// answered without a delivery channel.
+// reportVersions is M-7's three versions.
 //
 // **Installed against running** catches a replacement that was copied and never
 // restarted, which is the state an interrupted reinstall leaves. **Cache against
-// installed** is the "there is something newer" half, and there is no plugin
-// cache to read yet - so it says so rather than printing a blank. M-7's own
+// installed** is the "there is something newer" half, and it reads Claude Code's
+// plugin cache - which is where the delivery channel puts an archive it has
+// fetched and checked against the hash the marketplace entry names. M-7's own
 // reading is that the first pair is the more useful half anyway, because a user
-// who never installs the plugin still gets it.
+// who never installs the plugin still gets it, and this keeps that shape: no
+// cache is an ordinary machine and says so rather than reading as a fault.
 //
 // Nothing here fails the report. A version disagreement is a fact about the
 // machine and the two commands that resolve it are named in the line itself;
 // `doctor`'s exit code is M-6's and belongs to the stages, not to this.
-func (r *report) reportVersions(running string) {
-	installed := version.Product()
+func (r *report) reportVersions(installed, running, cacheRoot string) {
 	switch running {
 	case "":
 		r.field("version", "%s installed; the service does not report one, so it is older than "+
@@ -809,8 +816,22 @@ func (r *report) reportVersions(running string) {
 			"service was not restarted; `engramux update --from <dir>` does both",
 			installed, running)
 	}
-	r.field("newest available", "unknown - there is no delivery channel yet, so `update` reads "+
-		"a directory you point it at")
+	dir, newest := newestPlugin(cacheRoot)
+	switch {
+	case newest == "":
+		r.field("newest available", "nothing in Claude Code's plugin cache, so `update` reads "+
+			"a directory you point it at")
+	case compareVersions(newest, installed) > 0:
+		// The path is printed because it is the argument to the command
+		// on the same line. It is masked like every other value here, so
+		// the executable spelling needs --full - which is the trade M-6
+		// made everywhere else in this report.
+		r.field("newest available", "%s in the plugin cache is newer - `engramux update --from %s`",
+			newest, dir)
+	default:
+		r.field("newest available", "%s in the plugin cache, which is not newer than what is installed",
+			newest)
+	}
 }
 
 // reportMCP prints spec 5.9's endpoint, whether it is answering, and whether

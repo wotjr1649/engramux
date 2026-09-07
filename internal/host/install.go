@@ -47,8 +47,13 @@ type Options struct {
 	// points at the endpoint about to be registered (backlog 35). Empty
 	// means "do not know", which registers.
 	ClaudeMCP string
-	MCPJSON   string
-	TaskName  string
+	// PluginCache is Claude Code's plugin cache directory, which `doctor`
+	// reads to answer the third of M-7's three versions and which nothing
+	// here ever writes. It is on this struct because [resolvePaths] is the
+	// one place a path is decided, not because an installation touches it.
+	PluginCache string
+	MCPJSON     string
+	TaskName    string
 	// Binaries defaults to the relay and the service. It is a field so that a
 	// test can name something it can actually lock.
 	Binaries []Binary
