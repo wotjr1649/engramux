@@ -1667,6 +1667,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M11** | Plumbing down-weight earns its place | **Ran 2026-09-06, and the answer is no weight.** The non-vacuity arm is over its bar in both classes — a prompt is not in the top ten for its own most distinctive word 64.7% of the time — and the gate then found that no weight in the sweep improves a gain class without regressing one of the five. `a touched path` loses a document at weight 1 and never recovers. **[verified]**, and the table is below. Both arms of one run over one corpus, the way M4 is: recall@10 and MRR with a tool-plumbing down-weight off and on, over classes cut from documents carrying *human* text — and over M4's own three classes as the harm arm. **No improvement in the human classes, or any regression in M4's three, means the down-weight does not ship.** The section below carries the population, the field rule, the arm's figures and the sweep. What the arm licenses is building the rest of the gate; **nothing licenses a weight until the gate has run** |
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
+| **M13** | The query's share of the document | **Un-run, and the rule is registered.** Backlog 53's third and last candidate, and the one neither M11 nor M12 has the shape of: coverage is a property of the *pair*, where an event class and a match location are properties of the document. The same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and M11's populations for the third time, weight fixed at 5 and the **threshold** swept instead, against **M11's own condition unchanged**: improve recall@10 in a gain class and regress it in none of the five. The section below carries the rule, the population it chose its ladder from, what it expects to find, and the measured reason it is not simply bm25's own length normalisation spelled twice |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
@@ -2064,6 +2065,124 @@ It stays for the reason M11's seam stayed — a measurement nothing re-runs is t
 §8 forbids — and `TestTheHumanIDSetReachesTheStatement` is what says the predicate reaches the
 statement at all, since no figure in either table could tell a term that never arrived from one that
 arrived and changed nothing.
+
+### What M13 will measure, pre-registered before a number exists (M-2)
+
+**`[unverified]` throughout — nothing in this section has been run.** It is written before the gate
+exists, on M11's precedent and M12's, and the two things it fixes in advance are the rule and the
+condition. The population figures below and the two orderings in *Why it might already be there* are
+measured and are marked where they are; every recall figure this section will one day carry is
+absent on purpose.
+
+Backlog 53 named three candidate signals for telling a document that is *about* the query from one
+that merely *contains* it. M11 rejected a weight keyed on the document. M12 asked whether a weight
+keyed on where the match fell is a different instrument and found that it is, on three classes of
+five, and that it is powerless on the one that vetoes. **This is the third and last of the three, and
+it is the one neither of the others has the shape of: it is a property of the *pair*.** The same path
+is a large share of a two-line prompt and a vanishing share of a 40 KB tool output, and no property
+of either document alone says so.
+
+**Why it might already be there, which is this gate's M12-shaped question.** bm25 normalises by
+document length — that is what its `b` parameter is — so a ranking that already scores a short
+document higher for the same match has the candidate in it, and a second term would be a second
+spelling of a coefficient the index applies for free. **Measured 2026-09-07 over a synthetic
+44-document corpus**, one token planted once in a 52 B prompt, a 1.3 KB tool response and a 43 KB
+tool response: with the derived-field boost **off**, the ranking returns the 52 B document first and
+the 43 KB one last, so bm25's length normalisation is present and is working. With the boost **on**,
+**both tool documents move above the 52 B prompt.** `boostPerDerivedToken` is a flat 5 per token
+found in a derived column and it is blind to how long the column is, so it out-votes bm25's damping
+by an amount that does not depend on the document at all. **That is the mechanism this candidate
+would act on, and it is why it is not simply bm25 twice**: the ranking's length signal exists and the
+one term M4 added to it overwhelms it.
+
+*The rule, and it is deliberately the weaker of the two available.* Coverage of a document by a query
+is **the query's byte length over the document's indexed byte length** — `events.leaves`, the same
+text `events_fts` is built over and the same text `store.Leaves` returns. Occurrences are **not**
+counted, and a document carrying the token forty times scores exactly what one carrying it once
+scores. That understates the candidate, which is the direction M12 chose for its own substring rule
+and for the same reason: it makes the signal **harder** to license. It is also the only form a
+shipped term could take, because FTS5 exposes no per-row term frequency to SQL — so measuring the
+stronger form would be measuring something that cannot be built.
+
+*The population, measured 2026-09-07 over `.capture/fixtures-raw`.* 901 documents with §7.5's
+self-test excluded. Their indexed text runs **10 B at the shortest, 814 B at the median, 6,912 B at
+the ninth decile and 166,990 B at the longest** — three orders of magnitude across one corpus, which
+is what makes a share a discriminating quantity here rather than a constant. And the coverage each of
+the five classes' own queries has over its own target, as a median in parts per million: **23,026**
+for a prompt's own words, **13,953** for a reply's own words, **17,926** for a command line, **1,741**
+for a touched path, **3,100** for an error message.
+
+**Read those five numbers before the ladder, because they are what makes this gate falsifiable and
+they say the answer is not going to be tidy.** A command line's target sits *above* a reply's. So
+coverage does not separate the human classes from the machine ones and was never going to: a person
+typing a command into a two-line prompt and a hook recording that same command in a small
+`PreToolUse` payload are both documents the query is a large share of. What it separates is short
+from long, and only two of the five classes are systematically long — `a touched path` at a tenth of
+the gain classes' coverage and `an error message` at a fifth, because a path and a stack frame are
+cut out of tool output and tool output is what the long documents are.
+
+*What is therefore expected, written down so that the run can contradict it.* The gain classes
+improve and `a touched path` and `an error message` regress, which is M11's veto arriving by a
+different route. If that is what happens, the candidate closes on the same sentence M11 closed on and
+row 53 has nothing left in it. If the harm classes hold — because their targets are already outside
+the top ten, or because what the term lifts past them is not what the term was meant to lift — then
+the shape of the answer is M12's rather than M11's and the licensing paragraph below applies.
+
+*The ladder, and where its five values come from.* The term is `rank` less a weight times whether the
+document is in the lifted set, which is M11's expression and M12's, so **the weight is fixed at 5 for
+M12's reason**: 5 is where M11's gain was largest before the term begins to dominate bm25, and it
+makes this gate's weight-5 column directly comparable to the two already committed. What is swept
+instead is the **threshold**, in parts per million: **1,000, 2,000, 5,000, 10,000 and 20,000**. They
+are chosen from the population and not from any answer — the five classes' own target medians span
+1,741 to 23,026, and the ladder brackets that range at both ends so that its lowest value lifts
+nearly every target and its highest lifts almost none. A threshold is a free parameter and the sweep
+is what stops it being tuned, exactly as M11's eight weights did.
+
+*The lifted set, and why it is the seam M12 already built.* For one query the set is every document
+whose indexed text contains the query case-insensitively **and** whose coverage reaches the
+threshold. The containment half is not the rule and does not narrow it: an FTS5 prefix match implies
+containment, so every document the query can reach is in the set that the coverage test then filters,
+and the term is unchanged by it. It is there because it is what keeps the `events.id IN (…)` list the
+size of the match set rather than the size of the corpus. **The predicate is the one M12 added,
+unchanged** — an id set carried in per query on a test-only seam, whose export is renamed here
+because M12's name for it says human text and this set is not that. It is a measuring instrument for
+the reason that seam's own comment gives and cannot be anything else.
+
+*The arm.* M11's five classes over M11's populations, unchanged and for the third time: the two gain
+classes over every candidate, the three harm classes over `m4Sample`'s 25. Six columns per class —
+weight 0, and weight 5 at each of the five thresholds — and the supplementary run over every harm
+candidate rather than 25, on M12's precedent and with M12's standing: reported, not pre-registered,
+unable to change the verdict. **Two anchors have to reproduce and a run that misses either has a
+defect in this gate rather than a finding**: weight 0 on the sampled arm is M11's own baseline, 6,
+76, 17, 13 and 19, and weight 0 on the supplementary arm is M12's, 336, 56 and 79.
+
+*The condition, registered before the gate exists.* **A coverage signal is licensed only if, against
+weight 0, some threshold in the ladder improves recall@10 in at least one of the two gain classes and
+regresses it in none of the five.** That is M11's condition and M12's, unchanged, over the same
+classes and the same populations; the only thing that moves is what the term keys on. The gate
+reports the list of thresholds that meet it, which is M11's shippable-weights shape and is empty when
+none does.
+
+*One figure is reported beside the verdict and it is not gated on.* **`demoted`** is, of the top-ten
+places a class's queries fill at weight 0, how many hold a document the rule does not lift — the
+exact count of what the term would push down, per threshold. It is this gate's answer to the demand
+M12 left for it: a candidate that cannot say what it would have moved is not ready to be built, and
+`machine-only`'s 85 of 519 sampled and 330 of 760 over every harm candidate is the size it is being
+compared against. A verdict of no with `demoted` near zero says the threshold is above nothing and
+the column is weight 0 by another name; near the denominator it says the signal is real and this is
+not where it pays.
+
+*What a pass would license, and what it would cost.* The schema change and nothing else: an integer
+column holding the indexed text's byte length, and a migration. **That is materially cheaper than
+what M12 would have licensed** — M12's second FTS column is an index over half the corpus's text and
+`00002` already measured what rebuilding one costs, where this is eight bytes a row and no rebuild.
+Whether a column is needed at all, or whether SQLite answers the length of `events.leaves` from the
+record header without loading the value, is `[unverified]` and is part of what a pass licenses rather
+than part of this gate. The ranking would still have to be swept once the column exists, and this
+gate is not that sweep.
+
+*Nothing here logs a query.* Two of the five classes cut theirs from a prompt or an assistant message,
+which is M11's stricter rule, and it governs the whole file: counts and figures only.
 
 ### What M8 will measure, pre-registered before a number exists (M-2, M-4)
 
