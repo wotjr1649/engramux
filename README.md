@@ -28,11 +28,14 @@ exact message is unrecorded. One artefact, `windows/amd64`; `arm64` is unmeasure
 
 ## There is no release
 
-No tag, no release page, no marketplace entry, no archive, and no CI — this repository has never
-built an artefact anywhere but on a developer's machine. The only path anyone can walk today is
-**building from source, and that is the developer path**, labelled as one deliberately: the spec
-rejects source as a primary path for end users, and the Defender section below is why it is not
-merely inconvenient.
+No tag, no release page and no archive — this repository has never built an artefact anywhere but
+on a developer's machine, and as of 2026-09-07 nothing has run its checks anywhere else either.
+What exists is the *process* rather than the release: a marketplace entry that names version
+`0.0.0` because there is nothing to name, a packaging script, and two GitHub Actions workflows that
+have never run, because nothing has been pushed. The only path anyone can walk today is **building
+from source, and that is the developer path**, labelled as one deliberately: the spec rejects
+source as a primary path for end users, and the Defender section below is why it is not merely
+inconvenient.
 
 The version is `0.x` and there is no compatibility promise. Nothing outside `internal/` and `cmd/`
 is exported — `pkg/` included — because a public API surface is a promise 1.0 has not earned. A
@@ -123,6 +126,14 @@ everyone who downloads it, so its prevalence accumulates; a binary you built is 
 machine and stays rare forever, and rarity is what this detection keys on. Nothing here is
 code-signed; signing is sequenced behind a release process rather than bought.
 
+**1.0 will ship unsigned, and 1.0.1 onwards will carry a signature.** That order is forced rather
+than preferred. No certificate is being bought; what replaces buying one is SignPath Foundation,
+which signs qualifying open-source projects at OV level for free — and its first requirement is
+that the project **already be released in the form to be signed**. So whatever the first release
+is, it cannot be signed, and a pre-release existing only to clear that bar would buy nothing the
+bar does not already force. If you meet an unsigned binary from this project, you were told here
+first, which is the standard the fourth publication condition sets.
+
 **The exclusion procedure is `[unverified]`, and that is not a formality.**
 `Add-MpPreference -ExclusionPath` was attempted and refused with HRESULT `0xc0000142` — unelevated,
 or Tamper Protection, which is what that feature is for. An exclusion therefore has to go through
@@ -150,7 +161,10 @@ installed binary overwrite itself, with two separate refusals saying so.
 
 ## Checking it
 
-There is no CI. These three run locally, in this order:
+These three run locally, in this order. A push and a pull request run the same three in the same
+order on GitHub Actions — but a runner has no captured corpus and no native memory, so several
+gates skip there that do not skip here, and a green run on a runner is the weaker statement of the
+two. The last paragraph of this section is why.
 
 ```bash
 go test -p 1 ./...
@@ -214,16 +228,23 @@ saying there is nothing to read from.
 
 ## Delivery, in the future tense
 
-Today there is no channel for either host, so `update --from <directory>` is the only door, and it
+Today there is no release for either host, so `update --from <directory>` is the only door, and it
 is the same door for both.
 
-When a channel exists it will be a GitHub Release as the substrate and a Claude Code plugin as the
-channel, and the release archive will be the same artefact both ways — a Codex user who unpacks it
-by hand gets bytes identical to what a plugin user receives. **What will be unequal is the
-noticing.** Codex has a plugin system of its own, but as of 2026-09-03 it documents neither an
-archive source nor an update command, so a Codex plugin could carry the binaries and could not fetch
-a new release or say that one exists. That is a difference in convenience, not in capability, and it
-is written here rather than left for a Codex user to discover.
+The channel it is waiting for is built and is a GitHub Release as the substrate with a Claude Code
+plugin on top: one archive per version, and the marketplace entry in `.claude-plugin/` carries that
+archive's SHA-256, so the host fetches it, checks it, and unpacks it into its plugin cache.
+`engramux update` reads that directory, and `engramux doctor` says whether what is there is newer
+than what is installed. **Nothing in this product fetches anything** — the party that downloads is
+the host you already trust to download, and this codebase has still never made an outbound network
+call.
+
+**The release archive is the same artefact both ways.** A Codex user who downloads it and unpacks it
+by hand gets bytes identical to what a plugin user receives. What is unequal is the noticing: Codex
+has a plugin system of its own, but as of 2026-09-03 it documents neither an archive source nor an
+update command, so a Codex plugin could carry the binaries and could not fetch a new release or say
+that one exists. That is a difference in convenience, not in capability, and it is written here
+rather than left for a Codex user to discover.
 
 ## Where the decisions live
 
@@ -232,8 +253,9 @@ is written here rather than left for a Codex user to discover.
 - `docs/superpowers/backlog.md` — deferred findings no test owns yet.
 - `docs/prompts/` — one work order per session, dated. A record, never updated.
 
-This is one developer's project with no CI and no release process. Nothing here promises that an
-issue will be answered.
+This is one developer's project. It has a release process and two check workflows now, and neither
+has ever run on anything but that developer's machine. Nothing here promises that an issue will be
+answered.
 
 ## Licence
 

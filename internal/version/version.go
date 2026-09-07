@@ -23,7 +23,11 @@ import (
 // mistyped import path, or an initializer that is not a plain constant all
 // no-op with **no linker error at all** - and the obvious thing to copy here,
 // ipc.Version, is a const. Nothing in this repository can catch a flag that
-// silently did nothing: there is no CI, and a test cannot see release ldflags.
+// silently did nothing: a test cannot see release ldflags and neither can a
+// CI run of that suite. What does see it is scripts/package.sh, which runs
+// the binary it just built and refuses to package one reporting a different
+// version - and that is why `doctor` prints this on a machine with nothing
+// installed, which is the state a freshly built binary is in by definition.
 //
 // What does catch it is the binary itself, and it is not `go version -m`.
 // That does print the ldflags a build used, through `-s -w`, because build
