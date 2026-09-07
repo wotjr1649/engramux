@@ -1,8 +1,27 @@
 # Session 27 — Engramux: the packaging half, and the hash the owner commits
 
-Step 6's local half is built, verified against the real installation, and merged `--no-ff` — which
-is this repository's **first merge commit**, and the reason the rule exists. What is left of Step 6
-is a tag and a release page, and both are publication acts that need the owner's own hands.
+Step 6's local half is built, verified against the real installation, and merged `--no-ff`. What is
+left of Step 6 is a tag and a release page, and both are publication acts that need the owner's own
+hands.
+
+**Two corrections, written in by the session that wrote this document** — session 25's own precedent,
+marked so nobody reads it as a later session editing a record. Both were found by a grilling pass
+after this was committed, and both are the same failure: a claim taken from a document rather than
+from the thing the document describes.
+
+**This sentence said the merge was this repository's first, and it is the twenty-fourth.** `git log
+--merges --oneline | wc -l` answers 24, eighteen of them already on `origin`, the earliest
+`42d102a` on 2026-09-02. The claim came from `AGENTS.md`'s branch-policy paragraph, which said the
+repository had none — true when it was written on 2026-08-30, stale three days later, and repeated
+as fact by session 26's hand-off and by this document before anyone checked. `AGENTS.md` is
+corrected, and the rule that would have caught it is written into *How we work* rather than left as
+this session's lesson.
+
+**§3 said the plan's Steps 7 and 8 were available and blocked by nothing. Both were done on
+2026-09-04**, on `step-7-selector` and `step-8-window-cost`. There is **no unstarted step in the
+plan** — Steps 1 through 8 are done except Step 6's publication half, which is a publication act.
+What that changes about §3 is its conclusion rather than its shape: the work available to an agent
+is the backlog and row 53's reserved slot, and nothing else.
 
 One decision in it was not an agent's to make and was put to the owner rather than assumed. It is
 §2, it changed the shape of the release process, and it is why the archive had to become
@@ -99,10 +118,31 @@ rule says a tag is pushed only after the gates that skip on a runner have been s
 archive under `dist/` and rewrites `.claude-plugin/marketplace.json`. Review that diff, commit it,
 tag that commit `v<version>`, and push the tag. The workflow does the rest and refuses a mismatch.
 
-**Session 28's scope is the owner's to rule and is not decided here.** Nothing on the critical path
+**Ruled by the owner on 2026-09-07, in a grilling pass after this document was first committed, and
+written in by the session that wrote it.** Four answers, and they order everything above:
+
+1. **The owner's queue comes first and no agent session runs until the batch is pushed.** Every
+   agent session grows what has to be reviewed, and the push is the only one of the five that
+   unblocks an agent at all — it is also the only one whose cost grows with waiting.
+2. **The review stays what session 22 decided**: read in full, pushed once. Not delegated, not
+   staged.
+3. **Publication condition 3 closes before the first release**, not after. The condition is that a
+   stranger is told in advance, and a release is the moment strangers can meet the binary. The cost
+   is accepted: SignPath needs a release to exist, so signing moves back by however long the
+   Security UI walk takes.
+4. **M7's 150 labels before M8's 281.** Smaller, and finishing them hands half of Phase C to an
+   agent.
+
+So the order is: this correction commit, then the owner's review and push, then M7's labels, the
+Defender walk and backlog 52 in any order, then 0.1.0. **What a session 28 takes is answerable only
+once the push has happened** — it depends on whether the labels are done by then — so it is
+deliberately not fixed here.
+
+Nothing on the critical path
 is an agent's while Phase B is open. What is available if the owner wants it: row 53's reserved-slot
-candidate, which stays unmeasured and unassigned; backlog **38**, **40**, **51** and the **54** this
-session opened; and the plan's **Step 7** and **Step 8**, neither of which is blocked by anything.
+candidate, which stays unmeasured and unassigned, and backlog **38**, **40**, **51** and the **54**
+this session opened. **Not the plan**: this paragraph named Steps 7 and 8 and both were done on
+2026-09-04, which the correction at the top of this document covers.
 **54 is the one to weigh against the others rather than to take on sight** — it is read from the
 code and nobody has met it, so its priority is a guess about how many users move a configuration
 home, which is exactly the kind of number this repository normally refuses to act on without.

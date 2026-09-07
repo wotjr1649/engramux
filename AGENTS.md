@@ -146,6 +146,16 @@ document gets corrected to match. It settles nothing about **intent**. Code that
 invariant is a bug; editing the spec to match it is how a bug becomes permanent. Changing an
 invariant is a design change, made deliberately, not a side effect of an implementation.
 
+**A claim about this repository's own state carries the command that answers it.** The history, what
+files exist, whether anything runs anywhere but here — `git` and the filesystem answer all of those
+in one line, so a document that asserts one without naming that line is asking to be believed rather
+than checked, and nothing notices when it stops being true. Measured 2026-09-07: the branch-policy
+paragraph below said this repository had no merge commits. It was true when written on 2026-08-30
+and false from `42d102a` on 2026-09-02, and in the five days between, a session hand-off and a
+session brief both repeated it as fact. `git log --merges --oneline | wc -l` settles it in two
+seconds. The other half of this is already covered and needs no rule: a measurement carries the day
+it was taken, and the table below says to re-verify the rows naming a dependency.
+
 **No code blocks in documents.** Signatures, DDL, and package layout belong to code. The one
 exception is a reproduction command you actually ran and whose output you saw. Three spec revisions
 and a 5,748-line plan (`3e5fe8d`) were discarded for ignoring this. Plans reach that state far more
@@ -170,8 +180,11 @@ evidence.
 **Where work lands.** `main` takes documentation, measurements, spec and backlog changes, and
 test-only work — anything self-contained that does not change what the binary does. Anything that
 changes product behaviour or removes a component gets **a branch per plan step**, named for the
-step, merged with `--no-ff`. The merge commit is the point: this repository has none, which is
-exactly why "what did that step change" is not a question its history can answer. Deciding once at
+step, merged with `--no-ff`. The merge commit is the point: it is what makes "what did that step
+change" a question the history can answer, and `git log --merges --oneline` is how you ask. **The
+sentence that stood here said this repository had none.** That was true on 2026-08-30 and false from
+`42d102a` on 2026-09-02; the count on 2026-09-07 is 24, so the policy has been kept and the reason
+given for it had gone stale. Deciding once at
 the start of a session is not enough — the same session that opens with a backlog row can turn into
 a feature port, and that is when the branch is owed.
 
