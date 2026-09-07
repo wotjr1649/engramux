@@ -91,9 +91,40 @@ column it matched.
 | **C** | agent | M7 pass 2, and M8's P5 half against the committed rule. **This is where the native-grade verdict's second number comes from**, and it cannot start before B |
 | **D** | agent, then owner | CI and the release process → the 1.0 release → SignPath Foundation → signed releases |
 
-**A session opening into this has the same problem session 24 had and the same three answers, and
-the choice is the owner's.** None of them is on the critical path; that was true of M13 too and was
-priced before it was chosen.
+**Ruled by the owner on 2026-09-07, after this document was first committed, and written in by the
+session that wrote it.** A brief is a record and is not updated by a *later* session; this is the
+same shape session 23's own two corrections were, and it is marked so nobody reads it as the other
+thing. The three answers below were put to the owner and the answer is **the first one only**:
+
+- **Session 26 takes M14 and nothing else.** It is one gate, it lands on `main`, it finishes inside
+  a session, and dropping it mid-way strands nothing.
+- **Phase B is expected within a day**, so **Phase C outranks M14 the moment it opens.** Stop where
+  you are and take C; M14 is test-only and leaves no branch behind.
+- **Phase D's first step is authorised to start out of the plan's order** — the packaging, which is
+  locally verifiable end to end — but it is **session 27's**, not 26's. It is not a one-session job
+  and it would sit half-built on a branch when C arrives.
+- Row 53's reserved-slot candidate stays unmeasured and unassigned.
+- **Backlog 46 is disqualified for now**, and this is the reason rather than a preference: it
+  changes `internal/inject`, which is the package M7 is about to measure, and §4 forbids touching it
+  before pass 2's figures are reproduced.
+
+**What M14 is, and it is not what the paragraph below says.** M13's open question — whether a
+threshold between 5,000 and 20,000 ppm keeps the reply gain without the `an error message` loss —
+does **not** need the licensed schema change to be answered. `SearchLiftingIDs` already measures any
+rule over any population; **the length column is what a term needs to *ship*, not what a question
+needs to be *asked*.** So M14 is test-only, on `main`, and roughly 1.5× M13's 50 s.
+
+**And it cannot be extra rungs added to `m13Thresholds`.** That ladder is registered, and 5,000 and
+20,000 cleared the condition while 10,000 did not — rungs chosen from that shape are a grid picked
+after seeing its answer, which is precisely what M13's own section refuses to do to its condition.
+**M14 is a new gate with its own pre-registration commit**, and the thing its condition names that
+M13's could not is the **full** harm populations, which is where M13's sample of 25 was structurally
+blind. Expect the race budget to tighten; **M13's supplementary arm becomes redundant once M14
+covers those populations**, and that is the obvious place to pay for it — with a stated rule, in the
+spec, not by quietly deleting an arm.
+
+What follows is the survey the three answers were chosen from, kept because it says what the other
+two would have cost.
 
 *M13's own sweep* is the largest and the only one M13 licensed: the length column, its migration, and
 a real sweep of weight and threshold over the **full** harm populations. It is a behaviour change and
@@ -123,6 +154,11 @@ supplementary run disagreed with it. If it turns out to be the wrong condition, 
 made deliberately and recorded as one — never a harness quietly measuring something else. Every count
 in both tables is pinned, and a corpus that grows makes them wrong: **re-measure and correct the
 spec's figures, never relax the comparison.**
+
+**`m13Thresholds` is part of that and is the half that looks harmless.** Two of its five rungs
+cleared the condition and the one between them did not, so any rung added now is chosen from an
+answer already seen. M14 gets its own ladder in its own pre-registration commit; M13's five values
+stay exactly where they are.
 
 **M8's rule.** Committed before any figure existed. Phase C implements P5 against that rule.
 
