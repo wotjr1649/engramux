@@ -48,12 +48,15 @@ ppm** against the gain classes' 13,953 and 23,026, because a failure line is cut
 and tool output is what the long documents are. Every rung high enough to lift a reply is far above
 an error message's own share of its document.
 
-**Why this is a finding and not a grid chosen from an answer already seen, which is the objection it
-had to answer before it was written.** The interval came from a question M13 registered in its own
-section, and the condition M14 registered is M11's sentence over **every candidate of every class** —
-21, 5 and 4 times as many documents in the three harm classes. **A rule tuned to an answer is a rule
-that was made easier, and this one is strictly harder.** Nothing of M13's moved: its ladder, its
-condition, its licensed list and every pinned count are where they were.
+**Why this is a finding and not a grid chosen from an answer already seen, and the honest half goes
+first.** **The interval came from M13's table, not from M13's pre-registration.** `2ab9de3`
+registered M13's ladder and condition and names no range; the sentence naming 5,000 to 20,000 was
+written in `c6321f9`, after the answer was visible. **Choosing where to look from a result is
+ordinary. Choosing the rule after seeing which answer it gives is not** — and M14's condition is
+M11's own sentence over **every candidate of every class**, 21, 5 and 4 times as many documents in
+the three harm classes, which is **strictly harder to pass than the one it follows and never
+easier**. That is the whole defence and it does not need the other one. Nothing of M13's moved: its
+ladder, its condition, its licensed list and every pinned count are where they were.
 
 **Three anchors, and only one of them tests the rule.** Weight 0 reproduced M11's 6, 76, 17, 13, 19
 on the sampled 25 and M12's 336, 56, 79 over every candidate — and neither says anything about
@@ -85,8 +88,19 @@ shape at all.
 | **C** | agent | M7 pass 2, and M8's P5 half against the committed rule. **This is where the native-grade verdict's second number comes from**, and it cannot start before B |
 | **D** | agent, then owner | CI and the release process → the 1.0 release → SignPath Foundation → signed releases |
 
-**The owner ruled session 27's scope on 2026-09-07 and it is recorded in session 25's §3 rather than
-decided here.** **Phase C outranks everything the moment B opens.** Phase D's first step — the
+**Re-put to the owner on 2026-09-07 after this document was first committed, and written in by the
+session that wrote it** — session 25's own precedent, marked so nobody reads it as a later session
+editing a record. Two things had changed since the original ruling: M14 was done, and the weight
+sweep it opened existed as a priced alternative that did not exist when session 27's scope was first
+set. **Phase B is verified unmoved** — `.capture/m7`'s fixture is 150 of 150 `TODO` and
+`.capture/m8/pairs.tsv` is 281 of 281, measured here, so Phase C is blocked either way. The answer is
+**Phase D's packaging, unchanged**: the weight sweep is more measurement on a row whose three
+candidates are all measured and none of which ships, and packaging is the only thing publication is
+actually waiting on. **The race guard stays at 90m and the measurement is recorded rather than the
+timeout raised.**
+
+**The rest of session 27's scope was ruled on 2026-09-07 and is recorded in session 25's §3 rather
+than decided here.** **Phase C outranks everything the moment B opens.** Phase D's first step — the
 packaging, which is locally verifiable end to end — **is session 27's** and is authorised to start out
 of the plan's order; it is not a one-session job, so it goes on a branch and expects to be
 interrupted. Row 53's reserved-slot candidate stays unmeasured and unassigned. **Backlog 46 is still
@@ -160,12 +174,15 @@ and it logs class names, counts and threshold arrays only. So is M13's, now 11 l
    hand-off that reads it as a run budget prices the next gate against the wrong number, and
    session 25's *whole run took 43 minutes* is a true sentence about a different quantity. The
    binary that matters is `internal/search`, and it measured **3,473.0 s — 57.9 minutes of 90**
-   with M14 in it, against 2,500.2 s the day before. The four earlier readings spread 2,110.8 s to
-   2,563 s, so the machine's own spread is about 450 s and this is 910 s above the highest of them:
-   **the size is the gate.** A third of the guard is left. **One more corpus gate of M14's size does
-   not fit under it**, and the script's own comment says the answer is to raise the timeout rather
-   than skip the gate — so the next expensive gate raises it in the same commit that adds it, and
-   says what it re-measured.
+   with M14 in it, against 2,500.2 s the day before. **Do not read all of that as the gate.** The
+   multiplier is stable across the two days — 16.5× then 15.9× — so the 973 s jump is about sixteen
+   times a 66 s jump in the ordinary run, and only 32 s of that 66 is the two gates' net change:
+   **about half is M14 and half is the day**, the three earlier readings spreading 2,110.8 s to
+   2,563 s. A third of the guard is left, one more gate of M14's size lands at about **79 minutes**
+   with 11 minutes of margin against a day's spread of 7.5, and the script's comment says the
+   session that adds it raises the timeout in the same commit and says what it re-measured. **The
+   owner's answer on 2026-09-07 was to leave 90m and record the measurement**, because a hang guard
+   raised without need makes a real hang take longer to surface.
 3. **A `sed` pattern that escapes an ampersand in its left-hand side matches nothing and says
    nothing.** `&` is only special in the *replacement*; `\&` in the pattern does not match a literal
    `&`, so a mutation written as `if improved \&\& !regressed` was never applied. It cost nothing

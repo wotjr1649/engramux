@@ -2366,6 +2366,15 @@ corrected.
 *Nothing here logs a query.* Class names, counts and threshold arrays only, which is M13's rule and
 governs this gate's file the same way.
 
+**One thing the registered half above does not say, and it belongs beside it.** The interval this
+gate sweeps came from M13's **table**, not from M13's pre-registration: `2ab9de3` registered M13's
+ladder and its condition and names no range at all, and the sentence naming 5,000 to 20,000 was
+written in `c6321f9`, after the answer was visible. That is admitted rather than dressed up, because
+the defence does not need it. **Choosing where to look from a result is ordinary; choosing the rule
+after seeing which answer it gives is not** — and this gate's condition is M11's own sentence over
+21, 5 and 4 times as many documents, which is strictly harder than the one it follows and never
+easier.
+
 **The gate ran on 2026-09-07 and no threshold is licensed.**
 `TestGateM14TheThresholdM13LeftOpen` in `internal/search`, **79.1 s** over the 901-document corpus,
 ten searches over each of 906 candidates. All three anchors reproduced — which for the third of them
@@ -2414,15 +2423,18 @@ longer ladder. M13's supplementary arm retired into this gate on the condition r
 in full — so **M13 now runs in 16.3 s and the pair in 95.4 s**, against 63.2 s for M13 alone before.
 The harm populations are measured at nine rungs instead of five and the package pays 32 s for it.
 
-**Under `-race` it cost more than that arithmetic implies, and that is the figure to plan against.**
-`internal/search` measured **3,473.0 s** on 2026-09-07 against 2,500.2 s the day before. The four
-readings before this one spread 2,110.8 s to 2,563 s, so the machine's own spread is about 450 s and
-this is 910 s above the highest of them: the size is the gate rather than the day. `scripts/race.sh`
-guards each test binary with a 90-minute timeout — **not the run**, which is a distinction a hand-off
-loses easily — so that package now sits at 57.9 minutes of it and **a third of the guard is left
-rather than a half**. The script's comment carries the re-measurement it asks for whenever a gate is
-added. One more corpus gate of this size does not fit under 90m, and raising it is the answer the
-comment already gives.
+**Under `-race` the package moved a long way and about half of that is this gate.**
+`internal/search` measured **3,473.0 s** on 2026-09-07 against 2,500.2 s the day before, and **the
+multiplier is what makes the jump attributable at all**: 2,500.2 over 151.9 is 16.5× and 3,473.0 over
+218.3 is 15.9×, so the 973 s is about sixteen times a 66 s jump in the ordinary run — of which only
+**32 s is the two gates' net change** and the rest is the day. The three readings before this one
+spread 2,110.8 s to 2,563 s, which is the size of a day here. `scripts/race.sh` guards each test
+binary with a 90-minute timeout — **not the run**, which is a distinction a hand-off loses easily —
+so that package now sits at 57.9 minutes of it and **a third of the guard is left rather than a
+half**. One more gate of this size lands at about **79 minutes**, which fits, with 11 minutes of
+margin against a day's spread of about 7.5. The script's comment carries the re-measurement it asks
+for whenever a gate is added and says the answer is to raise the timeout in the commit that adds the
+gate rather than to skip the gate.
 
 **One thing the break-it pass measured that the gate does not report.** Relaxing the condition from
 *improves one and regresses none* to *improves one or regresses none* licenses **all nine rungs**,

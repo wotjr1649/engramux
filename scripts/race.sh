@@ -72,9 +72,15 @@ echo "race.sh: using $cc"
 # is added, and raise it here rather than skipping the gate.
 #
 # Re-measured 2026-09-07 with gate M14 added: internal/search is **3473.0 s, or
-# 57.9 minutes**, so 32 minutes of this guard are left rather than 48. The four
-# readings before it spread 2110.8 s to 2563 s, which is the machine's own
-# spread of about 450 s - this one is 910 s above the highest of them, so the
-# size is the gate and not the day. 90m is not raised here because it still
-# holds, but one more corpus gate of M14's size does not fit under it.
+# 57.9 minutes**, so 32 minutes of this guard are left rather than 48. Do not
+# read all of that as the gate. The -race multiplier for this package is stable
+# across the two days - 2500.2/151.9 is 16.5x and 3473.0/218.3 is 15.9x - so the
+# 973 s jump is about sixteen times a 66 s jump in the ordinary run, and only
+# 32 s of that 66 is the two gates' net change. **About half of it is M14 and
+# half is the day**, and the three readings before this one spread 2110.8 s to
+# 2563 s, which is the day's own size. 90m is not raised here because it still
+# holds and a hang guard raised without need makes a real hang take longer to
+# surface: one more gate of M14's size lands at about 79 minutes of 90, which
+# fits, with 11 minutes of margin against a spread of about 7.5. The session
+# that adds it raises this in the same commit and says what it re-measured.
 CGO_ENABLED=1 CC="$cc" exec go test -race -p 1 -timeout 90m "$@" ./...
