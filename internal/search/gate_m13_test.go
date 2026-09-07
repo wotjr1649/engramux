@@ -109,8 +109,6 @@ func TestGateM13TheQueryShareOfTheDocument(t *testing.T) {
 		t.Logf("M13: no threshold in the ladder meets the condition. By this gate's own terms that " +
 			"closes backlog 53's last candidate rather than licensing a length column.")
 	}
-
-	m13Supplementary(t, db, docs, text)
 }
 
 // m13Weight is the one weight this gate measures at. It is [m12Weight]'s value
@@ -138,24 +136,21 @@ var m13Thresholds = [5]int{1_000, 2_000, 5_000, 10_000, 20_000}
 // and backlog 53's last candidate closing on the table. Three of the five meet
 // it, which is the first time any of row 53's candidates has.
 //
-// **Read [m13SupplementaryClean] before this number is quoted anywhere.** The
-// condition is over M11's populations, which for the three harm classes is a
-// sample of 25 - and over the full harm populations every threshold in the
-// ladder regresses a class. The condition is not moved to account for that:
-// it was registered before the gate was built, the supplementary run was
-// registered as reported and unable to change the verdict, and what the pair
-// says is that the licensed schema change has to be swept over the full
-// populations before a term ships, not that the gate answered wrongly.
-var m13Licensed = []int{2_000, 5_000, 20_000}
-
-// m13SupplementaryClean is the thresholds that regress none of the three harm
-// classes over *every* candidate rather than over [m4Sample]'s 25, pinned. It is
-// reported and not gated on, on M12's precedent.
+// **Read [m14Licensed] before this number is quoted anywhere.** The condition is
+// over M11's populations, which for the three harm classes is a sample of 25 -
+// and over the full harm populations no threshold in this ladder or in M14's
+// wider one clears it. The condition is not moved to account for that: it was
+// registered before the gate was built, the supplementary run was registered as
+// reported and unable to change the verdict, and what the pair says is that the
+// licensed schema change has to be swept over the full populations before a term
+// ships, not that this gate answered wrongly.
 //
-// It is empty. M11's own verdict turned on a single document of 25 and its
-// supplementary run confirmed the sample; this one contradicts it, which is the
-// other thing a supplementary run is for.
-var m13SupplementaryClean []int
+// The supplementary run that first said so is not in this file any more. It was
+// retired into gate M14, which measures the same three populations at the same
+// five rungs and four more, on the condition memory spec 5 registered for the
+// move: M14's first run reproduced every one of its figures, recall and demoted
+// alike, before the arm came out.
+var m13Licensed = []int{2_000, 5_000, 20_000}
 
 // m13Row is one class's measurement, and every count in it is pinned rather than
 // only the verdict - M11's rule and M12's, for their reason. The verdict is a
@@ -375,69 +370,4 @@ func m13Hits(t *testing.T, db *sql.DB, c m4Candidate, weight float64, lifted []s
 		t.Fatalf("a derived query was refused: %v", err)
 	}
 	return hits
-}
-
-// m13Supplementary runs the three harm classes over every candidate rather than
-// over [m4Sample]'s 25, and it is reported rather than gated on.
-//
-// It is here for the reason M12's own supplementary run was, and it inherits
-// M12's weight-0 column as its anchor: M11's verdict turned on a single document
-// of 25, and a sample that small cannot say whether one document is a boundary
-// artefact. This one cannot change the verdict above and does not try to.
-func m13Supplementary(t *testing.T, db *sql.DB, docs []doc, text map[string]string) {
-	t.Helper()
-	// The weight-0 column is M12's committed supplementary table, and it is
-	// an anchor here for the reason the sampled arm's is: a run that misses
-	// it is measuring a different corpus.
-	anchors := map[string]int{"a command line": 336, "a touched path": 56, "an error message": 79}
-	pinned := map[string]m13Row{
-		"a command line": {base: 336, at: [5]int{336, 336, 342, 345, 349},
-			visible: 4627, demoted: [5]int{258, 438, 1108, 1771, 2803}},
-		"a touched path": {base: 56, at: [5]int{54, 54, 56, 56, 55},
-			visible: 1046, demoted: [5]int{78, 176, 350, 610, 854}},
-		"an error message": {base: 79, at: [5]int{76, 73, 74, 75, 78},
-			visible: 776, demoted: [5]int{215, 333, 555, 674, 740}},
-	}
-	measured := make([]m13Row, 0, len(m4Classes))
-	for _, c := range m4Classes {
-		k := m13Class{name: c.name, candidates: m4CandidatesFor(t, docs, c)}
-		r := m13Measure(t, k, db, docs, text)
-		measured = append(measured, r)
-		t.Logf("supp  %-22s  n %3d  recall@%d  weight 0 %3d  at %v ppm %v",
-			k.name, len(k.candidates), m11K, r.base, m13Thresholds, r.at)
-		t.Logf("supp  %-22s  of the %d top-%d places its queries fill at weight 0, %v hold a document "+
-			"the rule does not lift at %v ppm",
-			k.name, r.visible, m11K, r.demoted, m13Thresholds)
-		if r.base != anchors[k.name] {
-			t.Errorf("supplementary %s: recall@%d at weight 0 found %d of %d, and M12's own "+
-				"supplementary table records %d.", k.name, m11K, r.base, len(k.candidates), anchors[k.name])
-		}
-		if want := pinned[k.name]; r != want {
-			t.Errorf("supplementary %s: measured %+v over %d candidates, pinned %+v. Re-measure and "+
-				"correct memory spec 5's M13 figures.", k.name, r, len(k.candidates), want)
-		}
-	}
-
-	// The half of the condition this arm can answer. It has no gain class,
-	// so `improves one` is not computable here and is not attempted; what is
-	// computable is `regresses none`, over populations 21, 5 and 4 times the
-	// size of the ones the verdict was taken over.
-	var clean []int
-	for i, tau := range m13Thresholds {
-		regressed := slices.ContainsFunc(measured, func(r m13Row) bool { return r.at[i] < r.base })
-		if !regressed {
-			clean = append(clean, tau)
-		}
-	}
-	t.Logf("supp  M13: thresholds in ppm regressing none of the three harm classes over every "+
-		"candidate: %v, against %v over the sampled 25", clean, m13Licensed)
-	if !slices.Equal(clean, m13SupplementaryClean) {
-		t.Errorf("supplementary M13: %v regress none of the three, pinned %v. Re-measure and correct "+
-			"memory spec 5's M13 figures.", clean, m13SupplementaryClean)
-	}
-	if len(clean) == 0 {
-		t.Logf("supp  M13: every threshold in the ladder regresses a harm class over its full " +
-			"population, and three of them regress none over the sampled 25. The verdict stands as " +
-			"registered; what this says is that the sample is where the licence came from.")
-	}
 }
