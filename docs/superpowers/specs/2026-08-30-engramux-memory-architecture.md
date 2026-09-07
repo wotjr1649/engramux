@@ -1668,6 +1668,7 @@ and the two things the run says nothing about are in M-4's own section; none of 
 | **M10** | Injection's time | **The deadline holds, and the distribution is reported.** Over the whole corpus no injection exceeds the 500 ms M-4 gives it — asserted, and asserted against a search made deliberately slower than the budget as well as against the corpus, because a deadline that is never approached is not evidence that it is enforced. The p95, the worst, and the share that abstained on time are **reported**: nothing has measured what a cold read costs at this database's size, so a rate would be a number invented rather than found |
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
 | **M13** | The query's share of the document | **Ran 2026-09-07, and it is the first of backlog 53's candidates to clear M11's condition — on the sample, and on no threshold over the full populations.** Coverage is a property of the *pair*, which is the shape neither M11 nor M12 has: the same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and populations for the third time, the weight fixed at 5 and the **threshold** swept, against **M11's own condition unchanged**. Three of five rungs clear it; at 5,000 ppm `a reply's own words` goes 76 to **92 of 139** — the **weakest** gain of the three, against M11's thirty-one and M12's thirty-three — and `a command line` **gains** one rather than holding level, which neither of the others managed. Both of those lost a touched path and this one loses none of the five, which is the whole distance between a number and a licence. The supplementary run over every harm candidate is where it stops being tidy: **not one rung regresses none of the three**, `an error message` losing five of 96 at the licensing threshold. The condition is not moved for that. What is licensed is a length column and a migration; **what is not is a shipped term**, which needs a sweep over the full populations first. The section below carries both tables |
+| **M14** | The threshold M13 left open | **Registered 2026-09-07, un-run.** M13 licensed a length column and no shipped term, and its five rungs were never spaced to answer the question a sweep has to start from: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the `an error message` loss. This asks it, under M13's rule and at M13's weight, over **every candidate of every class** rather than over `m4Sample`'s 25 — M11's own condition over the populations where M13's supplementary run says the harm already is, which makes it strictly harder to pass rather than differently scoped. Nine rungs: M13's five, retired into this gate, and the 2,500 ppm grid filling the interval M13's spacing left open. It needs none of what M13 licensed — the id-set seam carries any per-query set at any weight — so it is **test-only and licenses no term either way**; what a pass buys is a threshold for the sweep to be built around, and what a no says is that there is none at this weight. The section below carries the ladder, the three anchors and the condition |
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
@@ -2260,6 +2261,100 @@ matters, and this one clears the sampled condition and does not clear the full-p
 row's question — how to tell a document that is *about* the query from one that merely *contains* it
 — has an answer worth building on for the first time, and what it needs next is the sweep above
 rather than another candidate.
+
+### What M14 will measure, pre-registered before a number exists (M-2)
+
+**Registered 2026-09-07, before the gate exists and before any figure it can produce.** M13 licensed
+a length column and no shipped term, and it left one question its own five rungs were never spaced to
+answer: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the
+`an error message` loss. This gate is that question and nothing else.
+
+**It needs none of what M13 licensed, and that is the first thing to get right about it.** The
+`events.id IN (…)` seam M12 built carries any per-query id set through the ranking at any weight, so
+the length column is what a *term* needs in order to ship and not what a *question* needs in order to
+be asked. M14 is therefore test-only, changes no shipped path, and `Search` still passes 0 and nil
+while it runs.
+
+*Why this is not a grid chosen from an answer already seen, which is the objection it has to answer
+before anything else.* Adding rungs to M13's ladder would be exactly that: two of its five cleared
+M13's condition and the one between them did not, so a value inserted there is picked from that shape
+and it would move a verdict that is already recorded. **Nothing of M13's moves.** Its ladder, its
+condition, its licensed list and every pinned count stay where they are. What this gate changes is
+the **population the condition is taken over** — `m4Sample`'s 25 becomes every candidate, which for
+the three harm classes is 21, 5 and 4 times as many documents — and that makes the same sentence
+**strictly harder to pass**, over the arm where M13's own supplementary run already says the harm is.
+A rule tuned to an answer is a rule that was made easier; this one is not.
+
+*The rule, unchanged from M13.* Coverage of a document by a query is the query's byte length over the
+document's indexed byte length in parts per million, over `events.leaves`, with occurrences not
+counted. It is the same function rather than a second spelling of it: this gate shares M13's coverage
+rule and writes only its own set builder — one scan of the corpus per query instead of one per query
+per rung, because coverage does not depend on the threshold — and the two agreeing at every rung both
+measure is one of the anchors below.
+
+*The ladder, nine rungs.* M13's five, and the 2,500 ppm grid that fills the interval M13's spacing
+left open: **1,000, 2,000, 5,000, 7,500, 10,000, 12,500, 15,000, 17,500 and 20,000**. Uniform spacing
+rather than values chosen to sit anywhere in particular, which is the only defence a free parameter
+has. **1,000 and 2,000 are in the ladder for a cost reason and it is stated rather than implied**:
+M13's supplementary arm is retired into this gate, and those two rungs are two of its columns.
+
+*The arm.* All five classes over **every** candidate — 17, 139, 534, 120 and 96, so 906 documents and
+ten searches each. The weight is fixed at 5, M12's value for M12's reason, and this gate does not
+sweep it and therefore cannot license one. The sampled 25 survive as a weight-0 anchor and are
+measured at no rung: M13 owns that table and this gate does not write a second one.
+
+*Three anchors, and all three exist before the run.* Weight 0 over the sampled 25, and over every
+candidate in the two gain classes, is M11's own baseline — **6, 76, 17, 13 and 19**. Weight 0 over
+every candidate in the three harm classes is M12's supplementary table and M13's — **336, 56 and
+79**. Neither of those says anything about coverage, because at weight 0 no id set is passed at all,
+so the third is the one that tests the rule rather than the harness: **at the five rungs M13 also
+measured, every column has to reproduce M13's committed figures** — 6, 6, 6, 6, 6 and 83, 86, 92, 92,
+82 on the gain classes, 336, 336, 342, 345, 349 and 54, 54, 56, 56, 55 and 76, 73, 74, 75, 78 over
+the full harm populations, `demoted` alike. Without that third row the first run would be pinning
+whatever came out of it.
+
+*The condition, registered before the gate exists.* **A coverage threshold is licensed only if,
+against weight 0, it improves recall@10 in at least one of the two gain classes and regresses it in
+none of the five — over every candidate of every class.** That is M11's sentence, M12's and M13's,
+over the populations M13's sample could not see. The gate reports the list of thresholds meeting it,
+and the list is empty when none does.
+
+**Most of that answer is registered in advance, which is written here so that the run cannot be read
+as a discovery.** M13's supplementary table already says that all five of its rungs regress a harm
+class over the full populations, so **the only rungs that can license anything here are the four new
+ones**. A licensed list containing 1,000, 2,000, 5,000, 10,000 or 20,000 would mean this gate and M13
+disagree about one corpus, which is a defect in one of them rather than a finding.
+
+*`demoted` is reported beside the verdict and not gated on*, per class and per rung, on M13's
+precedent and for M13's reason: M13's break-it pass caught a comparison flipped from inclusive to
+strict by one count in that column while every recall figure in both its tables was identical.
+
+*What a pass would license, and it is smaller than it looks.* A threshold for the sweep to be built
+around, and nothing else. The weight is one value here, so no term ships on this gate's evidence and
+the sweep M13 owed is still owed. The length column stays licensed either way — this gate cannot
+un-license it.
+
+*What a no would say, registered so that it can be said.* That at weight 5 no threshold anywhere from
+1,000 to 20,000 ppm clears M11's condition over the full populations, and backlog 53's third
+candidate is then measured out at that weight. What would remain is a sweep over the weight, or the
+row's question staying open with all three of its candidates measured and none shipped.
+
+*What it costs, said before it is written rather than discovered afterwards.* 906 candidates at ten
+searches each is **9,060 searches against M13's 5,886**, and one corpus scan per candidate instead of
+one per candidate per rung. Retiring M13's supplementary arm removes 4,500 of M13's, so the two gates
+together go from 5,886 searches to 10,446 — a little under **1.8×** what this package spends on them
+today. M13 measured **63.2 s** for its 5,886 on 2026-09-07, which prices this gate at roughly a
+minute and a half of wall time and the pair at about the same again; `scripts/race.sh`'s remaining
+headroom, which is now under half its budget, is what that comes out of.
+
+*The retirement of M13's supplementary arm is part of this registration and is conditional.* Its
+table stays in this document as the finding it is; what moves is which gate re-measures it. The arm
+comes out **only if** M14's first run reproduces every one of its figures at the five shared rungs,
+and if that reproduction ever fails afterwards the arm comes back rather than the figures being
+corrected.
+
+*Nothing here logs a query.* Class names, counts and threshold arrays only, which is M13's rule and
+governs this gate's file the same way.
 
 ### What M8 will measure, pre-registered before a number exists (M-2, M-4)
 
