@@ -1,0 +1,71 @@
+# Push and pull request run the three checks AGENTS.md names, in its order.
+#
+# Memory spec M-7 decides that this exists and what it runs; this file executes
+# it and decides nothing. One job with three steps rather than three jobs,
+# because "in that order, not concurrently" is the repository's own rule about
+# these three and parallel jobs would break it.
+#
+# A green run here is a weaker statement than a green local run, and that is
+# measured rather than assumed: a runner has no `.capture/` and no native
+# memory, so M1, M3, the Phase 4 gate's corpus mode and the Phase 6 audit's
+# masked half all skip, each by its own explicit skip. That is the whole reason
+# for M-7's tagging rule - a tag is pushed only after those four have been seen
+# green on a machine that has the corpus, and what run that was is recorded with
+# the release.
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    # A bound, not a budget. scripts/race.sh already guards each test binary at
+    # 90 minutes; this guards the job around it.
+    timeout-minutes: 150
+    defaults:
+      run:
+        # Not powershell: scripts/race.sh is bash, and one shell for every step
+        # means one set of quoting rules to be wrong about.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # The `go` directive, so the toolchain here and the one in go.mod
+          # cannot drift apart silently.
+          go-version-file: go.mod
+
+      # -p 1 for the reason AGENTS.md gives: both reasons it was written for are
+      # gone, and whether it can be dropped is [unverified] because nothing has
+      # re-measured the timing-sensitive tests.
+      - name: suite
+        run: go test -p 1 ./...
+
+      # Pinned, and through `go run` rather than off PATH. A golangci-lint built
+      # with an older Go cannot typecheck this module's standard library - it
+      # prints `0 issues.` and exits 7, which reads exactly like a clean run.
+      # `go run` builds it with the toolchain above, so the linter and the
+      # library it is reading always agree.
+      - name: lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
+
+      # -race needs CGO_ENABLED=1 and a real C compiler; there is no CGO-free
+      # route on windows/amd64. The script finds one on PATH or fails with
+      # instructions rather than skipping silently.
+      #
+      # [unverified]: the runner image lists gcc 15.2.0 under its tools, read
+      # 2026-09-07 from actions/runner-images' own Windows readme, but whether
+      # it is on PATH there has not been observed - nothing has run this
+      # workflow. If it is not, this step fails loudly with the script's own
+      # message and the fix is one `ENGRAMUX_CC` line.
+      - name: race
+        run: ./scripts/race.sh

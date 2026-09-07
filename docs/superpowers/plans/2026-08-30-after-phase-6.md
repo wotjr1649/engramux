@@ -281,7 +281,8 @@ for `update` to find, so building the release path is inside this step rather th
 splitting them makes two steps neither of which can verify the other. The one piece that is *not*
 here is the push and pull-request check workflow — it changes nothing the binary does, so by this
 repository's own rule it lands on `main` whenever somebody writes it, and it is worth writing before
-this step rather than during it.
+this step rather than during it. **Written 2026-09-07**, on `main` and as session 27's first commit,
+which is that rule being followed rather than an exception to it.
 
 **rev.6 amends the paragraph above rather than appending under it.** The two halves *were* split, on
 2026-09-04, because the release half is a publication act — a tag, a GitHub Release, a marketplace
@@ -314,6 +315,12 @@ against the owner's real installation, replacing both binaries and bringing the 
 *What is open, and it is two of the four clauses.* **A release exists that the channel can serve** —
 nothing is tagged, there is no `.github/`, no marketplace entry and no zip. **`doctor` reports all
 three versions** — it reports two, and says of the third that there is no delivery channel to read.
+
+**The `.github/` clause above went stale eight hours after it was written and is corrected here
+rather than in place**, because the paragraph is a dated record of what was open. Measured
+2026-09-07: `3d9f49b` wrote it at 04:39 and `499026b` added `.github/ISSUE_TEMPLATE/bug_report.yml`
+at 12:26 the same day, so it was true when written. What it should have named is the `workflows/`
+directory, and that is what session 27's first commit created.
 The remaining clause is met in the narrower form the spec now uses: `update` restarts the service on
 a failed copy and says which destinations it replaced, rather than restoring what was there, because
 nothing copies the previous bytes aside and claiming a rollback this product does not have would be
