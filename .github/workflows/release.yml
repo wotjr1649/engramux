@@ -1,0 +1,105 @@
+# A tag builds the two binaries, packages the archive, and creates the release.
+#
+# What it does not do is write to this repository, and that is a decision rather
+# than an omission. Memory spec M-7 asks that a version and the hash of the
+# artefact it names never be committed apart; the owner satisfies that by
+# running `scripts/package.sh <version>` locally, which writes both into
+# `.claude-plugin/marketplace.json`, and by committing and tagging that. This
+# workflow re-builds the same archive and refuses the release when the hash it
+# gets is not the one the tagged commit already names. So the check is that CI
+# and the owner's machine agree, and nothing here needs push access to `main`.
+#
+# That only works because the archive is reproducible: -trimpath, CGO_ENABLED=0,
+# -buildvcs=false, a toolchain pinned by go.mod, and scripts/mkzip stamping
+# every entry with the zip epoch. scripts/package.sh owns the first four and
+# explains why -buildvcs=false is one of them.
+#
+# The gates that need `.capture/` do not run on a runner, which is why M-7's
+# tagging rule says a tag is pushed only after they have been seen green on a
+# machine that has the corpus.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # Creating the release and uploading its one asset. Nothing here commits.
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Read before anything can rewrite it: scripts/package.sh writes the
+      # catalogue, so a comparison made after it ran would be comparing the
+      # build against itself.
+      - name: what the tagged commit claims
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          entry='.plugins[] | select(.name == "engramux")'
+          {
+            echo "VERSION=$version"
+            echo "CLAIMED_VERSION=$(jq -r "$entry | .version" .claude-plugin/marketplace.json)"
+            echo "CLAIMED_SHA=$(jq -r "$entry | .source.sha256" .claude-plugin/marketplace.json)"
+            echo "ARCHIVE=dist/engramux-$version-windows-amd64.zip"
+          } >> "$GITHUB_ENV"
+
+      # Before the build, because a tag on a commit whose catalogue names a
+      # different version is a mistake worth catching in five seconds rather
+      # than after a build.
+      - name: the tag and the catalogue agree
+        run: |
+          if [ "$CLAIMED_VERSION" != "$VERSION" ]; then
+            echo "the tag names $VERSION and the marketplace entry names $CLAIMED_VERSION" >&2
+            echo "run scripts/package.sh $VERSION, commit the catalogue, and tag that commit" >&2
+            exit 1
+          fi
+
+      - name: build and package
+        run: echo "BUILT_SHA=$(scripts/package.sh "$VERSION")" >> "$GITHUB_ENV"
+
+      - name: the archive is the one the catalogue names
+        run: |
+          if [ "$BUILT_SHA" != "$CLAIMED_SHA" ]; then
+            echo "the catalogue names $CLAIMED_SHA" >&2
+            echo "this build produced   $BUILT_SHA" >&2
+            echo "two builds of one commit must agree; see scripts/package.sh on what makes them" >&2
+            exit 1
+          fi
+
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > dist/notes.md <<NOTES
+          Windows, amd64. One archive, and it is the whole of the release.
+
+          **Claude Code**: add this repository as a plugin marketplace and install \`engramux\`.
+          The host fetches this archive, checks it against the SHA-256 below, and unpacks it;
+          \`engramux update\` then reads that directory.
+
+          **Codex, or by hand**: download the archive, unpack it, and run
+          \`engramux update --from <the directory you unpacked>\`. Same bytes either way.
+
+          A first install is \`engramux install --apply\` from the unpacked directory instead.
+
+          \`\`\`
+          $BUILT_SHA  engramux-$VERSION-windows-amd64.zip
+          \`\`\`
+
+          This build is not code-signed. Windows Defender may quarantine the CLI on first run as a
+          behaviour detection; the README says what it looks like and what to do about it.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE" \
+            --title "$VERSION" --notes-file dist/notes.md --verify-tag
