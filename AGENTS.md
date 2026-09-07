@@ -24,7 +24,7 @@ CGO_ENABLED=0 go build -ldflags "-s -w"               -o dist/engramux.exe      
 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service
 go test -p 1 ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
-./scripts/race.sh            # test suite under the race detector; about 45 min, 43 of it internal/search
+./scripts/race.sh            # test suite under the race detector; about 60 min, 58 of it internal/search
 go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
 go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/

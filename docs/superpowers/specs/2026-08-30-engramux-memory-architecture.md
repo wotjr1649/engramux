@@ -2414,6 +2414,16 @@ longer ladder. M13's supplementary arm retired into this gate on the condition r
 in full — so **M13 now runs in 16.3 s and the pair in 95.4 s**, against 63.2 s for M13 alone before.
 The harm populations are measured at nine rungs instead of five and the package pays 32 s for it.
 
+**Under `-race` it cost more than that arithmetic implies, and that is the figure to plan against.**
+`internal/search` measured **3,473.0 s** on 2026-09-07 against 2,500.2 s the day before. The four
+readings before this one spread 2,110.8 s to 2,563 s, so the machine's own spread is about 450 s and
+this is 910 s above the highest of them: the size is the gate rather than the day. `scripts/race.sh`
+guards each test binary with a 90-minute timeout — **not the run**, which is a distinction a hand-off
+loses easily — so that package now sits at 57.9 minutes of it and **a third of the guard is left
+rather than a half**. The script's comment carries the re-measurement it asks for whenever a gate is
+added. One more corpus gate of this size does not fit under 90m, and raising it is the answer the
+comment already gives.
+
 **One thing the break-it pass measured that the gate does not report.** Relaxing the condition from
 *improves one and regresses none* to *improves one or regresses none* licenses **all nine rungs**,
 not some of them. Since every rung regresses a harm class, the second half of that disjunction is

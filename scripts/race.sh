@@ -70,4 +70,11 @@ echo "race.sh: using $cc"
 # a stopwatch; 90m is that measurement with room for a loaded machine, and it is
 # still a hang guard rather than a performance budget. Re-measure it when a gate
 # is added, and raise it here rather than skipping the gate.
+#
+# Re-measured 2026-09-07 with gate M14 added: internal/search is **3473.0 s, or
+# 57.9 minutes**, so 32 minutes of this guard are left rather than 48. The four
+# readings before it spread 2110.8 s to 2563 s, which is the machine's own
+# spread of about 450 s - this one is 910 s above the highest of them, so the
+# size is the gate and not the day. 90m is not raised here because it still
+# holds, but one more corpus gate of M14's size does not fit under it.
 CGO_ENABLED=1 CC="$cc" exec go test -race -p 1 -timeout 90m "$@" ./...
