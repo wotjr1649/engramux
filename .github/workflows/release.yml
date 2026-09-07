@@ -67,7 +67,7 @@ jobs:
           fi
 
       - name: build and package
-        run: echo "BUILT_SHA=$(scripts/package.sh "$VERSION")" >> "$GITHUB_ENV"
+        run: echo "BUILT_SHA=$(bash scripts/package.sh "$VERSION")" >> "$GITHUB_ENV"
 
       - name: the archive is the one the catalogue names
         run: |

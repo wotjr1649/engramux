@@ -115,6 +115,14 @@ jq --arg v "$v" --arg url "$url" --arg sha "$sha" \
     '(.plugins[] | select(.name == "engramux")) |= (.version = $v | .source.url = $url | .source.sha256 = $sha)' \
     .claude-plugin/marketplace.json | tr -d '\r' > .claude-plugin/marketplace.json.tmp
 mv .claude-plugin/marketplace.json.tmp .claude-plugin/marketplace.json
+# Read it back, because the edit above can succeed at doing nothing: `|=` on a
+# `select` that matches no entry rewrites nothing, exits 0, and would leave this
+# script announcing a version it did not write. Verify the insertion, never the
+# exit code.
+if [ "$(jq -r '.plugins[] | select(.name == "engramux") | .source.sha256' .claude-plugin/marketplace.json)" != "$sha" ]; then
+    echo "package.sh: the catalogue does not name $sha after the rewrite - is there an entry named engramux in it?" >&2
+    exit 1
+fi
 echo "package.sh: .claude-plugin/marketplace.json now names $v" >&2
 echo "package.sh: review it, commit it, and tag that commit v$v" >&2
 

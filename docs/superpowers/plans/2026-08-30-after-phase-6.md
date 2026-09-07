@@ -341,13 +341,21 @@ readings and they differ on **authority** — one of them gives a workflow stand
 public repository's `main`. Put to the owner on 2026-09-07 and ruled: the owner commits the hash and
 CI verifies. That is what forced the archive to be reproducible, and `-buildvcs=false` with it.
 
-*Evidence.* The archive hashed identically across five runs and two commits, one of them on a dirty
-tree — which is the property the release procedure needs, because the owner builds before committing
-the hash. Eight break-it mutations, every one changing an answer rather than removing a reference,
-all eight killed and none reported `NOOP` or `BUILD`. `doctor`'s new line was read off the **real
-installation** with the release archive unpacked into a plugin-cache-shaped directory, and again
-against the real cache where it says there is nothing there. actionlint at exit 0 over both
+*Evidence.* The archive hashed identically across seven runs and three commits, one of them on a
+dirty tree — which is the property the release procedure needs, because the owner builds before
+committing the hash. Eight break-it mutations, every one changing an answer rather than removing a
+reference, all eight killed and none reported `NOOP` or `BUILD`. actionlint at exit 0 over both
 workflows. Suite, pinned linter and race script green in that order on the handed-over tree.
+
+**And the channel was walked end to end on the real installation, which is the part a fixture cannot
+stand in for.** The release archive was unpacked into a plugin-cache-shaped directory; `doctor` named
+that version and the exact `update --from` argument; `update --from` that directory replaced both
+binaries and restarted the service; `doctor` then reported **`0.1.0-test`, installed and running
+agree** — so the link-time version survived into the shipped artefact, which is the one thing no test
+in this repository can see — and the cache line flipped to *not newer than what is installed*. The
+machine was put back to a development build in the same turn. What that leaves unwalked is only the
+half the owner owns: Claude Code fetching the archive from a release page and checking it against the
+hash.
 
 *What is open, and both are the owner's.* **A release exists that the channel can serve** — the tag,
 the release page and the archive on it are publication acts, and `git tag` is still empty. And

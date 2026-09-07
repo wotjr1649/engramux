@@ -68,4 +68,4 @@ jobs:
       # workflow. If it is not, this step fails loudly with the script's own
       # message and the fix is one `ENGRAMUX_CC` line.
       - name: race
-        run: ./scripts/race.sh
+        run: bash scripts/race.sh

@@ -83,4 +83,15 @@ echo "race.sh: using $cc"
 # surface: one more gate of M14's size lands at about 79 minutes of 90, which
 # fits, with 11 minutes of margin against a spread of about 7.5. The session
 # that adds it raises this in the same commit and says what it re-measured.
+#
+# Read again 2026-09-07 with **no gate added**: internal/search is **3807.7 s,
+# or 63.5 minutes**, against 3473.0 s earlier the same day, and the whole run
+# took 69m13s over 22 packages. Nothing about the workload moved - the ordinary
+# run measured 217.7 s against 218.3 s - so all 335 s of it is the machine, and
+# this run carried a known confound: documents were edited and one `go run`
+# started while it was going. What it settles is the **spread** rather than a
+# new figure. The -race multiplier for this package has now been read at 16.5x,
+# 15.9x and 17.5x with the ordinary run flat, so pricing the next gate against
+# any single one of them is pricing against noise - take the highest. 90m still
+# holds and there are 26.5 minutes left of it rather than 32.
 CGO_ENABLED=1 CC="$cc" exec go test -race -p 1 -timeout 90m "$@" ./...
