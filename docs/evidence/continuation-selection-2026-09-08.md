@@ -86,3 +86,30 @@ must be addressed before this candidate can be frozen for that evaluation.
 
 Targeted continuation tests, the cue mutation check, the pinned linter and `git diff --check`
 passed. Full regression and race were not repeated for these opt-in, test-only changes.
+
+## Adoption rejected after competing-history check
+
+The latest-reply v2 candidate is rejected for adoption in its current form. Successful
+missing-fact configuration and code examples do not remedy its failure to choose among
+competing replies. `go test -p 1 -count=1 -timeout 2m -run
+'^TestMeasureContinuationCompetition$' -v ./internal/inject` ran two same-session cases:
+an older tie decision followed by an unrelated screenshot note, and the same older decision
+followed by an explicit revised tie decision. The candidate selected the latest event in
+both, recovering the required decision in 1/2. The first case demonstrates replacement of
+useful history by unrelated text. The second prevents treating a blanket oldest-first rule
+as the correction. This is a root-authored diagnostic, not independent quality evidence.
+The diagnostic process passed while reporting the selection failure explicitly.
+
+An independent conceptual reviewer, given no private records, recommended stopping further
+synthetic success demonstrations and distinguishing explicit model-mediated retrieval from
+automatic injection. Its suggestion to permit lower precision is not adopted: the existing
+M7 threshold remains unchanged. Explicit search and the exact reader are useful existing
+surfaces, but proving those surfaces does not complete the requested automatic-selection
+improvement. No product behavior or architectural invariant was changed by this decision.
+
+Do not consume the unopened private holdout to confirm this already known failure. A next
+automatic-selection candidate needs a materially different mechanism for identifying the
+requested decision and whether it is absent from current context. The earlier architecture
+choice remains unresolved; no additional-model adoption is inferred. Preserve v2 and its
+replay evidence for comparison, but do not spend further runs presenting single-candidate
+recovery as evidence for its adoption.
