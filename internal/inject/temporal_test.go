@@ -75,7 +75,12 @@ func TestMeasureTemporalSelection(t *testing.T) {
 		if err := prefix.advance(t, stamps[p.id]); err != nil {
 			t.Fatal("advance temporal index")
 		}
-		res := m7Build(t, prefix.db, p)
+		var res inject.Result
+		if os.Getenv("ENGRAMUX_TEMPORAL_PAIRED") == "1" {
+			res = pairedBuild(t, prefix.db, p, stamps[p.id])
+		} else {
+			res = m7Build(t, prefix.db, p)
+		}
 		notification := strings.HasPrefix(strings.TrimSpace(p.prompt), "<task-notification>") && strings.HasSuffix(strings.TrimSpace(p.prompt), "</task-notification>") && strings.Contains(p.prompt, "<status>completed</status>")
 		if notification {
 			notifications++
@@ -138,6 +143,9 @@ func TestMeasureTemporalSelection(t *testing.T) {
 		name := "temporal-trigger-metrics.json"
 		if writeReview {
 			value, name = review, "temporal-wanted-review.json"
+			if os.Getenv("ENGRAMUX_TEMPORAL_PAIRED") == "1" {
+				name = "temporal-paired-wanted-review.json"
+			}
 		}
 		b, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
