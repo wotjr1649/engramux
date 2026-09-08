@@ -43,3 +43,30 @@ holdout prompts and outputs remain unopened until that candidate and its labelli
 fixed. After holdout use, it becomes exposed evaluation data and must not be reused as an
 untouched sample for further tuning. Original M7 labels, prior failures and used holdouts are
 preserved rather than replaced by this population.
+
+## Development-only inspection
+
+`go test -p 1 -count=1 -timeout 2m -run '^TestWriteTransferDevelopmentPrompts$' -v
+./internal/inject`, with `ENGRAMUX_WRITE_TRANSFER_DEVELOPMENT=1`, passed in 0.21 s. The writer
+checks the bound database/WAL, reads only the 23 development event IDs with their exact stored
+scope and timestamp, masks whole payloads, and exclusively writes the private prompt file.
+No holdout body is queried. The pinned linter subsequently passed with exit 0.
+
+Before selector outputs, root-agent wanted-context judgements were fixed at **6 yes / 17 no**
+in a separate private file bound to the exported prompts' SHA-256. Yes requests refer to a
+prior observation, previous decisions, an unstated task, a named session, project validation
+history or prior recommendations. No requests are interpreted as activation commands,
+current-context probes, general explanations, self-contained work orders, notifications or
+explicit instruction-file reads. These interpretations are agent estimates, not owner intent.
+Bare command words are especially ambiguous and are not evidence of a universal intent rule.
+
+The review also emphasized that these prompt-level need judgements are distinct from later
+block-level relevance. A yes prompt does not make every returned block relevant. Returned
+blocks must be judged separately, with unknown retained when the evidence is insufficient;
+their contents must not be used to retroactively choose the prompt-level labels.
+
+Current-context probes require separate care: an old record mentioning a heading must not be
+used to answer whether that heading was present in the current model context before injection.
+Likewise, reading a named instruction file is not by itself a successful historical-memory
+task. Candidate design must preserve these distinctions; a larger retrieval count alone would
+not establish utility. No selector result or new candidate is reported by this inspection.
