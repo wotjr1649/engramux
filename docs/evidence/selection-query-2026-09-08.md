@@ -27,3 +27,21 @@ Relaxing the conjunction is not yet an improvement: 72 of the 91 prompts estimat
 to want context also contain an absent selected term, and relaxing them can introduce
 unwanted results. Relevance, useful coverage and task success remain unmeasured by this
 diagnostic. Any candidate must be fixed before a separate holdout is evaluated.
+
+The next development arm is fixed before observing holdout outputs: preserve every existing
+non-empty AND result; only after a non-broad abstention with three selected terms, try documents
+matching at least two of the three terms. The query is the union of the three pairwise ANDs,
+not unconditional OR. This also excludes absent terms without separate frequency queries:
+any pair containing an absent term matches nothing. Existing single-term and two-term successes
+stay on the original path. Each source keeps its 200-match cutoff; the same deadline, byte cap,
+self-exclusion and fencing remain mandatory. This is a hypothesis motivated by development
+data, not a measured improvement or permission to enable injection.
+
+`TestWriteSelectionSessionHoldout` selected every usable prompt from sessions absent from the
+development sample: **24 prompts in 18 sessions**, disjoint from the **39 development sessions**.
+The command run was `go test -p 1 -count=1 -timeout 1m -run
+'^TestWriteSelectionSessionHoldout$' -v ./internal/inject`, with
+`ENGRAMUX_WRITE_SELECTION_HOLDOUT=1`. It wrote an exclusive-create, masked prompt fixture
+under `.capture/selection-quality/holdout-2026-09-08/`, bound to the snapshot SHA-256. It did
+not retrieve candidate outputs or assign relevance labels. The small holdout cannot support
+a broad utility claim merely because it is disjoint.

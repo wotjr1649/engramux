@@ -1,15 +1,104 @@
 package inject_test
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/wotjr1649/engramux/internal/inject"
 	"github.com/wotjr1649/engramux/internal/search"
+	"github.com/wotjr1649/engramux/internal/secret"
 )
+
+func TestWriteSelectionSessionHoldout(t *testing.T) {
+	if os.Getenv("ENGRAMUX_WRITE_SELECTION_HOLDOUT") != "1" {
+		t.Skip("holdout creation is opt-in")
+	}
+	uri, err := temporalSourceURI(m7Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	excluded := map[string]bool{}
+	for _, p := range m7LabelledPrompts(t, db, "../../.capture/m7/agent-2026-09-08", m7Agent) {
+		excluded[p.session] = true
+	}
+	rows, err := db.QueryContext(t.Context(), `SELECT id,session_id,payload FROM events WHERE event_name='UserPromptSubmit' ORDER BY received_at,id`)
+	if err != nil {
+		t.Fatal("read holdout candidates")
+	}
+	defer func() { _ = rows.Close() }()
+	var output []string
+	sessions := map[string]bool{}
+	for rows.Next() {
+		var id, session string
+		var payload []byte
+		if err := rows.Scan(&id, &session, &payload); err != nil {
+			t.Fatal("read holdout row")
+		}
+		if session == "" || excluded[session] {
+			continue
+		}
+		var p struct {
+			Prompt string `json:"prompt"`
+		}
+		if json.Unmarshal(secret.Mask(payload), &p) != nil || p.Prompt == "" {
+			continue
+		}
+		output = append(output, strings.Join([]string{id, m7Script(p.Prompt), m7Todo, m7Line(p.Prompt)}, "\t"))
+		sessions[session] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal("holdout cursor failed")
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal("close holdout cursor")
+	}
+	if len(output) == 0 {
+		t.Fatal("no independent session remains")
+	}
+	snapshot, err := os.Open(m7Snapshot)
+	if err != nil {
+		t.Fatal("open snapshot for digest")
+	}
+	h := sha256.New()
+	_, hashErr := io.Copy(h, snapshot)
+	closeErr := snapshot.Close()
+	if hashErr != nil || closeErr != nil {
+		t.Fatal("snapshot digest failed")
+	}
+	path := "../../.capture/selection-quality/holdout-2026-09-08/prompts.tsv"
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal("holdout already exists or cannot be created; refusing replacement")
+	}
+	header := fmt.Sprintf("# Session-disjoint selection holdout. No selector output was used.\n%s\n# snapshot SHA-256: %x\n# excluded development sessions: %d\n# columns: prompt_id, script, wanted_context, prompt\n", m7UnlabelledHeader, h.Sum(nil), len(excluded))
+	_, writeErr := io.WriteString(f, header+strings.Join(output, "\n")+"\n")
+	closeErr = f.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatal("write holdout fixture")
+	}
+	t.Logf("wrote %d prompts from %d sessions disjoint from %d development sessions; no retrieval performed", len(output), len(sessions), len(excluded))
+}
 
 // This measures the existing selector without choosing replacements or exposing
 // prompt text. The already-labelled sample is development evidence, not a holdout.
