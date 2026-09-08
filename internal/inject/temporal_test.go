@@ -2,11 +2,13 @@ package inject_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/wotjr1649/engramux/internal/inject"
@@ -56,11 +58,24 @@ func TestMeasureTemporalSelection(t *testing.T) {
 	}
 	sort.SliceStable(prompts, func(i, j int) bool { return stamps[prompts[i].id] < stamps[prompts[j].id] })
 	var emitted, blocks, bytes, unwanted, wanted, wantedEmitted, deadlines int
+	var notifications, notificationInjections, notificationBytes int
+	type triggerMetric struct {
+		ID                    string
+		Wanted                string
+		CompletedNotification bool
+		Events, Bytes         int
+	}
+	var metrics []triggerMetric
 	for _, p := range prompts {
 		if err := prefix.advance(t, stamps[p.id]); err != nil {
 			t.Fatal("advance temporal index")
 		}
 		res := m7Build(t, prefix.db, p)
+		notification := strings.HasPrefix(strings.TrimSpace(p.prompt), "<task-notification>") && strings.HasSuffix(strings.TrimSpace(p.prompt), "</task-notification>") && strings.Contains(p.prompt, "<status>completed</status>")
+		if notification {
+			notifications++
+		}
+		metric := triggerMetric{ID: p.id, Wanted: p.wanted, CompletedNotification: notification, Events: len(res.Events)}
 		if p.wanted == m7Yes {
 			wanted++
 		}
@@ -68,9 +83,13 @@ func TestMeasureTemporalSelection(t *testing.T) {
 			deadlines++
 		}
 		if res.Text == "" {
+			metrics = append(metrics, metric)
 			continue
 		}
 		emitted++
+		if notification {
+			notificationInjections++
+		}
 		if p.wanted == m7Yes {
 			wantedEmitted++
 		}
@@ -87,13 +106,43 @@ func TestMeasureTemporalSelection(t *testing.T) {
 			}
 			blocks++
 			bytes += b.bytes
+			metric.Bytes += b.bytes
+			if notification {
+				notificationBytes += b.bytes
+			}
 			if p.wanted == m7No {
 				unwanted += b.bytes
 			}
 		}
+		metrics = append(metrics, metric)
+	}
+	if os.Getenv("ENGRAMUX_WRITE_TEMPORAL_METRICS") == "1" {
+		b, err := json.MarshalIndent(metrics, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := os.OpenRoot("../../.capture/selection-quality")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := root.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		f, err := root.OpenFile("temporal-trigger-metrics.json", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal("metrics exist or cannot be created")
+		}
+		_, we := f.Write(b)
+		ce := f.Close()
+		if we != nil || ce != nil {
+			t.Fatal("write trigger metrics failed")
+		}
 	}
 	t.Logf("event-only temporal diagnostic: %d prompts, %d injected, %d blocks, %d bytes, %d deadline abstentions", len(prompts), emitted, blocks, bytes, deadlines)
 	t.Logf("agent prompt estimates: %d/%d wanted prompts injected; unwanted bytes %d/%d (%.3f)", wantedEmitted, wanted, unwanted, bytes, m7Ratio(unwanted, bytes))
+	t.Logf("completed notification triggers: %d prompts, %d injected, %d excerpt bytes", notifications, notificationInjections, notificationBytes)
 	t.Log("NOT A QUALITY PASS: prefix outputs need fresh block judgements; no recall or task-utility claim")
 }
 

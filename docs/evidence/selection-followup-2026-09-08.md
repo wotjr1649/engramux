@@ -49,3 +49,40 @@ coverage and deadline results remain distinct. A zero-output arm cannot claim us
 Existing M7 conditions are not relaxed, and any failing score remains a failure. The candidate
 may reduce notification noise without establishing that remaining selected history is useful;
 that limitation must stay in the result.
+
+## Development rejection before implementation
+
+The completed-notification rule was not implemented. A strict-prefix development replay of
+the original 150 prompts found **52 completed-notification triggers, zero injections and zero
+excerpt bytes**. The existing selector already abstained on all of them, so the rule cannot
+reduce the observed unwanted output in that replay. The totals remained 18 injected prompts,
+93 blocks and 31,874 excerpt bytes; 20,917 bytes were on agent-labelled no prompts and 9 of
+59 wanted prompts received output. No quality improvement or M7 pass is claimed.
+
+The command run was `go test -p 1 -count=1 -timeout 2m -run
+'^TestMeasureTemporalSelection$' -v ./internal/inject`, with
+`ENGRAMUX_TEMPORAL_AGENT_DIR=../../.capture/m7/agent-2026-09-08`. It passed in 20.31 s.
+The proposed rule was rejected from development evidence without opening the followup
+holdout, changing labels, or consuming that holdout for a rule with no demonstrated benefit.
+
+## Trigger attribution
+
+A second run with `ENGRAMUX_WRITE_TEMPORAL_METRICS=1` passed in 18.74 s and exclusively
+created private per-trigger IDs, labels, event counts and excerpt-byte counts. It reproduced
+the same totals. Mapping these IDs back to the existing development labels attributes the
+20,917 unwanted bytes to nine prompts:
+
+| Prompt class | Prompts | Unwanted excerpt bytes |
+| --- | ---: | ---: |
+| Greeting | 2 | 1,436 |
+| Explicit exact-response request | 3 | 9,204 |
+| Isolated login command | 1 | 1,529 |
+| Isolated reasoning-mode word | 1 | 4,333 |
+| Notification without completed status | 1 | 4,095 |
+| Self-contained directory creation | 1 | 320 |
+
+These are root-agent classifications of already exposed development prompts, not owner
+judgements or a new holdout score. The result identifies explicit response-only requests as
+a narrower candidate worth reviewing: lexical overlap alone cannot show a need for memory.
+A general short-prompt exclusion would also suppress legitimate identifier lookups and is
+not justified by these counts. No new selection behavior is implemented by this diagnostic.
