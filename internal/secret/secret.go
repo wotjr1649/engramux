@@ -192,12 +192,21 @@ type span struct {
 	order      int // rule index, so equal spans have a deterministic winner
 }
 
+// The text credential rule requires an ASCII assignment delimiter. Sensitive
+// JSON keys are a separate rule and must not be gated on their value's text.
+func credentialTextPossible(leaf string) bool {
+	return strings.ContainsAny(leaf, ":=")
+}
+
 // spansIn returns every span of leaf that some rule matched. Spans may overlap:
 // two classes matching the same bytes is two tags, and [maskText] resolves the
 // overlap only when it comes to rewriting.
 func spansIn(key, leaf string) []span {
 	var out []span
 	for i, r := range rules {
+		if r.class == ClassCredential && !credentialTextPossible(leaf) {
+			continue
+		}
 		for _, m := range r.re.FindAllStringSubmatchIndex(leaf, -1) {
 			start, end := m[0], m[1]
 			if r.re.NumSubexp() > 0 && m[2] >= 0 {
