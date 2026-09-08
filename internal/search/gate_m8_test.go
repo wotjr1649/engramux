@@ -32,15 +32,10 @@ import (
 // answers a question when its own top ten for that question carries text
 // containing the question's answer literal.**
 //
-// # Only P1 is here, and the omission is deliberate
-//
-// P1's questions are gate M4's, derived mechanically, so P1 needs no label
-// anywhere and runs today. P5's are the labelled failure-fix pairs of
-// `.capture/m8/`, and on 2026-09-06 that file has no labels in it - the fixture
-// this file writes is what the owner labels. A measurement that cannot be run
-// cannot be watched failing either, so P5's half is not written yet rather than
-// written blind: §8 forbids shipping the `[unverified]` claim that would be.
-// What stops it drifting in the meantime is that its rule is already committed.
+// P1's questions are derived mechanically. P5's evaluator in m8_p5_test.go
+// requires labelled failure-fix candidates bound to the corpus hash. Owner
+// judgements and agent estimates have separate entry points; pending owner
+// labels are not a passing measurement.
 //
 // # Containment is tested against what the index holds, not against a masked read
 //
@@ -182,12 +177,20 @@ func m8MemoryAnswers(t *testing.T, db *sql.DB, bodies map[string]string, query, 
 // comment above says why the comparison is against what the index holds.
 func m8NativeBodies(t *testing.T, db *sql.DB) map[string]string {
 	t.Helper()
+	return m8NativeBodiesRequired(t, db, false)
+}
+
+func m8NativeBodiesRequired(t *testing.T, db *sql.DB, required bool) map[string]string {
+	t.Helper()
 	c := &memory.Collector{ClaudeHome: memory.ClaudeHome(), CodexHome: memory.CodexHome()}
 	rep, err := c.Collect(t.Context(), db, time.Now())
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	if rep.Written == 0 {
+		if required {
+			t.Fatal("P5 native corpus unavailable: no comparative evaluation was completed")
+		}
 		t.Skip("no native memory on this machine to measure coverage over")
 	}
 	rows, err := db.QueryContext(t.Context(), `SELECT id, body FROM memory_items`)
@@ -477,6 +480,10 @@ func TestWriteM8Pairs(t *testing.T) {
 		t.Fatalf("no failure in %d documents has a later event that ran or edited anything; "+
 			"the fixture would ask nothing", len(docs))
 	}
+	digest, err := m8CorpusDigest(corpusDir, docs)
+	if err != nil {
+		t.Fatal("freeze the M8 corpus identity")
+	}
 
 	//nolint:gosec // G301: the operator names the directory, which is this harness's whole interface
 	if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
@@ -504,7 +511,8 @@ func TestWriteM8Pairs(t *testing.T) {
 	labels := len(rows) - 2*len(pairs) // one comment and one blank per failure
 
 	w := bufio.NewWriter(f)
-	for _, l := range append(m8FixtureHeader(len(pairs), labels), rows...) {
+	header := append(m8FixtureHeader(len(pairs), labels), "# M8 corpus SHA-256: "+digest)
+	for _, l := range append(header, rows...) {
 		if _, err := fmt.Fprintln(w, l); err != nil {
 			t.Fatalf("write %s: %v", out, err)
 		}
@@ -520,6 +528,8 @@ func TestWriteM8Pairs(t *testing.T) {
 func m8FixtureHeader(pairs, labels int) []string {
 	return []string{
 		"# Gate M8, capability P5. Replace TODO with yes or no.",
+		"# M8 label source: unlabelled",
+		"# Completed labels must declare owner or agent and bind the corpus SHA-256.",
 		"#",
 		"# The question is: DID THIS EVENT RESOLVE THAT FAILURE?",
 		"#",
@@ -527,7 +537,7 @@ func m8FixtureHeader(pairs, labels int) []string {
 		"# no:  it is not - a retry, an unrelated step, or a look at something else.",
 		"#",
 		"# Every candidate of one failure answered no is a legitimate outcome and means",
-		"# the corpus holds no fix for it. Those failures leave P5's population and their",
+		"# no fix was labelled within this candidate window. Those failures leave P5's population and their",
 		"# count is reported; a recall figure over questions with no answer in the corpus",
 		"# measures the corpus rather than the retrieval.",
 		"#",
