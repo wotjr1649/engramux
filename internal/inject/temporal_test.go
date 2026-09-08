@@ -59,6 +59,9 @@ func TestMeasureTemporalSelection(t *testing.T) {
 	sort.SliceStable(prompts, func(i, j int) bool { return stamps[prompts[i].id] < stamps[prompts[j].id] })
 	var emitted, blocks, bytes, unwanted, wanted, wantedEmitted, deadlines int
 	var notifications, notificationInjections, notificationBytes int
+	// Both fields are validated labels or fixed implementation reasons, not corpus text.
+	causes := map[string]int{}
+	var noHitWanted, anyTermMatches, everyTermMatches, refusedTermPrompts int
 	type triggerMetric struct {
 		ID                    string
 		Wanted                string
@@ -95,6 +98,34 @@ func TestMeasureTemporalSelection(t *testing.T) {
 			deadlines++
 		}
 		if res.Text == "" {
+			causes[p.wanted+"\t"+res.Reason]++
+			if os.Getenv("ENGRAMUX_TEMPORAL_TERM_DIAGNOSTIC") == "1" && p.wanted == m7Yes && res.Reason == inject.ReasonNoHits {
+				noHitWanted++
+				terms := inject.QueryFor(p.prompt)
+				matched, refused := 0, false
+				for _, term := range terms {
+					_, total, err := search.Search(t.Context(), prefix.db, term, p.project, 1, search.MatchAll)
+					if err != nil {
+						if errors.Is(err, search.ErrEmptyQuery) || errors.Is(err, search.ErrNULQuery) || errors.Is(err, search.ErrTooManyTokens) || errors.Is(err, search.ErrTokenTooLong) {
+							refused = true
+							continue
+						}
+						t.Fatal("individual term diagnostic failed")
+					}
+					if total > 0 {
+						matched++
+					}
+				}
+				if matched > 0 {
+					anyTermMatches++
+				}
+				if len(terms) > 0 && matched == len(terms) {
+					everyTermMatches++
+				}
+				if refused {
+					refusedTermPrompts++
+				}
+			}
 			metrics = append(metrics, metric)
 			continue
 		}
@@ -178,7 +209,19 @@ func TestMeasureTemporalSelection(t *testing.T) {
 	t.Logf("event-only temporal diagnostic: %d prompts, %d injected, %d blocks, %d bytes, %d deadline abstentions", len(prompts), emitted, blocks, bytes, deadlines)
 	t.Logf("agent prompt estimates: %d/%d wanted prompts injected; unwanted bytes %d/%d (%.3f)", wantedEmitted, wanted, unwanted, bytes, m7Ratio(unwanted, bytes))
 	t.Logf("completed notification triggers: %d prompts, %d injected, %d excerpt bytes", notifications, notificationInjections, notificationBytes)
+	keys := make([]string, 0, len(causes))
+	for key := range causes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		label, reason, _ := strings.Cut(key, "\t")
+		t.Logf("abstention: agent_wanted=%s reason=%q prompts=%d", label, reason, causes[key])
+	}
 	t.Log("NOT A QUALITY PASS: prefix outputs need fresh block judgements; no recall or task-utility claim")
+	if os.Getenv("ENGRAMUX_TEMPORAL_TERM_DIAGNOSTIC") == "1" {
+		t.Logf("wanted no-hit term diagnostic: prompts=%d any_term_matched=%d every_term_matched=%d prompts_with_refused_term=%d", noHitWanted, anyTermMatches, everyTermMatches, refusedTermPrompts)
+	}
 }
 
 func TestTemporalReplayIndexesOnlyStrictlyEarlierEvents(t *testing.T) {
