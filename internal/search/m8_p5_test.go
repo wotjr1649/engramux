@@ -134,6 +134,34 @@ func m8P5Evaluate(t *testing.T, path, source string) {
 	t.Logf("P5 %s: literal coverage events %d/%d, native %d/%d; actual fix event %d/%d", source, literal, len(pop.cases), native, len(pop.cases), known, len(pop.cases))
 	t.Logf("P5 diagnostics: original failure returned %d/%d; native index reached %d/%d over %d items", echo, len(pop.cases), reached, len(pop.cases), len(bodies))
 	t.Log("P5 is retrospective fix retrieval, not as-of-trigger prediction; these figures alone do not prove task success or authorize publication")
+	if os.Getenv("ENGRAMUX_M8_TURN_EXPANSION") == "1" {
+		var recovered, extra int
+		for _, c := range pop.cases {
+			hits, _, err := search.Search(t.Context(), db, c.query, "", m8K, search.MatchAny)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := m8ExpandTurns(byID, hits, m8K)
+			extra += len(ids)
+			found := false
+			for _, id := range c.fixes {
+				for _, h := range hits {
+					if h.ID == id {
+						found = true
+					}
+				}
+				for _, added := range ids {
+					if added == id {
+						found = true
+					}
+				}
+			}
+			if found {
+				recovered++
+			}
+		}
+		t.Logf("EXTRA-CONTEXT diagnostic: actual fix %d/%d, added IDs=%d, max %d per query beyond original k=%d; not same-budget retrieval or task success", recovered, len(pop.cases), extra, m8K, m8K)
+	}
 }
 
 type m8P5Case struct {
