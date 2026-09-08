@@ -1,0 +1,12 @@
+{
+  "latest": {
+    "vela-grid-1": {"next_action":"advance_to_other_incomplete_task","evidence":["vela-203"],"certainty":"known"},
+    "cinder-sync-2": {"next_action":"resume_reopened_task","evidence":["cinder-313"],"certainty":"known"},
+    "lumen-forge-3": {"next_action":"request_clarification","evidence":["lumen-403"],"certainty":"unknown"}
+  },
+  "history": {
+    "vela-grid-1": {"next_action":"advance_to_other_incomplete_task","evidence":["vela-202","vela-203"],"certainty":"known"},
+    "cinder-sync-2": {"next_action":"resume_reopened_task","evidence":["cinder-312","cinder-313"],"certainty":"known"},
+    "lumen-forge-3": {"next_action":"request_clarification","evidence":["lumen-401","lumen-402","lumen-403"],"certainty":"unknown"}
+  }
+}

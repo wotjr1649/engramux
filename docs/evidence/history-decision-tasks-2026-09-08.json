@@ -1,0 +1,42 @@
+{
+  "source": "independent-agent-synthetic-design",
+  "choices": ["advance_to_other_incomplete_task", "repeat_completed_task", "resume_reopened_task", "request_clarification"],
+  "cases": [
+    {
+      "id": "vela-grid-1",
+      "records": [
+        {"id": "vela-201", "received": 101, "body": "TODO: In src/flux/evict.go, add a 45-second expiry for orphaned session keys. No implementation has landed."},
+        {"id": "vela-202", "received": 102, "body": "Completed the orphan-key expiry in src/flux/evict.go; added 12 table-driven tests. go test ./... passed."},
+        {"id": "vela-203", "received": 103, "body": "Unrelated note: the release guide has a stale screenshot. I have not changed the eviction implementation."}
+      ],
+      "question": "A separate backlog item is available. Choose the next action category for this queue.",
+      "expected_action": "advance_to_other_incomplete_task",
+      "expected_certainty": "known",
+      "required_evidence": ["vela-202"]
+    },
+    {
+      "id": "cinder-sync-2",
+      "records": [
+        {"id": "cinder-311", "received": 101, "body": "Completed packages/feather/merge.go: fixed duplicate-key handling; eight regression tests pass."},
+        {"id": "cinder-312", "received": 102, "body": "Reopened: duplicate keys still corrupt the merged index when the input has 19 chunks. The previous fix fails this reproduced case; treat packages/feather/merge.go as incomplete again."},
+        {"id": "cinder-313", "received": 103, "body": "Plan: add a stable sort before deduplication and rerun the 19-chunk regression plus the full package suite."}
+      ],
+      "question": "Choose the next action category for the maintenance task.",
+      "expected_action": "resume_reopened_task",
+      "expected_certainty": "known",
+      "required_evidence": ["cinder-312"]
+    },
+    {
+      "id": "lumen-forge-3",
+      "records": [
+        {"id": "lumen-402", "received": 101, "body": "Completed the timestamp tie-breaker in engine/merge.go; the seven-shard regression passed."},
+        {"id": "lumen-401", "received": 101, "body": "TODO: Fix the timestamp tie-breaker in engine/merge.go; the seven-shard collision case has no committed patch."},
+        {"id": "lumen-403", "received": 103, "body": "These Stops may have arrived out of order, and no trustworthy sequence is available to determine whether the TODO or the completion is authoritative."}
+      ],
+      "question": "The history may contain out-of-order records and exposes no trustworthy sequence. Choose an action only if supported; otherwise ask for clarification.",
+      "expected_action": "request_clarification",
+      "expected_certainty": "unknown",
+      "required_evidence": ["lumen-401", "lumen-402"]
+    }
+  ]
+}

@@ -113,6 +113,29 @@ func TestMeasureTransferNamedResume(t *testing.T) {
 
 func measureNamedHistory(t *testing.T, db *sql.DB, cwd, host, session string, cutoff int64) {
 	t.Helper()
+	output := boundedHistory(t, db, cwd, host, session, cutoff)
+	encoded, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile("../../.capture/selection-quality/transfer-2026-09-08/named-source-history.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		t.Fatal("history export exists or unavailable")
+	}
+	_, we := f.Write(encoded)
+	ce := f.Close()
+	if we != nil || ce != nil {
+		t.Fatal("history export failed")
+	}
+	bytes := 0
+	for _, msg := range output {
+		bytes += len(msg.Body)
+	}
+	t.Logf("named history: replies=%d body_bytes=%d", len(output), bytes)
+}
+
+func boundedHistory(t *testing.T, db *sql.DB, cwd, host, session string, cutoff int64) []ipc.ResumeMessage {
+	t.Helper()
 	p, err := project.FromArgument(cwd)
 	if err != nil {
 		t.Fatal("invalid project")
@@ -120,7 +143,7 @@ func measureNamedHistory(t *testing.T, db *sql.DB, cwd, host, session string, cu
 	deadline := time.Now().Add(500 * time.Millisecond)
 	ctx, cancel := context.WithDeadline(t.Context(), deadline)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, `SELECT id,received_at,CASE WHEN length(CAST(payload AS BLOB))<=1048576 THEN payload ELSE NULL END FROM events WHERE project_id=? AND host=? AND session_id=? AND event_name='Stop' ORDER BY received_at DESC,rowid DESC LIMIT 10`, p.ID, host, session)
+	rows, err := db.QueryContext(ctx, `SELECT id,received_at,CASE WHEN length(CAST(payload AS BLOB))<=1048576 THEN payload ELSE NULL END FROM events WHERE project_id=? AND host=? AND session_id=? AND event_name='Stop' AND received_at>0 AND received_at<? ORDER BY received_at DESC,rowid DESC LIMIT 10`, p.ID, host, session, cutoff)
 	if err != nil {
 		t.Fatal("history query failed")
 	}
@@ -172,18 +195,5 @@ func measureNamedHistory(t *testing.T, db *sql.DB, cwd, host, session string, cu
 	if ctx.Err() != nil || time.Now().After(deadline) {
 		t.Fatal("history exceeded budget")
 	}
-	encoded, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.OpenFile("../../.capture/selection-quality/transfer-2026-09-08/named-source-history.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		t.Fatal("history export exists or unavailable")
-	}
-	_, we := f.Write(encoded)
-	ce := f.Close()
-	if we != nil || ce != nil {
-		t.Fatal("history export failed")
-	}
-	t.Logf("named history: replies=%d body_bytes=%d", len(output), bytes)
+	return output
 }
