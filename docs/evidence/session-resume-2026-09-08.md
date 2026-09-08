@@ -60,3 +60,10 @@ No full-suite pass is claimed. Both runs passed the other packages. The session 
 focused tests and focused race run passed; the pinned linter exited 0 with no issues after
 adding the evaluation reader's deferred row cleanup. Separating SQL and returned-body
 processing cost is the next diagnostic; changing a threshold is not the proposed remedy.
+
+The pushed feature commit `c1d9120318621b6d604f47ede3f4fdbcd697ef17` subsequently passed
+the hosted suite, pinned linter and full race job in
+[checks run 34187966203](https://github.com/wotjr1649/engramux/actions/runs/34187966203).
+This was verified with `gh run view 34187966203 --repo wotjr1649/engramux --json headSha,jobs`.
+The local clock diagnosis is recorded separately in `search-clock-2026-09-08.md`; the hosted
+pass does not erase the two local failures above.
