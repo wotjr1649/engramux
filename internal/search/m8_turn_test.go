@@ -35,20 +35,32 @@ func m8TurnOf(d doc) m8TurnScope {
 // This is bounded extra context, not a same-k ranking improvement. Anchor
 // selection never reads the labelled failure ID or the expected fixes.
 func m8ExpandTurns(docs map[string]doc, hits []search.Hit, limit int) []string {
+	return m8ExpandContext(docs, hits, limit, true)
+}
+
+func m8ExpandContext(docs map[string]doc, hits []search.Hit, limit int, sameTurn bool) []string {
 	var out []string
+	scopes := map[string]m8TurnScope{}
+	for id, d := range docs {
+		scope := m8TurnOf(d)
+		if !sameTurn && scope.key != "" {
+			scope.key = "any-turn"
+		}
+		scopes[id] = scope
+	}
 	seen := map[string]bool{}
 	for _, h := range hits {
 		seen[h.ID] = true
 	}
 	for _, h := range hits {
 		anchor := docs[h.ID]
-		scope := m8TurnOf(anchor)
+		scope := scopes[h.ID]
 		if scope.key == "" {
 			continue
 		}
 		var candidates []doc
 		for _, d := range docs {
-			if !seen[d.id] && m8Stamp(d.name) > m8Stamp(anchor.name) && m8TurnOf(d) == scope {
+			if !seen[d.id] && m8Stamp(d.name) > m8Stamp(anchor.name) && scopes[d.id] == scope {
 				candidates = append(candidates, d)
 			}
 		}

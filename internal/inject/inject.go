@@ -318,6 +318,7 @@ func abstain(ctx context.Context, err error, start time.Time) (Result, error) {
 
 func isQueryRefusal(err error) bool {
 	return errors.Is(err, search.ErrEmptyQuery) ||
+		errors.Is(err, search.ErrNULQuery) ||
 		errors.Is(err, search.ErrTooManyTokens) ||
 		errors.Is(err, search.ErrTokenTooLong)
 }

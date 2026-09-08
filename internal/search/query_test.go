@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+func TestPublicSearchPathsRefuseNULBeforeDatabaseAccess(t *testing.T) {
+	query := "quartz\x00synthetic-private-token"
+	// A nil database makes any attempt to execute SQL fail immediately.
+	// Both public paths must return the typed input refusal first.
+	_, _, eventErr := Search(t.Context(), nil, query, "", 10, MatchAny)
+	_, _, memoryErr := SearchMemory(t.Context(), nil, query, nil, 10, MatchAny)
+	for _, err := range []error{eventErr, memoryErr} {
+		if !errors.Is(err, ErrNULQuery) {
+			t.Fatalf("public query error=%v, want NUL sentinel", err)
+		}
+		if strings.Contains(err.Error(), "quartz") || strings.Contains(err.Error(), "synthetic-private-token") {
+			t.Fatal("query value entered refusal message")
+		}
+	}
+}
+
 // TestMatchExpression pins the exact expression every shape produces, because
 // the rule is a string transformation and a property assertion cannot tell a
 // correct one from a nearly correct one: `"run-time"*` and `"run-time*"` differ
@@ -66,7 +82,7 @@ func TestMatchExpression(t *testing.T) {
 	}
 }
 
-// TestQueryBounds pins the three refusals to their sentinels. Each is an error
+// TestQueryBounds pins the refusals to their sentinels. Each is an error
 // and not an empty result: a caller that cannot tell "you asked for nothing"
 // from "nothing matched" reports the wrong thing to the person who typed it.
 func TestQueryBounds(t *testing.T) {
@@ -77,6 +93,9 @@ func TestQueryBounds(t *testing.T) {
 	}{
 		{"no text at all", "", ErrEmptyQuery},
 		{"whitespace only", " \t\n ", ErrEmptyQuery},
+		{"embedded NUL", "alpha\x00beta", ErrNULQuery},
+		{"trailing NUL", "alpha\x00", ErrNULQuery},
+		{"NUL only", "\x00", ErrNULQuery},
 		{"one token over the token cap", strings.TrimSpace(strings.Repeat("a ", maxQueryTokens+1)), ErrTooManyTokens},
 		{"one byte over the token length cap", strings.Repeat("a", maxTokenBytes+1), ErrTokenTooLong},
 	} {

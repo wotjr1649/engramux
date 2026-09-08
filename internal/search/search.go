@@ -62,7 +62,7 @@ type Hit struct {
 // whitespace and each token is quoted, so no syntax error can reach the caller
 // and no operator a person happened to type is obeyed ([matchExpression]). A
 // query that carries no token, too many, or one too long is refused with
-// [ErrEmptyQuery], [ErrTooManyTokens] or [ErrTokenTooLong] before the database
+// [ErrEmptyQuery], [ErrTooManyTokens], [ErrTokenTooLong] or [ErrNULQuery] before the database
 // is touched - all three are errors and not empty results.
 //
 // Every hit carries an excerpt cut from the event's masked payload, which is

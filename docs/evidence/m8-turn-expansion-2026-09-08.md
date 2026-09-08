@@ -46,3 +46,22 @@ generalization remain unmeasured. It scans test documents rather than using a pr
 and does not prove bounded body bytes, masking or endpoint latency for a new tool. The result
 supports designing a bounded explicit turn-context read for validation; it does not authorize
 automatic injection or replace the original M8 report.
+
+## Broader diagnostic and control
+
+The same-session control, which drops only the turn-key equality condition while retaining
+the ten-extra-ID cap, also recovered **2/2** positive fixes. This prevents attributing the
+observed gain to turn identity alone; reading extra nearby records explains this small result
+equally well.
+
+Across the 91 all-no candidate-window groups, turn expansion added context for **90 groups**:
+**900 added IDs**, of which **181** were explicitly labelled no for that failure and **719**
+were outside its labelled candidate window. The latter are unknown, not automatically false.
+The remaining query contained NUL bytes and was explicitly refused; it remains in the 91-group
+denominator. The original two positive results and the one unknown group were not relabelled.
+
+The expanded evaluation passed in 9.04 s using the same command and environment above. Its
+initial run exposed an existing FTS query-parser error, documented separately in
+`search-nul-2026-09-08.md`. This evidence does not justify automatically expanding every hit:
+the additional context is common on negative windows and its benefit outside two positives is
+unmeasured. A bounded explicit read remains a possible design, not an implemented release claim.

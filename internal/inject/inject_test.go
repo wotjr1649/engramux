@@ -60,6 +60,7 @@ func TestBuildAbstainsOnAPromptWithNothingToSearchOn(t *testing.T) {
 	for _, tc := range []struct{ prompt, reason string }{
 		{"", inject.ReasonNoTerms},
 		{"   ", inject.ReasonNoTerms},
+		{"quartz\x00hazard", inject.ReasonNoTerms},
 		{"a b c d", inject.ReasonNoTerms},
 		// Reduces to one common word; over this corpus nothing carries it,
 		// and over a real one the selectivity ceiling is what refuses it.
