@@ -15,11 +15,11 @@ import (
 	"github.com/wotjr1649/engramux/internal/pipe"
 )
 
-// TestTheToolSurfaceIsTheFiveSpecNames. The set is a decision, not an
+// TestTheToolSurfaceIsTheSixSpecNames. The set is a decision, not an
 // accident of what was easy to expose: `doctor` is deliberately not here,
 // because its reply carries the real database path where every other reply
 // masks it (spec 5.9), and ingest is not here because I-08 gives it the pipe.
-func TestTheToolSurfaceIsTheFiveSpecNames(t *testing.T) {
+func TestTheToolSurfaceIsTheSixSpecNames(t *testing.T) {
 	endpoint, token := serveForTest(t, stubHandler())
 	cs := connect(t, endpoint, token)
 
@@ -32,7 +32,7 @@ func TestTheToolSurfaceIsTheFiveSpecNames(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	slices.Sort(got)
-	want := []string{"get_event", "get_memory", "list_sessions", "search", "status"}
+	want := []string{"get_event", "get_memory", "get_session_resume", "list_sessions", "search", "status"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("the tools are %v, want %v", got, want)
 	}
@@ -60,9 +60,10 @@ func TestTheProjectArgumentIsRequiredInTheSchema(t *testing.T) {
 		t.Fatalf("list the tools: %v", err)
 	}
 	scoped := map[string]map[string]any{
-		"search":        {"query": "anything"},
-		"get_event":     {"id": stubEventID},
-		"list_sessions": {},
+		"search":             {"query": "anything"},
+		"get_event":          {"id": stubEventID},
+		"list_sessions":      {},
+		"get_session_resume": {"host": "codex", "host_session_id": "1"},
 	}
 	for _, tool := range res.Tools {
 		args, ok := scoped[tool.Name]
@@ -279,12 +280,12 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// TestNewRefusesAHandlerThatCannotAnswerAllFive. A nil field on a
+// TestNewRefusesAHandlerThatCannotAnswerAllSix. A nil field on a
 // [pipe.Handler] means "refuse that request type" to internal/pipe, and it
 // cannot mean that here: [mcp.AddTool] registers a tool unconditionally, so a
 // nil field would be a tool a model can see and a nil dereference when it calls
 // one.
-func TestNewRefusesAHandlerThatCannotAnswerAllFive(t *testing.T) {
+func TestNewRefusesAHandlerThatCannotAnswerAllSix(t *testing.T) {
 	full := stubHandler()
 	for _, tc := range []struct {
 		name string
@@ -295,6 +296,7 @@ func TestNewRefusesAHandlerThatCannotAnswerAllFive(t *testing.T) {
 		{"no ListSessions", func(h *pipe.Handler) { h.ListSessions = nil }},
 		{"no Status", func(h *pipe.Handler) { h.Status = nil }},
 		{"no GetMemory", func(h *pipe.Handler) { h.GetMemory = nil }},
+		{"no SessionResume", func(h *pipe.Handler) { h.SessionResume = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := full

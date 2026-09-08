@@ -377,6 +377,9 @@ func listenOnce(t *testing.T, dir string) (endpoint, token string) {
 // internal/service.
 func stubHandler() pipe.Handler {
 	return pipe.Handler{
+		SessionResume: func(context.Context, ipc.SessionResumeRequest) (ipc.SessionResumeReply, error) {
+			return ipc.SessionResumeReply{LatestReply: &ipc.ResumeMessage{EventID: stubEventID, Body: "accepted decision", ReceivedAtMS: 1}}, nil
+		},
 		Ingest: func(context.Context, ipc.Envelope) (ipc.AckStatus, error) {
 			return ipc.Committed, nil
 		},

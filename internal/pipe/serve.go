@@ -118,6 +118,9 @@ type Handler struct {
 	// GetMemory answers a GetMemory request, the fifth tool (memory spec
 	// rev.2, M-2 decision 9). A nil GetMemory refuses one, the same way.
 	GetMemory GetMemoryFunc
+	// SessionResume is an explicit MCP-only reader. It uses the same service
+	// read gate as the pipe; no CLI command or wire request type invokes it.
+	SessionResume func(context.Context, ipc.SessionResumeRequest) (ipc.SessionResumeReply, error)
 	// Doctor answers a Doctor request. A nil Doctor refuses one, the same
 	// way.
 	Doctor DoctorFunc

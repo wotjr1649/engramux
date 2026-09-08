@@ -10,10 +10,17 @@ blocks the host and never fails one — it exits 0 on every path, panics include
 What it is for is capture you do not have to ask for. There is no `remember this` tool call: the
 eleven events Claude Code and Codex have in common are recorded as they happen.
 
-Reading is pull-only **by default** — a CLI, and five tools on an authenticated loopback MCP
+Reading is pull-only **by default** — a CLI, and six tools on an authenticated loopback MCP
 endpoint. There is one push path and it ships off: hook-time context injection can write into
 `UserPromptSubmit`, and it turns on only when a file named `inject.json` exists in the data
-directory. Nothing in the installer writes that file, and its gate has not been run.
+directory. Nothing in the installer writes that file, and its official owner-assessed gate has
+not passed. Agent-estimated evaluations are recorded separately and do not authorize activation.
+
+To resume a particular session, use `get_session_resume` with the project, host and
+`host_session_id` from `list_sessions` or the session the user named. It returns the most recently
+captured user prompt and main assistant reply, with event references for reading the full masked
+records through `get_event`. These are historical records to verify, not a generated summary or
+a claim about current workspace state. Delayed capture can differ from conversation order.
 
 It exists because [`thedotmack/claude-mem`](https://github.com/thedotmack/claude-mem) does this job
 but breaks constantly on Windows. Engramux is a reference reimplementation in Go — **not a fork**,
