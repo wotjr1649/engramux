@@ -104,16 +104,28 @@ func TestMeasureTransferDevelopment(t *testing.T) {
 	}
 	var output []result
 	type totals struct{ emitted, wanted, wantedEmitted, blocks, bytes, unwanted, deadlines int }
-	counts := map[string]*totals{"baseline": {}, "paired": {}}
+	arms := []string{"baseline", "paired"}
+	name := "development-replay.json"
+	if os.Getenv("ENGRAMUX_TRANSFER_ANCHOR") == "1" {
+		arms = []string{"baseline", "anchor"}
+		name = "development-anchor-replay.json"
+	}
+	counts := map[string]*totals{}
+	for _, arm := range arms {
+		counts[arm] = &totals{}
+	}
 	for _, tr := range triggers {
 		if err := prefix.advance(t, tr.stamp); err != nil {
 			t.Fatal(err)
 		}
-		for _, arm := range []string{"baseline", "paired"} {
+		for _, arm := range arms {
 			var got inject.Result
-			if arm == "baseline" {
+			switch arm {
+			case "baseline":
 				got = m7Build(t, prefix.db, tr.p)
-			} else {
+			case "anchor":
+				got = rareAnchorBuild(t, prefix.db, tr.p)
+			default:
 				got = pairedBuild(t, prefix.db, tr.p, tr.stamp)
 			}
 			r := result{Arm: arm, PromptID: tr.p.id, Session: tr.p.session, Prompt: tr.p.prompt, Wanted: tr.p.wanted, Reason: got.Reason}
@@ -164,7 +176,7 @@ func TestMeasureTransferDevelopment(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	f, err := root.OpenFile("development-replay.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		t.Fatal("replay export exists or cannot be created")
 	}
@@ -173,7 +185,7 @@ func TestMeasureTransferDevelopment(t *testing.T) {
 	if we != nil || ce != nil {
 		t.Fatal("replay export failed")
 	}
-	for _, arm := range []string{"baseline", "paired"} {
+	for _, arm := range arms {
 		c := counts[arm]
 		t.Logf("%s: prompts=23 emitted=%d wanted=%d wanted_emitted=%d blocks=%d bytes=%d unwanted=%d deadlines=%d", arm, c.emitted, c.wanted, c.wantedEmitted, c.blocks, c.bytes, c.unwanted, c.deadlines)
 	}
