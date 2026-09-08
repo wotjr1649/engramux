@@ -85,3 +85,40 @@ Known relevant bytes are 576/31,258 (1.84%); even crediting every unknown wanted
 This remains development evidence, not official M7 or an independent task-success evaluation.
 It strengthens rejection of this candidate without opening the holdout or lowering a threshold.
 Repeating the judgement writer exited 1 with `judgements already exist; refusing overwrite`.
+
+## Same-session evidence availability
+
+`go test -p 1 -count=1 -timeout 2m -run '^TestWriteTransferPredecessors$' -v
+./internal/inject`, with `ENGRAMUX_TRANSFER_PREDECESSORS=1`, examined only the six
+development requests already labelled yes. For each exact host, project and session it
+counted Stop events strictly before the request and read the latest one, ordering timestamp
+ties by ID. This is a bounded availability audit, not the product selector. It masks the
+whole payload before extracting the assistant message and writes only under `.capture/`.
+The wanted-label file remains bound to the exported development prompts by SHA-256.
+
+| Wanted request ordinal | Earlier same-session Stops | Latest body bytes | Root inspection |
+| --- | ---: | ---: | --- |
+| 1 | 0 | 0 | No same-session Stop; other evidence not ruled out |
+| 2 | 5 | 1,593 | Concrete unfinished work and next-step proposal |
+| 3 | 1 | 1,357 | Restart constraints, but no exact requested execution path |
+| 4 | 0 | 0 | No same-session Stop; named other session still to inspect |
+| 5 | 1 | 10,931 | Project status and limits of demonstrated benefit |
+| 6 | 2 | 7,026 | The recommendation being accepted is present |
+
+The first audit limited bodies to 2,000 runes and truncated two of the four bodies, including
+the accepted recommendation. Its original private export was preserved. Raising only this
+offline inspection bound to 8,000 runes and using a separate exclusive output produced the
+table above with no truncation; the second run passed in 0.02 s. This does not change the
+product's injection budget. The pinned linter subsequently exited 0 with `0 issues.`.
+
+There is relevant stored evidence for at least ordinals 2, 5 and 6. Collection absence cannot
+explain every missed request. Ordinal 3 is partial and is not credited as a complete answer.
+These are root-agent relevance judgements of historical statements, not verification of those
+statements' factual accuracy. The selection-review subagent reviewed the aggregate interpretation.
+
+Crucially, a previous answer in the same session may already be in the model's context.
+Neither the context at each trigger nor the benefit of injecting it again was measured.
+Thus this audit is not a new quality score, task-success result, or justification for
+automatically injecting the latest same-session answer. A named other-session request is
+the next bounded case to inspect; absence in this narrow audit does not establish absence
+from the corpus. The 108 holdout prompt bodies and outputs remain unopened.
