@@ -70,3 +70,24 @@ used to answer whether that heading was present in the current model context bef
 Likewise, reading a named instruction file is not by itself a successful historical-memory
 task. Candidate design must preserve these distinctions; a larger retrieval count alone would
 not establish utility. No selector result or new candidate is reported by this inspection.
+
+## Development replay
+
+`go test -p 1 -count=1 -timeout 3m -run '^TestMeasureTransferDevelopment$' -v ./internal/inject`
+with `ENGRAMUX_TRANSFER_REPLAY=1` passed in 12.61 s after correcting the new harness to record
+empty abstentions without trying to parse a nonexistent fence. No product fence rule changed.
+The private export retains all 23 prompts for both arms, including abstentions, and checks
+selected event project and strict-prefix timestamps. Source database and WAL hashes still
+matched the frozen manifest afterwards. The pinned linter passed with exit 0.
+
+| Arm | Emitted prompts | Wanted output | Blocks | Bytes | Unwanted bytes | Deadline abstentions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 2/23 | 0/6 | 24 | 9,317 | 9,317 | 0 |
+| Explicit paired-answer replacement | 2/23 | 0/6 | 23 | 9,030 | 9,030 | 0 |
+
+Both emitted only for two general concept-explanation requests. Every wanted prompt abstained
+because no corpus hit matched the selected query. The pairing arm cannot repair this initial
+retrieval failure, because it only replaces already-selected questions. Neither arm passes;
+no block-level relevance score or new holdout result is claimed. This is development evidence
+for reviewing request interpretation and query construction, not tuning another exception to
+the two observed negatives. Holdout 108 remains unopened.
