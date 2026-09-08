@@ -360,6 +360,11 @@ func handlers(db *sql.DB, dbPath, spoolPath string, started time.Time, gate *rea
 				return listSessions(ctx, db, req)
 			})
 		},
+		SessionResume: func(ctx context.Context, req ipc.SessionResumeRequest) (ipc.SessionResumeReply, error) {
+			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.SessionResumeReply, error) {
+				return sessionResume(ctx, db, req)
+			})
+		},
 		GetMemory: func(ctx context.Context, req ipc.GetMemoryRequest) (ipc.GetMemoryReply, error) {
 			return boundedRead(ctx, gate, func(ctx context.Context) (ipc.GetMemoryReply, error) {
 				return getMemory(ctx, db, req)
