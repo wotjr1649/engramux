@@ -81,6 +81,13 @@ const (
 // against a busiest-session rate of 14.8 events/min, so a timestamp neither
 // orders nor disambiguates.
 func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now time.Time) (ipc.AckStatus, error) {
+	return ingestWithProject(ctx, db, env, src, now, project.Identify)
+}
+
+// ingestWithProject lets a test hold project resolution at a barrier while the
+// real single-connection database serves another ingest. Ingest always supplies
+// project.Identify; the resolver is per call, never shared mutable state.
+func ingestWithProject(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now time.Time, resolveProject func(string) project.Project) (ipc.AckStatus, error) {
 	// A payload that is not a JSON object leaves fields nil, which every
 	// reader below treats as "absent". host.Detect answers "unknown" for it.
 	var fields map[string]any
@@ -106,7 +113,7 @@ func Ingest(ctx context.Context, db *sql.DB, env ipc.Envelope, src Source, now t
 	//
 	// A missing or non-absolute cwd is resolved by project.Identify without
 	// consulting the service's own working directory - see its doc comment.
-	p := project.Identify(field(fields, "cwd"))
+	p := resolveProject(field(fields, "cwd"))
 	privacyClass := secret.Detect(env.Payload).String()
 	// The third decode of the same bytes - the fields map above, Detect, and
 	// this - and deliberately not shared with either. Detect walks a decoded
