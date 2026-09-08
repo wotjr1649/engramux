@@ -197,3 +197,36 @@ The selection-review subagent confirmed the limited interpretation and emphasize
 later statement only supersedes an earlier one when they concern the same work item and
 the later statement actually reports a changed state. Receipt order alone is not semantic
 completion evidence, and a later planning note must not erase an earlier completion report.
+
+## Same-session duplication hypothesis
+
+The provenance audit now also joins each selected event to its trigger and verifies exact
+project and strict-prefix timestamps. Same-session means matching both host and stored session
+ID; no payload content is needed for this join. `python -X utf8
+docs/evidence/transfer-block-provenance.py` produced:
+
+| Arm and prompt label | Same-session blocks / bytes | Other-session blocks / bytes |
+| --- | ---: | ---: |
+| Baseline, unwanted | 1 / 316 | 23 / 9,001 |
+| Rare-term candidate, unwanted | 5 / 1,835 | 69 / 23,331 |
+| Rare-term candidate, wanted | 2 / 1,057 | 13 / 5,035 |
+
+Joining the separately stored agent excerpt judgements, after checking their replay SHA-256,
+places the sole known-relevant 576-byte excerpt in the same-session group. Its other 481 bytes
+are labelled no. Other-session wanted excerpts contain 3,150 no bytes and 1,885 unknown bytes.
+No labels were changed by this metadata join.
+
+Deleting all same-session blocks from the existing candidate output would leave 23,331 unwanted
+bytes out of 28,366 total (82.25%) and remove its only known-relevant excerpt. The baseline
+would still have 9,001 bytes, all on unwanted requests. These are post-hoc deletion calculations,
+not a new retrieval run: removed results might be backfilled by a real selector. They do not
+justify implementing blanket current-session exclusion as the next quality candidate.
+
+The selection-review subagent confirmed this limited interpretation. In this development
+population, same-session removal alone does not address most observed unwanted bytes. Neither
+same-session membership nor receipt order proves that a block is already in the host model's
+current context. `inject.Request` carries prompt, project and the current event's exclusion ID;
+it does not carry the host's actual visible context. Persisted history can remain after host
+compaction or truncation, so context redundancy cannot be inferred from session identity alone.
+This is an input/evaluation limitation, not proof that selection cannot improve with existing
+inputs. No product behavior changed, and no additional holdout content was read.
