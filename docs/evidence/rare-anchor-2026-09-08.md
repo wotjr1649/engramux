@@ -45,3 +45,43 @@ tests and skipped the opt-in replay, preserving its existing output. The pinned 
 rejected the new arm dispatch with QF1003; using a tagged switch fixed it and the subsequent
 run exited 0 with `0 issues.`. `git diff --check` passed. No full regression or race run was
 needed for these test-only changes; no installation, push or release occurred.
+
+## Provenance and excerpt relevance followup
+
+`python -X utf8 docs/evidence/transfer-block-provenance.py` queried only event types
+for IDs already selected by the development replay. It printed fixed event enums and
+counts, with no payloads or identifiers. Of the 25,166 unwanted bytes, 14,726 were
+UserPromptSubmit, 4,065 PostToolUse, 3,328 Stop, 1,924 PreToolUse and 1,123 other types.
+Of the 6,092 wanted bytes, the corresponding values were 3,041, 1,547, 576 and zero;
+SubagentStop contributed 324, SessionStart 266, and other types 338.
+
+Deleting all returned question events would leave 10,440 unwanted bytes out of 13,491
+(77.4%). Keeping only Stop and PostToolUse would leave 7,393 out of 9,516 (77.7%).
+These are post-hoc deletion calculations on existing results, not new selector replays.
+They neither account for backfilling removed hits nor demonstrate causal gate effects.
+They do show that removing question events alone cannot make these outputs acceptable.
+The selection-review subagent independently reviewed these aggregate limits.
+
+Root then judged all 15 displayed excerpts returned for the six wanted requests:
+
+| Excerpt relevance | Blocks | Bytes |
+| --- | ---: | ---: |
+| Yes | 1 | 576 |
+| No | 10 | 3,631 |
+| Unknown | 4 | 1,885 |
+
+The one yes excerpt gives a concrete prior explanation of absent benefit guarantees and
+implementation limits relevant to the request. This labels its relevance, not the truth of
+its claims or success on the task. Excerpts labelled no are the target session's metadata, a generic
+continuation message, or questions that supply none of the requested answer. The four unknown
+excerpts contain older policy or project decisions, but the displayed context does not establish
+that they are the recommendation currently being accepted. They are not relabelled as irrelevant.
+
+`python -X utf8 docs/evidence/label-anchor-wanted.py` checked the reviewed replay SHA-256,
+exclusively wrote private agent judgements keyed by prompt and event, and reported exactly
+1/10/4 blocks and 576/3,631/1,885 bytes. It does not alter original wanted labels.
+Known relevant bytes are 576/31,258 (1.84%); even crediting every unknown wanted excerpt gives
+2,461/31,258 (7.87%). Only one of the six wanted requests has a known relevant excerpt.
+This remains development evidence, not official M7 or an independent task-success evaluation.
+It strengthens rejection of this candidate without opening the holdout or lowering a threshold.
+Repeating the judgement writer exited 1 with `judgements already exist; refusing overwrite`.
