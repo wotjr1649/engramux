@@ -55,3 +55,35 @@ would still not constitute a product design change or a selection-quality pass.
 No model was downloaded, dependency added, inference run, host configuration changed or
 private prompt sent to an external inference service. Semantic-model feasibility remains
 unverified. Existing runtime/privacy boundaries, original labels and activation criteria stand.
+
+## Versioned source follow-up
+
+Static inspection selected `v0.7.7` as a concrete review target, not an adoption decision or
+a claim that it is the newest release. Its [module file](https://github.com/knights-analytics/hugot/blob/v0.7.7/go.mod)
+declares Go 1.26.5, compute v0.1.2, GoMLX v0.28.2 and go-huggingface v0.4.1;
+the mutable-head versions above must not be substituted for this review.
+
+[NewGoSession](https://github.com/knights-analytics/hugot/blob/v0.7.7/hugot_go.go)
+imports gobackend explicitly. The
+[Rust-tokenizer disabled file](https://github.com/knights-analytics/hugot/blob/v0.7.7/backends/tokenizer_rust_disabled.go)
+and [XLA disabled file](https://github.com/knights-analytics/hugot/blob/v0.7.7/hugot_xla_disabled.go)
+both include the no-cgo case. The
+[Go tokenizer](https://github.com/knights-analytics/hugot/blob/v0.7.7/backends/tokenizer_go.go)
+uses hftokenizer, constructs paired text with separator tokens, and adjusts BERT type IDs.
+These inspected files support a possible Go-only route; they do not establish the complete
+transitive build or compatibility with a particular Korean model.
+
+The versioned [GoMLX backend](https://github.com/knights-analytics/hugot/blob/v0.7.7/backends/model_gomlx.go)
+selects the explicit `go` configuration unless GPU/TPU/XLA options override it. Two details
+prevent treating that route as ready for the hook budget: the default Go shape-cache limit
+is -1, and cancellation returns from `runGoMLXSessionOnBatch` without joining the goroutine
+executing `Exec`. The execution call receives no request context. This is static evidence
+of an unjoined cancellation path, not a measured leak or proof of its duration. A future
+probe must observe worker completion and bounded retained state, as well as response latency.
+Returning before a deadline would not by itself demonstrate bounded work.
+
+No inference probe was executed. Version pinning narrows the feasibility question but gives
+no evidence that a semantic score distinguishes historical necessity from topical similarity.
+The next selection-quality experiment should measure incremental task outcomes with the
+host-visible context controlled; additional lexical exceptions or runtime exploration alone
+cannot answer that question.
