@@ -1,0 +1,26 @@
+[
+  {
+    "id": "continuation_prior_constraint",
+    "current_request": "Continue the sample reminder schedule by creating one reminder. Return only a JSON object with exactly these keys: \"name\" (string), \"hour\" (integer), \"minute\" (integer), and \"time_zone\" (string). Set name to \"stretch\", hour to 9, and minute to 15. Carry forward the schedule's established time-zone constraint.",
+    "visible_prior_reply": "",
+    "recalled_data": ""
+  },
+  {
+    "id": "continuation_prior_decision",
+    "current_request": "Continue the sample book-club schedule by adding its next meeting. Return only a JSON object with exactly these keys: \"day\" (string), \"start_hour\" (integer), \"start_minute\" (integer), and \"duration_minutes\" (integer). Use the selected weekday, start at 18:30, and set duration to 60 minutes.",
+    "visible_prior_reply": "",
+    "recalled_data": ""
+  },
+  {
+    "id": "self_contained_continue",
+    "current_request": "Continue with a new, self-contained reading-list configuration. Return only a JSON object with exactly these keys: \"title\" (string), \"item_count\" (integer), and \"archived\" (boolean). Set title to \"Weekend reading\", item_count to 3, and archived to false.",
+    "visible_prior_reply": "",
+    "recalled_data": ""
+  },
+  {
+    "id": "current_overrides_stale",
+    "current_request": "For the current export configuration, explicitly set format to \"json\" and delimiter to \";\". Return only a JSON object with exactly these keys: \"format\" (string), \"delimiter\" (string), and \"include_headers\" (boolean). Set include_headers to true. Follow these current values for this request.",
+    "visible_prior_reply": "",
+    "recalled_data": ""
+  }
+]
