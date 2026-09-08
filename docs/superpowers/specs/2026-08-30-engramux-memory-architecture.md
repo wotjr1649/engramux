@@ -1111,6 +1111,15 @@ reader is meant to be able to tell recall from silence (§6's fifth mitigation),
 in the corpus matched" for a search that matched and was then filtered. The two cases want different
 words. This is recorded rather than fixed here; it changes a log line, not a decision.
 
+**Implemented 2026-09-08:** empty-result reasons now report observed event-index and
+memory-index ceiling suppression separately, followed by any actual prompt-event and
+Engramux-command exclusions, in that order. Multiple observations are retained rather than
+letting one ceiling hide the other index's exclusion. `ReasonNoHits` remains only when none
+of those observations occurred. This changes the service log and IPC reason, not query
+derivation, candidate selection, thresholds, emitted context or the historical figures above.
+`TestBuildReportsActualExclusions` and `TestBuildReportsMixedSuppression` own the regression;
+docs/evidence/abstention-causes-2026-09-08.md records validation and the limits of these reasons.
+
 **Whether that is P2 working or the reduction being too narrow is what M7's `should_inject` labels
 decide**, and they are the owner's to write. The two readings are not the same claim: a prompt with
 no history receiving zero bytes is the capability, and a prompt with history receiving zero bytes is

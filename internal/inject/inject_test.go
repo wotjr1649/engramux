@@ -99,8 +99,8 @@ func TestBuildAbstainsWhenTheQueryMatchesTooMuch(t *testing.T) {
 	if res.Text != "" {
 		t.Errorf("Build injected %d bytes for a query matching 250 of 250 documents", len(res.Text))
 	}
-	if res.Reason != inject.ReasonTooBroad {
-		t.Errorf("Build abstained for %q, want %q", res.Reason, inject.ReasonTooBroad)
+	if res.Reason != "events: "+inject.ReasonTooBroad {
+		t.Errorf("Build abstained for %q, want event selectivity ceiling", res.Reason)
 	}
 }
 

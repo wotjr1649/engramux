@@ -145,13 +145,15 @@ type Result struct {
 
 // The abstention reasons. Each is a different question a reader of the log has.
 const (
-	ReasonNoTerms   = "the prompt has no term to search on"
-	ReasonNoHits    = "nothing in the corpus matched"
-	ReasonTooBroad  = "the query matched too much of the corpus to be recall"
-	ReasonDeadline  = "the search did not finish inside the budget"
-	ReasonNoRoom    = "no excerpt fits the byte cap"
-	ReasonNoFence   = "no fence nonce was free of the payload"
-	ReasonInjecting = ""
+	ReasonNoTerms     = "the prompt has no term to search on"
+	ReasonNoHits      = "nothing in the corpus matched"
+	ReasonTooBroad    = "the query matched too much of the corpus to be recall"
+	ReasonDeadline    = "the search did not finish inside the budget"
+	ReasonNoRoom      = "no excerpt fits the byte cap"
+	ReasonNoFence     = "no fence nonce was free of the payload"
+	ReasonInjecting   = ""
+	ReasonOwnPrompt   = "matching prompt event excluded"
+	ReasonOwnCommands = "matching engramux commands excluded"
 )
 
 // Build selects, assembles and fences one injection, or abstains.
@@ -215,24 +217,21 @@ func build(ctx context.Context, db *sql.DB, req Request, budget time.Duration) (
 	if err != nil {
 		return abstain(ctx, err, start)
 	}
-	broad := total > maxMatches
-	if broad {
+	eventBroad, memoryBroad := total > maxMatches, memTotal > maxMatches
+	if eventBroad {
 		hits = nil
 	}
-	if memTotal > maxMatches {
-		broad = true
+	if memoryBroad {
 		mem = nil
 	}
 
-	hits, err = keepable(ctx, db, hits, req.ExcludeID)
+	var removed exclusions
+	hits, removed, err = keepable(ctx, db, hits, req.ExcludeID)
 	if err != nil {
 		return abstain(ctx, err, start)
 	}
 	if len(hits) == 0 && len(mem) == 0 {
-		if broad {
-			return Result{Reason: ReasonTooBroad, Elapsed: time.Since(start)}, nil
-		}
-		return Result{Reason: ReasonNoHits, Elapsed: time.Since(start)}, nil
+		return Result{Reason: emptyReason(eventBroad, memoryBroad, removed), Elapsed: time.Since(start)}, nil
 	}
 
 	// The overhead is measured rather than computed: the fence's own
@@ -393,6 +392,29 @@ func identifier(tok string) bool {
 	return upper && unicode.IsUpper([]rune(tok)[0])
 }
 
+type exclusions struct{ prompt, command bool }
+
+// emptyReason reports all observed suppression causes, never corpus text.
+func emptyReason(eventBroad, memoryBroad bool, removed exclusions) string {
+	var reasons []string
+	if eventBroad {
+		reasons = append(reasons, "events: "+ReasonTooBroad)
+	}
+	if memoryBroad {
+		reasons = append(reasons, "memory: "+ReasonTooBroad)
+	}
+	if removed.prompt {
+		reasons = append(reasons, ReasonOwnPrompt)
+	}
+	if removed.command {
+		reasons = append(reasons, ReasonOwnCommands)
+	}
+	if len(reasons) == 0 {
+		return ReasonNoHits
+	}
+	return strings.Join(reasons, "; ")
+}
+
 // keepable drops the hits this injection may not carry: the prompt's own event,
 // and every event that is this product running itself.
 //
@@ -414,18 +436,20 @@ func identifier(tok string) bool {
 // each segment of the shell line, first token, quotes stripped, base name
 // compared. `grep -rn engramux .` keeps its hit; `cd d:/x && ./dist/engramux.exe
 // search foo` does not.
-func keepable(ctx context.Context, db *sql.DB, hits []search.Hit, excludeID string) ([]search.Hit, error) {
+func keepable(ctx context.Context, db *sql.DB, hits []search.Hit, excludeID string) ([]search.Hit, exclusions, error) {
+	var removed exclusions
 	out := make([]search.Hit, 0, len(hits))
 	ids := make([]any, 0, len(hits))
 	for _, h := range hits {
 		if h.ID == excludeID {
+			removed.prompt = true
 			continue
 		}
 		out = append(out, h)
 		ids = append(ids, h.ID)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, removed, nil
 	}
 
 	// derived_cmd rather than the payload: it is migration 00005's column
@@ -440,35 +464,37 @@ func keepable(ctx context.Context, db *sql.DB, hits []search.Hit, excludeID stri
 		strings.Repeat(",?", len(ids)-1) + `)`
 	rows, err := db.QueryContext(ctx, q, ids...)
 	if err != nil {
-		return nil, fmt.Errorf("read the commands: %w", err)
+		return nil, removed, fmt.Errorf("read the commands: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	self := map[string]bool{}
 	for rows.Next() {
 		var id, cmd string
 		if err := rows.Scan(&id, &cmd); err != nil {
-			return nil, fmt.Errorf("scan a command: %w", err)
+			return nil, removed, fmt.Errorf("scan a command: %w", err)
 		}
 		if InvokesEngramux(cmd) {
 			self[id] = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read the commands: %w", err)
+		return nil, removed, fmt.Errorf("read the commands: %w", err)
 	}
 	// Closed before the caller's next read, which takes the same single
 	// connection (1.0 spec §5.4).
 	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close the commands: %w", err)
+		return nil, removed, fmt.Errorf("close the commands: %w", err)
 	}
 
 	kept := out[:0]
 	for _, h := range out {
 		if !self[h.ID] {
 			kept = append(kept, h)
+		} else {
+			removed.command = true
 		}
 	}
-	return kept, nil
+	return kept, removed, nil
 }
 
 // engramuxBase is the installed relay's file name without its extension. The
