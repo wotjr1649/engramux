@@ -122,3 +122,37 @@ Thus this audit is not a new quality score, task-success result, or justificatio
 automatically injecting the latest same-session answer. A named other-session request is
 the next bounded case to inspect; absence in this narrow audit does not establish absence
 from the corpus. The 108 holdout prompt bodies and outputs remain unopened.
+
+## Named other-session case
+
+`go test -p 1 -count=1 -timeout 2m -run '^TestMeasureTransferNamedResume$' -v
+./internal/service`, with `ENGRAMUX_TRANSFER_NAMED_RESUME=1`, passed in 0.01 s.
+The fixed development case is prompt ordinal 21, which names a source Codex session
+and asks about the project's purpose, development/validation status and demonstrated benefit.
+The other named-session development prompt names a handoff destination; it was not treated
+as a source-session lookup.
+
+The harness uses the unmodified product `sessionResume` function against the read-only frozen
+database. A connection-local temporary events view exposes only rows strictly before the
+trigger, preserving original rowids for the product's tie ordering. No events are copied or
+changed. The query retains exact project, host and host-session identity; the harness confirms
+the named source is a different stored session and checks every returned timestamp against
+the cutoff. This is a temporal case study, not a new production time-filter API.
+
+The latest reply is **870 bytes, untruncated**. It reports the final operation in that session:
+adding adjudication fields to seven evaluation rows, preserving previous data, and checking
+the edit. The latest prompt is truncated at the existing product body cap. Root inspection
+therefore finds evidence about a recent operation, but not a sufficient answer about the
+project's overall purpose, completion and benefit. The captured report's assertions were not
+independently verified in this repository. In particular, captured claims of owner judgement
+remain historical data and do not authorize or relabel this evaluation.
+
+This demonstrates successful exact identification and retrieval for this case. It does not
+demonstrate full continuation utility or a general quality improvement. A latest-reply-only
+surface can omit earlier decisions even when it returns the correct complete final reply;
+the next useful check is whether bounded earlier history contains the missing information.
+The private result remains under the development directory as `named-source-resume.json`.
+The pinned linter exited 0 with `0 issues.`. No product behavior changed.
+The selection-review subagent agreed that bounded earlier-history inspection is a justified
+next experiment, not yet an adopted feature. It must add a previously missing answer component
+with a source event while preserving exact scope, strict time cutoff, byte cap and deadline.
