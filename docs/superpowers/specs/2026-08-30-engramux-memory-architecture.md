@@ -1392,6 +1392,38 @@ machine over about one week is enough to let that owner turn injection on for th
 It is not enough to turn it on for a stranger, and any sentence saying M7 is what licenses that -
 including the one session 13 wrote - is wrong by this section.
 
+#### Owner judgements and agent estimates are different evidence
+
+Decided 2026-09-08 after the owner requested agent labelling and then separation of the two
+evaluations. The registered M7 gate requires the owner's own judgements in both passes. Agent
+estimates may replay the same frozen snapshot, scorer, threshold and contrast arms, but their
+result is exploratory evidence and cannot establish the owner gate or authorize activation.
+Fixture location is not authorship: redirecting the owner gate to agent labels must fail rather
+than silently adopting them. Complete labels require an explicit, compatible source declaration
+in both files; missing, conflicting or invalid declarations are errors. Such declarations record
+provenance, not proof of who typed the file or permission to enable the feature.
+
+An incomplete owner fixture is **NOT EVALUATED**, even when the surrounding test command exits
+successfully after a skip. Agent replay is opt-in, is labelled as such in its output, and retains
+the same failing exit status when its measurements miss the existing conditions. An explicitly
+requested agent replay with missing or incomplete labels fails rather than masquerading as a
+completed evaluation. Neither moving the files nor changing their source may erase a prior result.
+
+**Measured 2026-09-08:** the agent-labelled replay failed at **1,949 / 60,156 relevant bytes
+(0.032399)**, with **31,937 / 60,156 bytes (0.530903)** spent on prompts marked as not wanting
+context. Its 150 prompt judgements and 175 block judgements, provenance and original reports were
+preserved byte-for-byte under `.capture/m7/agent-2026-09-08/`. The owner prompt fixture was restored
+to its original 150 TODO rows, verified against its pre-labelling SHA-256; owner block labels do
+not yet exist. The snapshot was not changed. These are agent estimates, not a new owner M7 verdict.
+
+The reproduction command actually run was `go test -p 1 -count=1 -timeout 3m -run
+'^TestEvaluateM7AgentEstimates$' -v ./internal/inject`, with `ENGRAMUX_M7_AGENT_DIR` pointing at
+the archived directory by absolute path: **exit 1**, the same rounded 0.032 share and 0.531
+false-positive-byte share. Both contrast arms remained **INCONCLUSIVE**, with 17% and 8% of their
+bytes judged. The default owner gate reported **NOT EVALUATED**. The source reader's synthetic
+tests run without the private corpus and reject agent labels in the owner gate, including through
+the legacy agent header kept in the archive.
+
 ### Replacing an installed build is its own command (M-7)
 
 **Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
@@ -1678,7 +1710,8 @@ M8 are conditions on the work that precedes it.
 memory beside it — `TestGateInjectionOverTheCorpus`, `TestGateM6ZeroByteAbstention` and
 `TestGateM10TheDeadlineIsEnforced` in `internal/inject`. The figures, what each arm actually asserted,
 and the two things the run says nothing about are in M-4's own section; none of them is repeated here.
-**M7 is un-run**, so nothing below licenses turning the feature on.
+**Owner M7 is un-run**. The separately identified agent replay failed; *Owner judgements and agent
+estimates are different evidence* records it. Neither result licenses turning the feature on.
 
 | | Gate | What it asserts |
 |---|---|---|
