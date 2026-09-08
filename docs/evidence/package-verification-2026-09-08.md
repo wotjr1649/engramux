@@ -41,3 +41,32 @@ Only that worktree's marketplace was modified. The main worktree's marketplace, 
 binaries and host configuration were unchanged. No tag, push or GitHub Release was created.
 The archive is deliberately labelled verification and does not resolve publication conditions,
 automatic-selection quality or the deferred Defender discussion.
+
+## Refresh at source 4402f3e
+
+The earlier artifact does not cover the later credential-delimiter optimization:
+`git diff --name-only 653bf3a 4402f3e -- internal/secret/secret.go` reported that source file.
+A fresh detached worktree was therefore created with
+`git worktree add --detach .capture/package-current-4402f3e 4402f3e` after verifying that the
+target did not exist. The packaging script and mkzip implementation were inspected first.
+
+In that worktree, the same direct Bash invocation recorded above ran twice with process-local
+GOPROXY=off, GOSUMDB=off and GOTOOLCHAIN=local. Both package runs exited 0 and each newly built
+CLI reported 0.1.0-verification. Their staging directories were dist/stage.cxsnVM and
+dist/stage.WiheDa. Both archives hashed to
+`bb968c35601c6c88afcfee4c24c655c2c694f7c45d9e867a7aaaa4d81ca7ebab`, independently confirmed
+with Get-FileHash. The source revision is 4402f3e5fede4eb462b27750f0bed08b826ad4d8.
+
+Python zipfile CRC checking passed and the archive contained exactly the five entries listed
+above. Direct PE-header checks on the archived binaries confirmed amd64, CLI subsystem 3 and
+service subsystem 2. The worktree marketplace named the same verification version and hash.
+`go version -m dist/stage.cxsnVM/engramux.exe` and
+`go version -m dist/stage.cxsnVM/engramux-service.exe` both reported Go 1.27.0, CGO_ENABLED=0,
+GOOS=windows, GOARCH=amd64 and -trimpath=true. The runtime version checks remain the stronger
+evidence for the linked version itself.
+
+The isolated worktree's only tracked change is its task-generated marketplace entry. The main
+worktree remained clean before this evidence update. These artifacts are local verification
+builds; the old artifact is preserved, and no installed service, host settings, main marketplace,
+remote, tag or release was changed. This closes the stale packaging-evidence gap, not the
+selection-quality, owner-labelled evaluation or publication prerequisites.
