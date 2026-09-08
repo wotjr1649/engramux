@@ -135,7 +135,7 @@ func m8P5Evaluate(t *testing.T, path, source string) {
 	t.Logf("P5 diagnostics: original failure returned %d/%d; native index reached %d/%d over %d items", echo, len(pop.cases), reached, len(pop.cases), len(bodies))
 	t.Log("P5 is retrospective fix retrieval, not as-of-trigger prediction; these figures alone do not prove task success or authorize publication")
 	if os.Getenv("ENGRAMUX_M8_TURN_EXPANSION") == "1" {
-		var recovered, extra int
+		var recovered, extra, controlRecovered int
 		for _, c := range pop.cases {
 			hits, _, err := search.Search(t.Context(), db, c.query, "", m8K, search.MatchAny)
 			if err != nil {
@@ -159,18 +159,69 @@ func m8P5Evaluate(t *testing.T, path, source string) {
 			if found {
 				recovered++
 			}
+			control := m8ExpandContext(byID, hits, m8K, false)
+			found = false
+			for _, id := range c.fixes {
+				for _, h := range hits {
+					if h.ID == id {
+						found = true
+					}
+				}
+				for _, added := range control {
+					if added == id {
+						found = true
+					}
+				}
+			}
+			if found {
+				controlRecovered++
+			}
 		}
 		t.Logf("EXTRA-CONTEXT diagnostic: actual fix %d/%d, added IDs=%d, max %d per query beyond original k=%d; not same-budget retrieval or task success", recovered, len(pop.cases), extra, m8K, m8K)
+		t.Logf("SAME-SESSION control without turn constraint: actual fix %d/%d", controlRecovered, len(pop.cases))
+		var negativeAdded, negativeExpanded, labelledNo, unjudged, refused int
+		for _, c := range pop.negatives {
+			hits, _, err := search.Search(t.Context(), db, c.query, "", m8K, search.MatchAny)
+			if errors.Is(err, search.ErrNULQuery) {
+				refused++
+				continue
+			}
+			if err != nil {
+				t.Fatalf("negative query refused: bytes=%d NUL=%d quotes=%d error=%v", len(c.query), strings.Count(c.query, "\x00"), strings.Count(c.query, "\""), err)
+			}
+			ids := m8ExpandTurns(byID, hits, m8K)
+			negativeAdded += len(ids)
+			if len(ids) > 0 {
+				negativeExpanded++
+			}
+			for _, id := range ids {
+				judged := false
+				for _, no := range c.judgedNo {
+					if id == no {
+						judged = true
+					}
+				}
+				if judged {
+					labelledNo++
+				} else {
+					unjudged++
+				}
+			}
+		}
+		t.Logf("ALL-NO-WINDOW diagnostic: groups=%d expanded=%d added=%d labelled-no-added=%d outside-labelled-window=%d; outside-window is unknown, not automatically false", len(pop.negatives), negativeExpanded, negativeAdded, labelledNo, unjudged)
+		t.Logf("ALL-NO-WINDOW refusals: NUL queries=%d; retained in group denominator", refused)
 	}
 }
 
 type m8P5Case struct {
 	failure, query  string
 	fixes, literals []string
+	judgedNo        []string
 }
 
 type m8P5Population struct {
 	cases          []m8P5Case
+	negatives      []m8P5Case
 	allNo, unknown int
 }
 
@@ -322,6 +373,7 @@ func m8P5Plan(docs []doc, labels map[m8LabelKey]string) (m8P5Population, error) 
 			case "unknown":
 				unknown = true
 			case "no":
+				c.judgedNo = append(c.judgedNo, fix.id)
 			case "yes":
 				if m8Stamp(fix.name) <= m8Stamp(failure.name) || strings.Split(fix.name, "__")[0] != strings.Split(failure.name, "__")[0] {
 					return out, errM8Rows
@@ -345,6 +397,7 @@ func m8P5Plan(docs []doc, labels map[m8LabelKey]string) (m8P5Population, error) 
 			out.unknown++
 		case len(c.fixes) == 0:
 			out.allNo++
+			out.negatives = append(out.negatives, c)
 		default:
 			out.cases = append(out.cases, c)
 		}

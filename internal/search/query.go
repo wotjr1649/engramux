@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// The three ways a query is refused before it reaches SQLite. Each is an error
+// The ways a query is refused before it reaches SQLite. Each is an error
 // and not an empty result set, because a caller that cannot tell "you asked for
 // nothing" from "nothing matched" reports the wrong one to the person who
 // typed it.
@@ -20,6 +20,9 @@ var (
 
 	// ErrTokenTooLong is returned for a token over [maxTokenBytes].
 	ErrTokenTooLong = errors.New("search: a query token is too long")
+
+	// ErrNULQuery refuses input that FTS5 cannot parse without truncation.
+	ErrNULQuery = errors.New("search: the query contains a NUL byte")
 )
 
 // The two bounds on a query, which are about not handing SQLite a pathological
@@ -61,6 +64,9 @@ const (
 // [matchExpression]. A token that unicode61 tokenizes to nothing, `---` or a
 // lone `"`, is legal input here and is not special-cased.
 func queryTokens(text string) ([]string, error) {
+	if strings.ContainsRune(text, 0) {
+		return nil, ErrNULQuery
+	}
 	tokens := strings.Fields(text)
 	if len(tokens) == 0 {
 		return nil, ErrEmptyQuery
