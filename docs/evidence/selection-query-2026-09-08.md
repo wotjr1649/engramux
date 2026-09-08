@@ -45,3 +45,32 @@ The command run was `go test -p 1 -count=1 -timeout 1m -run
 under `.capture/selection-quality/holdout-2026-09-08/`, bound to the snapshot SHA-256. It did
 not retrieve candidate outputs or assign relevance labels. The small holdout cannot support
 a broad utility claim merely because it is disjoint.
+
+The pair-fallback experiment is preserved locally at `3fc2d15` on
+`step-selection-pair-fallback` and was **not merged**. The check actually run was
+`git merge-base --is-ancestor 3fc2d15 main`, which returned 1. The fixed rule passed its
+synthetic overlap, full-match preservation, self-exclusion and per-source cutoff checks;
+mutating it to unconditional OR or allowing it to displace a full match made the corresponding
+tests fail. These mechanical passes did not make its selection quality acceptable.
+
+Before looking at outputs, the 24 holdout prompts were estimated as **6 wanted / 18 not wanted**.
+The labels and their reasons are private agent estimates, not owner judgements. The paired replay
+alternated which arm ran first against each prefix and pooled 67 blocks without changing labels.
+The command run was `go test -p 1 -count=1 -timeout 3m -run
+'^TestWritePairHoldoutReplay$' -v ./internal/inject`, with `ENGRAMUX_WRITE_PAIR_HOLDOUT=1`.
+
+| Holdout result | Original AND | Pair fallback |
+|---|---:|---:|
+| Prompts receiving output | 3 | 9 |
+| Wanted prompts receiving output | 0 of 6 | 4 of 6 |
+| Emitted excerpt bytes | 7,161 | 23,044 |
+| Bytes on not-wanted prompts | 7,161 | 11,862 |
+| Unwanted byte share | 1.000 | 0.514754 |
+
+The candidate failed the existing 0.50 false-positive-byte condition. More wanted prompts receiving
+output does not establish that the output was useful. Inspection also found earlier requests for
+different briefs retrieved through shared continuation wording. Full block relevance was not scored
+after the negative-control failure, and no precision or task-success pass is claimed. The original
+holdout and replay files were preserved; an attempted repeat of the fixture writer was refused and
+the fixture SHA-256 stayed unchanged. This holdout is now exposed and cannot be reused as an
+independent test for a candidate designed from these findings.
