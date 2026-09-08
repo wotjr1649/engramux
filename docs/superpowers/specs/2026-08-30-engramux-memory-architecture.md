@@ -1452,6 +1452,27 @@ source enforcement. The boundary, backward-order and read-only mutations each pr
 intended assertion failure, and the restored test passed. This checks the measuring instrument;
 it is not a passing selector-quality result.
 
+**First content-only candidate rejected, 2026-09-08.** A development arm kept the existing
+query, ranking, limit and budgets but built excerpts only from conversation/tool fields and
+required a literal query-token match in those fields. The same temporal command returned
+17 injections, 94 blocks and 26,422 bytes; 17,978 bytes (0.680) went to prompts estimated not
+to want context, and 8 of 59 estimated wanted prompts received output. Less text was not proof
+of better selection. A synthetic `quartz?` query then lost an answer that FTS still matched:
+literal substring admission did not share the tokenizer's punctuation semantics. The arm was
+removed from the product; no ranking term, threshold or default changed.
+
+`TestInjectionMatchesPunctuationLikeSearch` preserves that retrieval boundary. A separate
+eight-prompt synthetic probe supplied by a fixture-design agent recovered **0 of 4** earlier
+decisions under both the baseline and the rejected arm, with **0 of 4** unnecessary injections.
+Those prompts combine Korean requests with English decisions; this measures a limitation of
+the current lexical selector, not a translation capability it promises. The probe retains the
+prompts, earlier decisions and exact expected answers, but does not run agents on the answers
+and therefore reports no task-success score. Its future records and metadata distractors are
+not ingested; it is not a substitute for the temporal boundary test. The command run was
+`go test -p 1 -count=1 -timeout 45s -run
+'^Test(InjectionMatchesPunctuation|MeasureIndependentSyntheticSelection)' -v ./internal/inject`.
+The test process passed its mechanical checks; selector utility remains **unverified**.
+
 ### Replacing an installed build is its own command (M-7)
 
 **Decided 2026-09-03**, and scheduled after the plan's Steps 4 and 5 rather than into them. Nobody has
