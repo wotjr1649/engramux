@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -343,7 +345,17 @@ func TestCheckpointingDoesNotBlockIngest(t *testing.T) {
 	)
 	db, path := ckptDB(t)
 	payload := ckptFixture(t)
-	stop := start(t, &Checkpointer{DB: db, Path: path, Threshold: threshold, Interval: time.Hour, Poll: time.Millisecond})
+	var checkpointCount atomic.Int64
+	stop := start(t, &Checkpointer{DB: db, Path: path, Threshold: threshold, Interval: time.Hour, Poll: time.Millisecond,
+		Report: func(_ time.Time, err error) {
+			if err == nil {
+				checkpointCount.Add(1)
+			}
+		},
+	})
+	statsBefore := db.Stats()
+	var memoryBefore runtime.MemStats
+	runtime.ReadMemStats(&memoryBefore)
 
 	var mu sync.Mutex
 	var slowest time.Duration
@@ -381,6 +393,12 @@ func TestCheckpointingDoesNotBlockIngest(t *testing.T) {
 	stop()
 
 	t.Logf("%d ingests against a %d B threshold: the slowest took %v", writers*perWriter, int64(threshold), slowest)
+	statsAfter := db.Stats()
+	var memoryAfter runtime.MemStats
+	runtime.ReadMemStats(&memoryAfter)
+	t.Logf("diagnostic: %d completed checkpoints; DB pool waits %d totaling %s; GC cycles %d, stop-the-world pause %d ns; GOMAXPROCS %d",
+		checkpointCount.Load(), statsAfter.WaitCount-statsBefore.WaitCount, statsAfter.WaitDuration-statsBefore.WaitDuration,
+		memoryAfter.NumGC-memoryBefore.NumGC, memoryAfter.PauseTotalNs-memoryBefore.PauseTotalNs, runtime.GOMAXPROCS(0))
 	requireCount(t, db, "events", writers*perWriter)
 	if slowest > time.Second {
 		t.Errorf("the slowest ingest took %v, over spec 5.3's whole 1 s relay budget", slowest)

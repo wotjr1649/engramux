@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -90,6 +91,7 @@ type result struct {
 	stdout   []byte
 	stderr   []byte
 	elapsed  time.Duration
+	started  time.Time
 	spoolDir string
 }
 
@@ -141,6 +143,7 @@ func runWithLocal(t *testing.T, bin, local string, setup func(*exec.Cmd)) result
 	}
 
 	res := result{
+		started:  start,
 		exit:     cmd.ProcessState.ExitCode(),
 		stdout:   stdout.Bytes(),
 		stderr:   stderr.Bytes(),
@@ -698,9 +701,9 @@ func TestPanicWhileSettlingExitsZero(t *testing.T) {
 // 130 ms cold; 200 ms is that with room.
 const budgetSlack = 200 * time.Millisecond
 
-// spawnOverhead measures what running the relay costs when the relay itself
-// does no I/O at all: empty stdin never reaches the dial, so the elapsed time
-// is process start and teardown and nothing else.
+// spawnOverhead measures process start and teardown through a refused CLI
+// command. Empty relay stdin is not a no-op: it mints an event and fsyncs a
+// spool record, so using it would subtract storage work from a budget check.
 //
 // It is measured rather than assumed because it is subtracted from a real
 // assertion below, and a padded constant there would turn the upper bound into
@@ -708,10 +711,29 @@ const budgetSlack = 200 * time.Millisecond
 // and costs an order of magnitude more than the warm one the real run gets.
 func spawnOverhead(t *testing.T) time.Duration {
 	t.Helper()
-	run(t, relayBin, nil)
-	d := run(t, relayBin, nil).elapsed
+	spawnProbe(t)
+	d := spawnProbe(t).elapsed
 	t.Logf("subprocess overhead = %s", d)
 	return d
+}
+
+func TestSpawnOverheadDoesNotWriteASpool(t *testing.T) {
+	res := spawnProbe(t)
+	entries, err := os.ReadDir(res.spoolDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("read probe spool directory")
+	}
+	if len(entries) != 0 {
+		t.Errorf("probe spooled %d records, want none", len(entries))
+	}
+	if res.exit != 2 {
+		t.Fatalf("probe exit=%d, want the unrecognised CLI command", res.exit)
+	}
+}
+
+func spawnProbe(t *testing.T) result {
+	t.Helper()
+	return runWith(t, relayBin, func(cmd *exec.Cmd) { cmd.Args = append(cmd.Args, "--engramux-test-overhead") })
 }
 
 // TestPostDialBudgetStops is gate clause 5. The server accepts and reads the
@@ -726,19 +748,38 @@ func spawnOverhead(t *testing.T) time.Duration {
 // measured and subtracted rather than added to the limit as slack.
 func TestPostDialBudgetStops(t *testing.T) {
 	in := payload(t)
-	obs := serveRaw(t, func(_ net.Conn, _ ipc.Envelope, stop <-chan struct{}) {
-		// Hold the connection open, silently, past the relay's budget.
-		select {
-		case <-stop:
-		case <-time.After(5 * time.Second):
+	type connectionSpan struct {
+		received, closed time.Time
+		err              error
+	}
+	closed := make(chan connectionSpan, 1)
+	obs := serveRaw(t, func(c net.Conn, _ ipc.Envelope, _ <-chan struct{}) {
+		// Read without replying, so the client still waits for its ACK. EOF
+		// observes transport shutdown before the relay's durable spool tail.
+		received := time.Now()
+		if err := c.SetReadDeadline(received.Add(5 * time.Second)); err != nil {
+			closed <- connectionSpan{received, time.Now(), err}
+			return
 		}
+		var b [1]byte
+		_, err := c.Read(b[:])
+		closed <- connectionSpan{received, time.Now(), err}
 	})
 
-	// Measured against the same stalled server, and unaffected by it: an
-	// empty stdin is refused before the dial, so these runs never connect.
+	// The refused CLI command neither connects to this server nor spools.
 	overhead := spawnOverhead(t)
 
 	res := run(t, relayBin, in)
+	select {
+	case span := <-closed:
+		if !errors.Is(span.err, io.EOF) {
+			t.Error("stalled server did not observe the relay closing the connection")
+		}
+		t.Logf("diagnostic: request-to-observed-close %s; process-start-to-observed-close %s; observed-close-to-process-return %s",
+			span.closed.Sub(span.received), span.closed.Sub(res.started), res.started.Add(res.elapsed).Sub(span.closed))
+	case <-time.After(6 * time.Second):
+		t.Error("no transport shutdown diagnostic")
+	}
 
 	res.requireExitZeroAndSilentStdout(t)
 	res.requireSpooledAs(t, obs.only(t).IngestID, in)
