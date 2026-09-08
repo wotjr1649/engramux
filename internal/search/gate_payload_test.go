@@ -86,32 +86,28 @@ func TestGateTheSearchDoesNotReadPayloadsItDoesNotReturn(t *testing.T) {
 	}
 }
 
-// searchBest runs the shipped search path four times and returns the best of the
-// last three, the first being a warm-up. Best rather than mean, because the
-// question is what the statement costs and not what the machine was doing.
+// searchBest reports the final four-call group's best post-warm-up sample.
+// The standard benchmark lifecycle calibrates by repeating complete groups;
+// the result is not the minimum across those groups.
+// QPC measures intervals: the local Go clock reported 2.521 ms for the same
+// scan QPC measured at 6.030 ms. See docs/evidence/search-clock-2026-09-08.md.
 func searchBest(t *testing.T, db *sql.DB, limit int) time.Duration {
 	t.Helper()
-	var best time.Duration
-	for i := range 4 {
-		start := time.Now()
+	return bestSearchGroup(t, func(b *testing.B) {
 		hits, total, err := search.Search(t.Context(), db, payloadProbeTerm, "", limit, search.MatchAll)
 		if err != nil {
-			t.Fatalf("search: %v", err)
+			b.Fatalf("search: %v", err)
 		}
 		if len(hits) != limit {
-			t.Fatalf("search returned %d hits, want %d", len(hits), limit)
+			b.Fatalf("search returned %d hits, want %d", len(hits), limit)
 		}
 		// The match set is the point: an arm that matched a handful
 		// would price nothing, and a corpus that stopped carrying the
 		// term in every document would look like a fix.
 		if total != 20000 {
-			t.Fatalf("the term matched %d documents, want every one of them", total)
+			b.Fatalf("the term matched %d documents, want every one of them", total)
 		}
-		if d := time.Since(start); i > 0 && (best == 0 || d < best) {
-			best = d
-		}
-	}
-	return best
+	})
 }
 
 // payloadProbeTerm is in every document of a [payloadCorpus].
@@ -261,24 +257,18 @@ func TestGateTheMemorySearchDoesNotReadBodiesItDoesNotReturn(t *testing.T) {
 // searchMemoryBest is [searchBest] against the memory statement.
 func searchMemoryBest(t *testing.T, db *sql.DB, items, limit int) time.Duration {
 	t.Helper()
-	var best time.Duration
-	for i := range 4 {
-		start := time.Now()
+	return bestSearchGroup(t, func(b *testing.B) {
 		hits, total, err := search.SearchMemory(t.Context(), db, payloadProbeTerm, nil, limit, search.MatchAll)
 		if err != nil {
-			t.Fatalf("search memory: %v", err)
+			b.Fatalf("search memory: %v", err)
 		}
 		if len(hits) != limit {
-			t.Fatalf("memory search returned %d hits, want %d", len(hits), limit)
+			b.Fatalf("memory search returned %d hits, want %d", len(hits), limit)
 		}
 		if total != int64(items) {
-			t.Fatalf("the term matched %d items, want every one of them", total)
+			b.Fatalf("the term matched %d items, want every one of them", total)
 		}
-		if d := time.Since(start); i > 0 && (best == 0 || d < best) {
-			best = d
-		}
-	}
-	return best
+	})
 }
 
 // memoryPayloadCorpus is [payloadCorpus] over memory_items: every item carries

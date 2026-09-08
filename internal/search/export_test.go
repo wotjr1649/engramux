@@ -28,6 +28,12 @@ import (
 var (
 	QueryTokens     = queryTokens
 	MatchExpression = matchExpression
+	// Cost probes use the actual query and masking functions, without adding
+	// instrumentation or a masking bypass to the shipped search path.
+	CostEventQuery   = matchQuery
+	CostMemoryQuery  = memoryMatchQuery
+	CostEventExcerpt = excerpt
+	CostTextExcerpt  = excerptText
 )
 
 // SearchUnboosted is [Search] with the derived-field boost off.
