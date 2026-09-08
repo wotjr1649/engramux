@@ -35,14 +35,17 @@ exact message is unrecorded. One artefact, `windows/amd64`; `arm64` is unmeasure
 
 ## There is no release
 
-No tag, no release page and no archive — this repository has never built an artefact anywhere but
-on a developer's machine, and as of 2026-09-07 nothing has run its checks anywhere else either.
-What exists is the *process* rather than the release: a marketplace entry that names version
-`0.0.0` because there is nothing to name, a packaging script, and two GitHub Actions workflows that
-have never run, because nothing has been pushed. The only path anyone can walk today is **building
-from source, and that is the developer path**, labelled as one deliberately: the spec rejects
-source as a primary path for end users, and the Defender section below is why it is not merely
-inconvenient.
+There is no published release. Checked on 2026-09-08 with `gh release list --repo
+wotjr1649/engramux --limit 5` and `git tag --list`: no release was listed and the local repository
+had no tags. The marketplace still names placeholder version `0.0.0`; it is not an installable
+release. Packaging support exists, but publication prerequisites remain unresolved.
+
+Hosted checks have now run: the [main checks run for 3e4b44c](https://github.com/wotjr1649/engramux/actions/runs/34190680850)
+completed successfully. Verified with `gh run view 34190680850 --repo wotjr1649/engramux --json
+headSha,status,conclusion,url`. This verifies that revision's hosted checks, not a release archive
+or the private-corpus gates that skip on CI. The available path remains **building from source,
+the developer path**: the spec rejects source as a primary path for end users, and the Defender
+section below explains the remaining first-install concern.
 
 The version is `0.x` and there is no compatibility promise. Nothing outside `internal/` and `cmd/`
 is exported — `pkg/` included — because a public API surface is a promise 1.0 has not earned. A
