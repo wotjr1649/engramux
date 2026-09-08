@@ -1120,9 +1120,10 @@ a miss this instrument would otherwise never see.
 whose documents are the machine's own, where every earlier M10 reading was over documents a few dozen
 bytes long.
 
-**One fidelity limit, and it runs in the safe direction.** The snapshot is the whole history, so an
-August prompt searches a corpus containing September. At hook time only the past exists, so the real
-abstention rate is **higher** than 83% rather than lower, and the finding is conservative.
+**One fidelity limit, corrected on 2026-09-08.** The snapshot is the whole history, so an
+August prompt searches a corpus containing September. This does not bound the real abstention rate:
+future rows change ranking, document frequencies and the broad-query cutoff as well as candidates.
+The ingest-prefix diagnostic below measures the time restriction separately.
 
 #### The second reading, over 150 prompts and per stratum (M-4)
 
@@ -1286,11 +1287,11 @@ The stratum is computed from the prompt's letters and never labelled: half or mo
 `hangul`, under a fifth is `latin`, the rest is `mixed` - the same boundaries rev.11's own table
 uses.
 
-#### Two fidelity limits, and only one of them runs in the safe direction
+#### Two fidelity limits
 
 **The snapshot freezes the database and not the clock.** An August prompt searches a corpus holding
-September, where at hook time only the past existed. That one is conservative: the real abstention
-rate is higher, not lower.
+September, where at hook time only the past existed. This cannot establish historical relevance
+or task utility, and the direction of its effect on abstention is not guaranteed.
 
 **It does not freeze project identity either, and that one is not conservative.** The injector
 resolves the request's `cwd` against the **live filesystem** every time, so a worktree that has been
@@ -1423,6 +1424,33 @@ false-positive-byte share. Both contrast arms remained **INCONCLUSIVE**, with 17
 bytes judged. The default owner gate reported **NOT EVALUATED**. The source reader's synthetic
 tests run without the private corpus and reject agent labels in the owner gate, including through
 the legacy agent header kept in the archive.
+
+#### Ingest-prefix selection diagnostic
+
+The original full-snapshot M7 remains a historical measurement with its original labels and bar.
+It does not license a claim that a selected answer existed when the prompt arrived. The separate
+`TestMeasureTemporalSelection` builds the real event FTS index incrementally in memory from a
+read-only attachment of the frozen snapshot. Only events with positive `received_at` strictly
+before the trigger enter the index; a tied millisecond is excluded because it does not establish
+visibility order. Replay refuses backward time and project identity drift. All projects contribute
+their earlier rows to ranking statistics, as in production. Current native memory is absent because
+its historical versions are unknown. This is an event-only ingest-prefix proxy, not reconstruction
+of host occurrence time, an owner gate, or evidence of task success.
+
+**Measured 2026-09-08:** `go test -p 1 -count=1 -timeout 3m -run
+'^TestMeasureTemporalSelection$' -v ./internal/inject`, with `ENGRAMUX_TEMPORAL_AGENT_DIR` set
+to `../../.capture/m7/agent-2026-09-08`, returned 18 injections, 93 blocks and 31,874 excerpt
+bytes over the unchanged 150 prompts, with zero deadline abstentions. Nine of the 59 prompts
+estimated to want context received output. The 91 estimated not to want it received 20,917 bytes,
+or 0.656 of emitted excerpt bytes. No new block relevance labels were assigned, so neither
+precision nor recall is claimed. This exposed development sample cannot become an independent
+holdout by changing the replay mechanism.
+
+`TestTemporalReplayIndexesOnlyStrictlyEarlierEvents` checks real FTS retrieval at the strict
+boundary, a future-only term, repeated cutoff, forward advance, backward refusal and read-only
+source enforcement. The boundary, backward-order and read-only mutations each produced the
+intended assertion failure, and the restored test passed. This checks the measuring instrument;
+it is not a passing selector-quality result.
 
 ### Replacing an installed build is its own command (M-7)
 
