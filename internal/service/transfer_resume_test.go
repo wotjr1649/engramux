@@ -10,8 +10,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/wotjr1649/engramux/internal/ipc"
+	"github.com/wotjr1649/engramux/internal/project"
+	"github.com/wotjr1649/engramux/internal/secret"
 )
 
 func TestMeasureTransferNamedResume(t *testing.T) {
@@ -72,6 +76,10 @@ func TestMeasureTransferNamedResume(t *testing.T) {
 	if _, err := db.ExecContext(t.Context(), fmt.Sprintf("CREATE TEMP VIEW events AS SELECT rowid AS rowid,* FROM main.events WHERE received_at>0 AND received_at<%d", cutoff)); err != nil {
 		t.Fatal("prefix view failed")
 	}
+	if os.Getenv("ENGRAMUX_TRANSFER_HISTORY") == "1" {
+		measureNamedHistory(t, db, fields.CWD, host, namedID, cutoff)
+		return
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), readDeadline)
 	got, err := sessionResume(ctx, db, ipc.SessionResumeRequest{Project: fields.CWD, Host: host, HostSessionID: names[0]})
 	cancel()
@@ -101,4 +109,81 @@ func TestMeasureTransferNamedResume(t *testing.T) {
 	} else {
 		t.Logf("named source: reply_bytes=%d truncated=%t", len(got.LatestReply.Body), got.LatestReply.Truncated)
 	}
+}
+
+func measureNamedHistory(t *testing.T, db *sql.DB, cwd, host, session string, cutoff int64) {
+	t.Helper()
+	p, err := project.FromArgument(cwd)
+	if err != nil {
+		t.Fatal("invalid project")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	ctx, cancel := context.WithDeadline(t.Context(), deadline)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, `SELECT id,received_at,CASE WHEN length(CAST(payload AS BLOB))<=1048576 THEN payload ELSE NULL END FROM events WHERE project_id=? AND host=? AND session_id=? AND event_name='Stop' ORDER BY received_at DESC,rowid DESC LIMIT 10`, p.ID, host, session)
+	if err != nil {
+		t.Fatal("history query failed")
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var output []ipc.ResumeMessage
+	bytes := 0
+	for rows.Next() {
+		var msg ipc.ResumeMessage
+		var payload []byte
+		if err := rows.Scan(&msg.EventID, &msg.ReceivedAtMS, &payload); err != nil {
+			t.Fatal("history scan failed")
+		}
+		if msg.ReceivedAtMS <= 0 || msg.ReceivedAtMS >= cutoff {
+			t.Fatal("history outside prefix")
+		}
+		if len(msg.EventID) > ipc.MaxEventIDBytes || secret.MaskString(msg.EventID) != msg.EventID {
+			t.Fatal("unusable event reference")
+		}
+		var fields struct {
+			Body string `json:"last_assistant_message"`
+		}
+		if len(payload) == 0 || json.Unmarshal(secret.Mask(payload), &fields) != nil {
+			t.Fatal("invalid history body")
+		}
+		msg.Body = fields.Body
+		capBytes := min(ipc.ResumeBodyBytes, 5000-bytes)
+		if len(msg.Body) > capBytes {
+			n := capBytes
+			for n > 0 && !utf8.RuneStart(msg.Body[n]) {
+				n--
+			}
+			msg.Body, msg.Truncated = msg.Body[:n], true
+		}
+		if msg.Body != "" {
+			output = append(output, msg)
+			bytes += len(msg.Body)
+		}
+		if bytes >= 4997 {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal("history incomplete")
+	}
+	if ctx.Err() != nil || time.Now().After(deadline) {
+		t.Fatal("history exceeded budget")
+	}
+	encoded, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile("../../.capture/selection-quality/transfer-2026-09-08/named-source-history.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		t.Fatal("history export exists or unavailable")
+	}
+	_, we := f.Write(encoded)
+	ce := f.Close()
+	if we != nil || ce != nil {
+		t.Fatal("history export failed")
+	}
+	t.Logf("named history: replies=%d body_bytes=%d", len(output), bytes)
 }

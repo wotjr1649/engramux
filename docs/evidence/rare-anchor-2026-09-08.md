@@ -156,3 +156,44 @@ The pinned linter exited 0 with `0 issues.`. No product behavior changed.
 The selection-review subagent agreed that bounded earlier-history inspection is a justified
 next experiment, not yet an adopted feature. It must add a previously missing answer component
 with a source event while preserving exact scope, strict time cutoff, byte cap and deadline.
+
+## Bounded earlier-reply comparison
+
+The same fixed case was rerun with `ENGRAMUX_TRANSFER_HISTORY=1` in addition to
+`ENGRAMUX_TRANSFER_NAMED_RESUME=1`, using the same command above. This experimental arm
+selects at most ten earlier Stop records in the exact source project, host and stored session,
+newest first with rowid tie ordering. It masks whole payloads before reading assistant text,
+keeps event references and timestamps, caps each body at the existing 2,400-byte resume limit,
+and caps total body text at 5,000 bytes. Query, decoding and masking share a 500 ms deadline
+with a final wall-clock check. The body cap excludes JSON metadata; it is not a claim that
+the exported JSON or a production injection fits 5,000 bytes. No product selector changed.
+
+The run passed in 0.01 s and returned **three replies / 5,000 body bytes**. The first reply
+matches the original latest reply. The second is complete; the third is truncated. Comparing
+the previously fixed question components gives this root-agent assessment:
+
+| Requested information | Latest reply alone | With bounded earlier replies |
+| --- | --- | --- |
+| Project purpose | Insufficient | Still insufficient |
+| Development and validation state | One final data-edit operation | Adds evaluation verification and remaining document work |
+| Demonstrated benefit | No benefit measurement in the shown reply | Adds a condition comparison and explicit failure of a required gate |
+
+This is a concrete increase in source-backed information for this development case. It does
+not establish that the captured measurements are true, that the reader completed a task better,
+or that automatic M7 selection passed. The earlier third reply describes preparation for work
+that the later second reply reports completed. Displaying it as a current TODO would be wrong.
+The first reply also resolves an adjudication action still pending in the second. Retrieval
+must retain chronology and provenance; captured plans and approval requests remain historical
+data, not current instructions. This is a reason to test status reconciliation, not a reason
+to hide earlier conflicting records or automatically trust the latest statement as verified fact.
+
+The private output is `named-source-history.json`; the previous latest-only output was not
+overwritten. The linter initially flagged the helper's variable output path with G304. Making
+the experiment destination a fixed literal resolved it without a suppression; the pinned
+linter then exited 0 with `0 issues.`. A subsequent default invocation compiled successfully
+and skipped the opt-in audit, preserving its existing result. No broad regression or race run
+was performed for this test-only comparison.
+The selection-review subagent confirmed the limited interpretation and emphasized that a
+later statement only supersedes an earlier one when they concern the same work item and
+the later statement actually reports a changed state. Receipt order alone is not semantic
+completion evidence, and a later planning note must not erase an earlier completion report.
