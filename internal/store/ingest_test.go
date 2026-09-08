@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -576,96 +577,105 @@ func TestIngestWithoutAnAbsoluteCwdIgnoresTheServiceWorkingDirectory(t *testing.
 	}
 }
 
-// deepWalkComponents is how many path components deepWalkCWD carries. The walk
-// costs one os.Lstat per component and every one of them fails, so the cost is
-// real work with no setup: 4,000 measured 77 ms on the machine this was written
-// on, where 1,000 measured 5.8 ms.
-const deepWalkComponents = 4000
-
-// deepWalkCWD is an absolute cwd on a volume that does not exist, nested deeply
-// enough that resolving it costs measurable filesystem work.
-//
-// It is the cheap, deterministic stand-in for the trigger that matters in
-// production and cannot be reproduced here: a cwd that is slow to stat because
-// it is a UNC path to a host that is down, or a mapped drive whose share has
-// gone away. Those cost tens of seconds per level; this costs microseconds per
-// level and gets there by having a lot of levels.
-var deepWalkCWD = `Z:\` + strings.Repeat(`w\`, deepWalkComponents) + "leaf"
-
 // TestIngestResolvesTheProjectOutsideTheTransaction is the availability
-// property behind spec 5.4's single connection: while the write transaction is
-// open, nothing that is not SQL runs.
+// property behind spec 5.4's single connection: a stalled project resolution
+// must not hold the connection that every other ingest needs.
 //
-// project.Identify walks the filesystem and takes no context, so it can neither
-// be bounded nor cancelled. Called from inside the transaction it holds the
-// service's *only* connection for its whole duration - every other ingest and
-// the drain wait behind it in db.BeginTx - so one cwd on a dead UNC path stalls
-// the whole service, and every relay that arrives during the stall times out
-// and spools. Called before BeginTx it stalls one event. secret.Detect is the
-// same shape and much smaller, and is hoisted with it.
+// A timing ratio cannot establish that ordering. CI run 34174370049 on 2026-09-08:
+// eight filesystem walks took 1.684s against a 1.508s limit even though the
+// resolver was outside the transaction. Concurrent filesystem work need not
+// overlap by the fraction measured on the developer's machine.
 //
-// The assertion is a ratio and not a duration, so it means the same thing on a
-// slow machine as on a fast one. N ingests of one slow-to-resolve cwd cost *at
-// least* N walks when the walk is inside the transaction, because the single
-// connection serialises them end to end and nothing can overlap; when it is
-// outside, they overlap by however much the machine allows. Three quarters of N
-// walks is below the first floor and above what the second needs on any machine
-// that can run two of these walks at once - measured here at 8 walks serialised
-// against 2.7 overlapped.
+// Hold only resolution at a channel barrier, then commit and read another
+// event through the real database before releasing it. The resolver still
+// calls project.Identify after release, and both events must round-trip. The
+// timeout bounds a broken test; elapsed time is not the assertion.
 func TestIngestResolvesTheProjectOutsideTheTransaction(t *testing.T) {
-	const concurrency = 8
-	ctx := t.Context()
 	db := migrated(t)
-
-	// The premise, measured rather than assumed: a walk too cheap to
-	// measure makes both orderings look alike and the assertion vacuous.
-	start := time.Now()
-	project.Identify(deepWalkCWD)
-	walk := time.Since(start)
-	t.Logf("one project.Identify over %d components = %s", deepWalkComponents, walk)
-	if walk < 20*time.Millisecond {
-		t.Fatalf("resolving the cwd took %s, too little to tell the two orderings apart; "+
-			"raise deepWalkComponents until it costs at least 20ms on this machine", walk)
+	if got := db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("connection limit = %d, want 1", got)
 	}
-
-	payload := payloadOf(t, map[string]any{
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cwd := t.TempDir()
+	heldPayload := payloadOf(t, map[string]any{
 		"hook_event_name": "PostToolUse",
-		"session_id":      "s-deep-walk",
-		"cwd":             deepWalkCWD,
+		"session_id":      "s-held-resolution",
+		"cwd":             cwd,
 	})
-
-	var wg sync.WaitGroup
-	errs := make([]error, concurrency)
-	start = time.Now()
-	for i := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			id := fmt.Sprintf("0198f0c1-0000-7000-8000-00000000e%03d", i)
-			status, err := Ingest(ctx, db, ingestEnv(id, payload), SourcePipe, upsertNow)
-			if err == nil && status != ipc.Committed {
-				err = fmt.Errorf("status = %q, want %q", status, ipc.Committed)
-			}
-			errs[i] = err
-		}()
-	}
-	wg.Wait()
-	elapsed := time.Since(start)
-
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent ingest %d: %v", i, err)
+	otherPayload := payloadOf(t, map[string]any{
+		"hook_event_name": "PostToolUse",
+		"session_id":      "s-other-ingest",
+		"cwd":             cwd,
+	})
+	entered := make(chan string, 1)
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	// Release and join even when an assertion fails, before migrated's
+	// cleanup closes SQLite and TempDir removes its files.
+	defer func() {
+		unblock()
+		cancel()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Error("held ingest did not stop during cleanup")
 		}
+	}()
+	resolve := func(path string) project.Project {
+		entered <- path
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return project.Identify(path)
 	}
-	// Every event still landed, so the overlap above is not a shortcut
-	// through work that did not happen.
-	requireCount(t, db, "events", concurrency)
-	requireCount(t, db, "projects", 1)
+	var heldStatus ipc.AckStatus
+	var heldErr error
+	go func() {
+		defer close(finished)
+		heldStatus, heldErr = ingestWithProject(ctx, db, ingestEnv("ev-held-resolution", heldPayload), SourcePipe, upsertNow, resolve)
+	}()
+	select {
+	case path := <-entered:
+		if path != cwd {
+			t.Fatal("resolver did not receive the payload's cwd")
+		}
+	case <-finished:
+		t.Fatal("ingest returned without reaching the resolver")
+	case <-ctx.Done():
+		t.Fatal("ingest never reached the resolver")
+	}
+	if got := db.Stats().InUse; got != 0 {
+		t.Fatalf("held project resolution owns %d connections, want 0: resolution must precede BeginTx", got)
+	}
+	status, err := Ingest(ctx, db, ingestEnv("ev-other-ingest", otherPayload), SourcePipe, upsertNow)
+	requireCommitted(t, status, err, "ingest while resolution is held")
+	wantProject := project.Identify(cwd).ID
+	other := readEvent(t, db, "ev-other-ingest")
+	if other.payload != string(otherPayload) || other.projectID != wantProject {
+		t.Fatal("other ingest did not round-trip its payload and resolved project")
+	}
+	requireCount(t, db, "events", 1)
+	select {
+	case <-finished:
+		t.Fatal("held ingest returned before resolution was released")
+	default:
+	}
 
-	if limit := walk * concurrency * 3 / 4; elapsed >= limit {
-		t.Fatalf("%d concurrent ingests took %s, want under %s (three quarters of %d serialised %s walks): "+
-			"the cwd is resolved inside the transaction, so the one connection is held for the walk",
-			concurrency, elapsed, limit, concurrency, walk)
+	unblock()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("held ingest did not finish after resolution was released")
 	}
-	t.Logf("%d concurrent ingests = %s, against %s serialised", concurrency, elapsed, walk*concurrency)
+	requireCommitted(t, heldStatus, heldErr, "released ingest")
+	held := readEvent(t, db, "ev-held-resolution")
+	if held.payload != string(heldPayload) || held.projectID != wantProject {
+		t.Fatal("released ingest did not round-trip its payload and resolved project")
+	}
+	requireCount(t, db, "events", 2)
+	requireCount(t, db, "sessions", 2)
+	requireCount(t, db, "projects", 1)
 }
