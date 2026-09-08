@@ -35,3 +35,28 @@ missing/null/nonstring/oversized keys, and refuse multiplicity rather than choos
 order. A same-key association still does not prove that a selected answer helps the current
 request. The existing source events and IDs remain authoritative references; no private key
 values should be added to public evidence or logs. The previously used holdouts remain exposed.
+
+## Test-only resolver
+
+`pair_resolver_test.go` now resolves prompt event IDs to Stop event IDs using the explicit
+host key and exact scope. It returns no body and changes no production path. The initial
+empty resolver failed both normal-host cases; the implementation passed, then deliberately
+allowing multiple prompts or answers failed both duplicate cases. Restoring the uniqueness
+condition passed again. Scope mismatch, reversed receipt order, zero timestamp, cutoff ties,
+future records, missing keys, unknown hosts and SubagentStop exclusion are covered separately.
+
+The payload reader uses only the host's own field, rejects a repeated linkage field,
+nonstring/missing/null values, malformed JSON and oversized payloads, and does not fall back
+to the other host's field. Resolver keys are bounded and empty or NUL-bearing keys are
+excluded. The test-only snapshot loader reads at most 100,000 metadata records with payloads
+bounded at 1 MiB and prints only aggregate counts.
+
+`go test -p 1 -count=1 -timeout 2m -run '^Test(Pair|MeasureExplicitPair)' -v ./internal/inject`
+with `ENGRAMUX_PAIR_AUDIT=1` passed. The Go resolver found **604 Claude Code and 39 Codex pairs
+from 1,438 records**, matching the independent Python field audit; its snapshot test took
+0.04 s. The pinned linter passed with exit 0. This full-snapshot count is not trigger-time
+availability or a 500 ms production performance guarantee.
+
+Body retrieval, masking/fencing within the injection budget, candidate ranking and answer
+relevance are not implemented by this resolver. Those remain required before interpreting
+pair recovery as useful context or integrating it into automatic injection.
