@@ -66,6 +66,11 @@ func TestMeasureTemporalSelection(t *testing.T) {
 		Events, Bytes         int
 	}
 	var metrics []triggerMetric
+	type reviewBlock struct {
+		PromptID, Prompt, EventID, EventName, Text string
+		Bytes                                      int
+	}
+	var review []reviewBlock
 	for _, p := range prompts {
 		if err := prefix.advance(t, stamps[p.id]); err != nil {
 			t.Fatal("advance temporal index")
@@ -105,6 +110,13 @@ func TestMeasureTemporalSelection(t *testing.T) {
 				t.Fatal("selected an event not strictly earlier than the trigger")
 			}
 			blocks++
+			if os.Getenv("ENGRAMUX_WRITE_TEMPORAL_REVIEW") == "1" && p.wanted == m7Yes {
+				var kind string
+				if err := prefix.db.QueryRowContext(t.Context(), "SELECT event_name FROM events WHERE id=?", b.id).Scan(&kind); err != nil {
+					t.Fatal("read review event kind")
+				}
+				review = append(review, reviewBlock{PromptID: p.id, Prompt: p.prompt, EventID: b.id, EventName: kind, Text: b.text, Bytes: b.bytes})
+			}
 			bytes += b.bytes
 			metric.Bytes += b.bytes
 			if notification {
@@ -116,8 +128,18 @@ func TestMeasureTemporalSelection(t *testing.T) {
 		}
 		metrics = append(metrics, metric)
 	}
-	if os.Getenv("ENGRAMUX_WRITE_TEMPORAL_METRICS") == "1" {
-		b, err := json.MarshalIndent(metrics, "", "  ")
+	writeMetrics := os.Getenv("ENGRAMUX_WRITE_TEMPORAL_METRICS") == "1"
+	writeReview := os.Getenv("ENGRAMUX_WRITE_TEMPORAL_REVIEW") == "1"
+	if writeMetrics && writeReview {
+		t.Fatal("select one export per run")
+	}
+	if writeMetrics || writeReview {
+		var value any = metrics
+		name := "temporal-trigger-metrics.json"
+		if writeReview {
+			value, name = review, "temporal-wanted-review.json"
+		}
+		b, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -130,7 +152,7 @@ func TestMeasureTemporalSelection(t *testing.T) {
 				t.Error(err)
 			}
 		}()
-		f, err := root.OpenFile("temporal-trigger-metrics.json", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			t.Fatal("metrics exist or cannot be created")
 		}
