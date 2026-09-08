@@ -110,6 +110,10 @@ func TestMeasureTransferDevelopment(t *testing.T) {
 		arms = []string{"baseline", "anchor"}
 		name = "development-anchor-replay.json"
 	}
+	if os.Getenv("ENGRAMUX_TRANSFER_CONTINUATION") == "1" {
+		arms = []string{"baseline", "continuation"}
+		name = "development-continuation-v2-replay.json"
+	}
 	counts := map[string]*totals{}
 	for _, arm := range arms {
 		counts[arm] = &totals{}
@@ -125,6 +129,8 @@ func TestMeasureTransferDevelopment(t *testing.T) {
 				got = m7Build(t, prefix.db, tr.p)
 			case "anchor":
 				got = rareAnchorBuild(t, prefix.db, tr.p)
+			case "continuation":
+				got = continuationBuild(t, prefix.db, tr.p, tr.stamp)
 			default:
 				got = pairedBuild(t, prefix.db, tr.p, tr.stamp)
 			}

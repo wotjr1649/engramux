@@ -78,6 +78,8 @@ func TestMeasureTemporalSelection(t *testing.T) {
 		var res inject.Result
 		if os.Getenv("ENGRAMUX_TEMPORAL_PAIRED") == "1" {
 			res = pairedBuild(t, prefix.db, p, stamps[p.id])
+		} else if os.Getenv("ENGRAMUX_TEMPORAL_CONTINUATION") == "1" {
+			res = continuationBuild(t, prefix.db, p, stamps[p.id])
 		} else {
 			res = m7Build(t, prefix.db, p)
 		}
@@ -146,6 +148,9 @@ func TestMeasureTemporalSelection(t *testing.T) {
 			if os.Getenv("ENGRAMUX_TEMPORAL_PAIRED") == "1" {
 				name = "temporal-paired-wanted-review.json"
 			}
+		}
+		if os.Getenv("ENGRAMUX_TEMPORAL_CONTINUATION") == "1" {
+			name = "continuation-v2-" + name
 		}
 		b, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
