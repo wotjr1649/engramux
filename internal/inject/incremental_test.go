@@ -14,7 +14,28 @@ func TestMeasureIncrementalHistory(t *testing.T) {
 	if os.Getenv("ENGRAMUX_INCREMENTAL_HISTORY") != "1" {
 		t.Skip("public task export is opt-in")
 	}
-	data, err := os.ReadFile("../../docs/evidence/incremental-tasks-2026-09-08.json")
+	exportIncrementalHistory(t, "incremental-tasks-2026-09-08.json", "incremental-output-2026-09-08.json", 4)
+}
+
+func TestMeasureCodeHistory(t *testing.T) {
+	if os.Getenv("ENGRAMUX_CODE_HISTORY") != "1" {
+		t.Skip("public code task export is opt-in")
+	}
+	exportIncrementalHistory(t, "code-history-task-2026-09-08.json", "code-history-output-2026-09-08.json", 1)
+}
+
+func exportIncrementalHistory(t *testing.T, designName, outputName string, count int) {
+	t.Helper()
+	root, err := os.OpenRoot("../../docs/evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	data, err := root.ReadFile(designName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +45,8 @@ func TestMeasureIncrementalHistory(t *testing.T) {
 	if err := json.Unmarshal(data, &design); err != nil {
 		t.Fatal(err)
 	}
-	if len(design.Cases) != 4 {
-		t.Fatal("expected four frozen public tasks")
+	if len(design.Cases) != count {
+		t.Fatal("unexpected frozen public task count")
 	}
 	type result struct {
 		ID     string   `json:"id"`
@@ -68,8 +89,7 @@ func TestMeasureIncrementalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const path = "../../docs/evidence/incremental-output-2026-09-08.json"
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := root.OpenFile(outputName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
