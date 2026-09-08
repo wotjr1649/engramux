@@ -1,0 +1,72 @@
+{
+  "date": "2026-09-08",
+  "scope": "Synthetic configuration reconstruction, one fresh solver per arm, no model override; not M7 or general task success.",
+  "fixtureDesigner": "utility_evaluation",
+  "tasks": [
+    {
+      "ID": 1,
+      "Prompt": "Resume the work associated with session 20000000-0000-4000-8000-000000000001. Return exactly one compact JSON object with the keys retry_count and queue_name, in that order, using the values accepted in that session's prior Stop message. Do not add explanation or extra keys.",
+      "FTS": "C:/synthetic/resume-utility\nStop\nStop: The accepted resume configuration for this session is retry_count=7 and queue_name=\"amber-latch\".\n20000000-0000-4000-8000-000000000001\n/synthetic/.claude/projects/session.jsonl\n",
+      "Resume": "Stop: The accepted resume configuration for this session is retry_count=7 and queue_name=\"amber-latch\".",
+      "Expected": "{\"retry_count\":7,\"queue_name\":\"amber-latch\"}"
+    },
+    {
+      "ID": 2,
+      "Prompt": "Resume the work associated with session 20000000-0000-4000-8000-000000000002. Return exactly one compact JSON object with the keys batch_size and cache_mode, in that order, using the values accepted in that session's prior Stop message. Do not add explanation or extra keys.",
+      "FTS": "C:/synthetic/resume-utility\nStop\nStop: The accepted resume configuration for this session is batch_size=13 and cache_mode=\"copper-sieve\".\n20000000-0000-4000-8000-000000000002\n/synthetic/.claude/projects/session.jsonl\n",
+      "Resume": "Stop: The accepted resume configuration for this session is batch_size=13 and cache_mode=\"copper-sieve\".",
+      "Expected": "{\"batch_size\":13,\"cache_mode\":\"copper-sieve\"}"
+    },
+    {
+      "ID": 3,
+      "Prompt": "Resume the work associated with session 20000000-0000-4000-8000-000000000003. Return exactly one compact JSON object with the keys worker_limit and checkpoint_style, in that order, using the values accepted in that session's prior Stop message. Do not add explanation or extra keys.",
+      "FTS": "C:/synthetic/resume-utility\nStop\nStop: The accepted resume configuration for this session is worker_limit=3 and checkpoint_style=\"append-only\".\n20000000-0000-4000-8000-000000000003\n/synthetic/.claude/projects/session.jsonl\n",
+      "Resume": "Stop: The accepted resume configuration for this session is worker_limit=3 and checkpoint_style=\"append-only\".",
+      "Expected": "{\"worker_limit\":3,\"checkpoint_style\":\"append-only\"}"
+    },
+    {
+      "ID": 4,
+      "Prompt": "For session 20000000-0000-4000-8000-000000000004, the current prompt itself gives the values to return: retry_count=9 and queue_name=\"current-queue\". Do not use history. Return exactly one compact JSON object with the keys retry_count and queue_name, in that order, using the values stated here. Do not add explanation or extra keys.",
+      "FTS": "C:/synthetic/resume-utility\nStop\nStop: The accepted resume configuration for this session is retry_count=2 and queue_name=\"old-queue\".\n20000000-0000-4000-8000-000000000004\n/synthetic/.claude/projects/session.jsonl\n",
+      "Resume": "Stop: The accepted resume configuration for this session is retry_count=2 and queue_name=\"old-queue\".",
+      "Expected": "{\"retry_count\":9,\"queue_name\":\"current-queue\"}"
+    }
+  ],
+  "responses": {
+    "no_memory": {
+      "1": "INSUFFICIENT",
+      "2": "INSUFFICIENT",
+      "3": "INSUFFICIENT",
+      "4": "{\"retry_count\":9,\"queue_name\":\"current-queue\"}"
+    },
+    "exact_resume": {
+      "1": "{\"retry_count\":7,\"queue_name\":\"amber-latch\"}",
+      "2": "{\"batch_size\":13,\"cache_mode\":\"copper-sieve\"}",
+      "3": "{\"worker_limit\":3,\"checkpoint_style\":\"append-only\"}",
+      "4": "{\"retry_count\":9,\"queue_name\":\"current-queue\"}"
+    },
+    "fts": {
+      "1": "{\"retry_count\":7,\"queue_name\":\"amber-latch\"}",
+      "2": "{\"batch_size\":13,\"cache_mode\":\"copper-sieve\"}",
+      "3": "{\"worker_limit\":3,\"checkpoint_style\":\"append-only\"}",
+      "4": "{\"retry_count\":9,\"queue_name\":\"current-queue\"}"
+    }
+  },
+  "scores": {
+    "no_memory": {
+      "needed": 0,
+      "neededTotal": 3,
+      "control": true
+    },
+    "exact_resume": {
+      "needed": 3,
+      "neededTotal": 3,
+      "control": true
+    },
+    "fts": {
+      "needed": 3,
+      "neededTotal": 3,
+      "control": true
+    }
+  }
+}
