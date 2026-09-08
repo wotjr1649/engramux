@@ -70,7 +70,9 @@ const (
 // that consume it end to end is how those hours get spent twice. The override
 // points the passes at a scratch directory beside the same snapshot, so the
 // machinery can be exercised against throwaway labels without the real files
-// being anywhere near it. Nothing shipped reads this.
+// being anywhere near it. It does not override label provenance: completed
+// fixtures must declare owner judgements. Agent estimates have their own
+// entry point and ENGRAMUX_M7_AGENT_DIR. Nothing shipped reads either variable.
 var m7FixtureDir = cmp.Or(os.Getenv("ENGRAMUX_M7_DIR"), m7Dir)
 
 func m7PromptsPath() string { return filepath.Join(m7FixtureDir, "prompts.tsv") }
@@ -158,6 +160,8 @@ func TestWriteM7Prompts(t *testing.T) {
 
 	header := []string{
 		"# Gate M7, pass 1. Replace TODO with yes or no, then run pass 2.",
+		m7UnlabelledHeader,
+		"# After judging every row, change the label source above to owner.",
 		"#",
 		"# The question is: WOULD YOU HAVE WANTED earlier context here?",
 		"#",
@@ -199,7 +203,7 @@ func TestWriteM7Prompts(t *testing.T) {
 // lists as reported rather than gated.
 func TestWriteM7Blocks(t *testing.T) {
 	db := m7Open(t)
-	prompts := m7LabelledPrompts(t, db)
+	prompts := m7LabelledPrompts(t, db, m7FixtureDir, m7Owner)
 
 	var (
 		rows      []string
@@ -249,6 +253,8 @@ func TestWriteM7Blocks(t *testing.T) {
 	}
 	header := []string{
 		"# Gate M7, pass 2. Replace TODO with yes or no for every row, then run the gate.",
+		m7UnlabelledHeader,
+		"# After judging every row, change the label source above to owner.",
 		"#",
 		"# yes: this excerpt was worth the bytes it spent on this prompt.",
 		"# no:  it was not - it is a distractor, or it is unrelated.",
@@ -272,9 +278,32 @@ func TestWriteM7Blocks(t *testing.T) {
 // that scored the file would stay green through any change to the selector, the
 // ranking or the budget, because nothing in it would have re-run.
 func TestGateM7PrecisionAtBudget(t *testing.T) {
+	m7Evaluate(t, m7FixtureDir, m7Owner)
+}
+
+// TestEvaluateM7AgentEstimates replays agent labels with the same scorer and
+// failure conditions. It is opt-in and cannot establish the owner's M7 gate.
+func TestEvaluateM7AgentEstimates(t *testing.T) {
+	dir := os.Getenv("ENGRAMUX_M7_AGENT_DIR")
+	if dir == "" {
+		t.Skip("agent estimates are opt-in: set ENGRAMUX_M7_AGENT_DIR; this is not the owner M7 gate")
+	}
+	m7Evaluate(t, dir, m7Agent)
+}
+
+func m7Evaluate(t *testing.T, dir, source string) {
+	t.Helper()
+	if source == m7Agent {
+		t.Log("M7 agent estimates: exploratory replay, not an owner gate or activation evidence")
+		if _, err := os.Stat(m7Snapshot); err != nil {
+			t.Fatal("explicit agent evaluation requires the frozen M7 snapshot")
+		}
+	} else {
+		t.Log("M7 owner gate: requires owner judgements in both label files")
+	}
 	db := m7Open(t)
-	prompts := m7LabelledPrompts(t, db)
-	labels := m7LabelledBlocks(t)
+	prompts := m7LabelledPrompts(t, db, dir, source)
+	labels := m7LabelledBlocks(t, dir, source)
 
 	type scored struct {
 		prompt     m7Prompt
@@ -329,7 +358,7 @@ func TestGateM7PrecisionAtBudget(t *testing.T) {
 	if len(unlabelled) > 0 {
 		t.Fatalf("%d emitted blocks carry no label - the frozen corpus or the injector has moved "+
 			"since %s was written. Re-run pass 2 into a fresh file and re-label, or restore the "+
-			"snapshot this fixture was built against", len(unlabelled), m7BlocksPath())
+			"snapshot this fixture was built against", len(unlabelled), filepath.Join(dir, "blocks.tsv"))
 	}
 
 	share := m7Share(runs, func(s scored) (int, int) { return s.relBytes, s.totalBytes })
@@ -344,7 +373,7 @@ func TestGateM7PrecisionAtBudget(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("M7 gate: relevant-byte share %.3f, bar strictly above %.2f", share, m7Bar)
+	t.Logf("M7 %s: relevant-byte share %.3f, bar strictly above %.2f", source, share, m7Bar)
 	t.Logf("reported: pooled block precision %.3f over %d blocks", m7Ratio(blocksRelevant, blocksTotal), blocksTotal)
 	t.Logf("reported: %d of %d prompts injected, %d abstained", emitted, len(prompts), len(prompts)-emitted)
 	t.Logf("reported: coverage %d of %d should_inject prompts got a relevant block", coverage, wantInject)
@@ -405,7 +434,7 @@ func m7NonVacuity(t *testing.T, db *sql.DB, prompts []m7Prompt, labels map[strin
 	waste := m7Ratio(falseBytes, allBytes)
 	t.Logf("arm  false-positive bytes      %.3f of all emitted bytes went to should_inject=no prompts", waste)
 	if waste > m7Bar {
-		t.Errorf("%.3f of every byte this injector emitted went to a prompt the owner said holds "+
+		t.Errorf("%.3f of every byte this injector emitted went to a prompt the labels mark as holding "+
 			"nothing worth recalling, above the bar of %.2f. The precision figure above cannot "+
 			"redeem that: it is scored only over prompts that were injected into", waste, m7Bar)
 	}
@@ -844,18 +873,19 @@ func m7Sample(t *testing.T, db *sql.DB) []m7Prompt {
 
 // m7LabelledPrompts is [m7Sample] with pass 1's answers attached, refusing a
 // file that is missing, unlabelled or out of step with the sample.
-func m7LabelledPrompts(t *testing.T, db *sql.DB) []m7Prompt {
+func m7LabelledPrompts(t *testing.T, db *sql.DB, dir, source string) []m7Prompt {
 	t.Helper()
+	path := filepath.Join(dir, "prompts.tsv")
 	labels := map[string]string{}
-	for _, f := range m7Read(t, m7PromptsPath(), 4) {
-		labels[f[0]] = m7Answer(t, m7PromptsPath(), f[2])
+	for _, f := range m7Read(t, path, 4, source) {
+		labels[f[0]] = strings.ToLower(strings.TrimSpace(f[2]))
 	}
 	out := m7Sample(t, db)
 	for i := range out {
 		v, ok := labels[out[i].id]
 		if !ok {
 			t.Fatalf("%s has no row for a sampled prompt - it was written against a different "+
-				"snapshot. Re-run pass 1 into a fresh file", m7PromptsPath())
+				"snapshot. Re-run pass 1 into a fresh file", path)
 		}
 		out[i].wanted = v
 	}
@@ -863,60 +893,36 @@ func m7LabelledPrompts(t *testing.T, db *sql.DB) []m7Prompt {
 }
 
 // m7LabelledBlocks reads pass 2's answers, keyed by prompt and block.
-func m7LabelledBlocks(t *testing.T) map[string]string {
+func m7LabelledBlocks(t *testing.T, dir, source string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, f := range m7Read(t, m7BlocksPath(), 6) {
-		out[f[0]+"\x00"+f[1]] = m7Answer(t, m7BlocksPath(), f[4])
+	for _, f := range m7Read(t, filepath.Join(dir, "blocks.tsv"), 6, source) {
+		out[f[0]+"\x00"+f[1]] = strings.ToLower(strings.TrimSpace(f[4]))
 	}
 	return out
 }
 
-// m7Answer reads one label column, refusing anything that is not yes or no.
-func m7Answer(t *testing.T, path, v string) string {
-	t.Helper()
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case m7Yes:
-		return m7Yes
-	case m7No:
-		return m7No
-	default:
-		t.Skipf("%s still carries an unanswered or unreadable label (%q); it is not a labelled "+
-			"fixture yet", path, v)
-		return ""
-	}
-}
-
-// m7Read returns the data rows of one TSV, skipping when the file is absent.
-func m7Read(t *testing.T, path string, fields int) [][]string {
+// m7Read separates pending owner work from invalid or incompatible labels.
+// An explicitly requested agent replay must have complete input, not a skip.
+func m7Read(t *testing.T, path string, fields int, source string) [][]string {
 	t.Helper()
 	f, err := os.Open(path) //nolint:gosec // G304: a fixed path under .capture/
 	if errors.Is(err, fs.ErrNotExist) {
-		t.Skipf("no %s yet - the pass that writes it has not been run, or it has not been labelled", path)
+		if source == m7Agent {
+			t.Fatal("explicit agent evaluation is missing a label file")
+		}
+		t.Skip("M7 owner label file is absent; NOT EVALUATED, not a passing gate")
 	} else if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	var out [][]string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.Split(line, "\t")
-		if len(parts) != fields {
-			t.Fatalf("%s has a row with %d columns, want %d", path, len(parts), fields)
-		}
-		out = append(out, parts)
+	out, err := m7ParseLabels(f, fields, source)
+	if errors.Is(err, errM7Pending) && source == m7Owner {
+		t.Skip("M7 owner labels pending; NOT EVALUATED, not a passing gate")
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	if len(out) == 0 {
-		t.Skipf("%s has no data rows", path)
+	if err != nil {
+		t.Fatalf("M7 %s labels: %v", source, err)
 	}
 	return out
 }
