@@ -1833,6 +1833,68 @@ estimates are different evidence* records it. Neither result licenses turning th
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
 | **M13** | The query's share of the document | **Ran 2026-09-07, and it is the first of backlog 53's candidates to clear M11's condition — on the sample, and on no threshold over the full populations.** Coverage is a property of the *pair*, which is the shape neither M11 nor M12 has: the same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and populations for the third time, the weight fixed at 5 and the **threshold** swept, against **M11's own condition unchanged**. Three of five rungs clear it; at 5,000 ppm `a reply's own words` goes 76 to **92 of 139** — the **weakest** gain of the three, against M11's thirty-one and M12's thirty-three — and `a command line` **gains** one rather than holding level, which neither of the others managed. Both of those lost a touched path and this one loses none of the five, which is the whole distance between a number and a licence. The supplementary run over every harm candidate is where it stops being tidy: **not one rung regresses none of the three**, `an error message` losing five of 96 at the licensing threshold. The condition is not moved for that. What is licensed is a length column and a migration; **what is not is a shipped term**, which needs a sweep over the full populations first. The section below carries both tables |
 | **M14** | The threshold M13 left open | **Registered and ran 2026-09-07, and there is no threshold.** M13 licensed a length column and no shipped term, and its five rungs were never spaced to answer the question a sweep has to start from: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the `an error message` loss. This asked it, under M13's rule and at M13's weight, over **every candidate of every class** rather than over `m4Sample`'s 25 — M11's own condition over the populations where M13's supplementary run said the harm already is, which makes it strictly harder to pass rather than differently scoped. Nine rungs: M13's five, retired into this gate, and the 2,500 ppm grid filling the interval M13's spacing left open. **The interval holds a better rung and no clean one.** At 7,500 ppm four of the five classes are at or above baseline — `a reply's own words` at **93 of 139**, and `a touched path` at **57 of 120**, the first document any of row 53's candidates has lifted on the class that vetoed the other two — and `an error message` is 74 of 96 against 79, short of its baseline at every rung in the ladder and best where the gain has already gone. All three anchors reproduced, the third of them sixty of M13's own counts. It is **test-only and licensed no term either way**: what the no says is that backlog 53's third candidate is measured out **at this weight**, and the length column stays licensed and unspent. The section below carries the table |
+| **M15** | Retention earns its place | **Registered 2026-09-09, un-run.** Of the bytes the database holds, how many a session-level eviction would remove, where a session is dropped only when *every* event in it is droppable and an event is droppable only when it is unreachable. **Below 30% the eviction code is not written and this branch closes.** A second, exploratory arm reports what value-truncation would recover at a ladder of thresholds and carries no bar. *What M15 measures, and the sentence it must not lose* below carries the criterion, the two arms, the corpus and the limit |
+| **M16** | The duplicate half of the file | **Registered 2026-09-09, un-run.** `events_fts` indexes one column, `leaves`, and nothing else reads it - `excerpt.go` recomputes the same walk from the payload at read time. So the stored column is a second copy of the payload's string text, measured at **36% of the file** by `00002`. This asks whether it can become a VIRTUAL generated column instead. **The condition is that the index content is exactly identical**: unchanged reachability, recall@10 and MRR in all five classes, a clean FTS integrity-check, row counts preserved, and the file actually smaller. A difference is a bug rather than a trade-off, because the same function is being computed over the same input |
+
+
+### What M15 measures, and the sentence it must not lose
+
+**Registered 2026-09-09, before the harness existed and before one byte was counted.** The owner's
+framing is what set it: a brain is long-term memory, and long-term memory is *what is being held*
+and *what is worth holding*. Neither had a definition in this product. Nothing here calls a model;
+what is being decided is a retention rule, not a summariser, so M-1 is neither opened nor closed by
+it.
+
+**Droppable means unreachable.** An event is kept when a query cut from its own text returns it -
+membership in the MATCH set, not a rank. `TestEveryCandidateDocumentIsReachable` already computes
+exactly that, over every candidate of every class rather than over a sample, and its own doc comment
+records why the answer is stable: reachability is monotone under widening, so a corpus fifty times
+larger cannot push a document out of its own query's result set. An event carrying no cuttable
+literal in any class is never a candidate and therefore never kept.
+
+**A session is dropped only when every event in it is droppable.** No partial sessions, and that is
+worth more than the bytes it costs: a session survives whole or not at all, so no structural event
+is ever orphaned from the events it bounds and `get_session_resume` cannot be handed a session that
+has been hollowed out.
+
+**The bar is 30% of bytes, and it is bytes rather than sessions.** A session of three hundred tiny
+events and one of five enormous ones do not buy the same thing. Below the bar the eviction code is
+not written.
+
+**The sentence this must not lose.** What the measurement answers is *"under this query
+distribution, X% of bytes were never reached"*. It does not answer *"X% is safe to delete"*. The
+classes are cut from documents, so they are a sample of the questions anyone might ask, and an
+event no class query reached today can be the answer to tomorrow's. **It is an upper bound on
+droppability, not a safety proof**, and any decision that treats it as one has stopped using this
+measurement and started using its number.
+
+**The second arm is exploratory and says so.** It reports the distribution of string-value lengths
+in the payloads and, at a ladder of thresholds, what truncating the values above each would recover.
+It carries no bar, because the choice between levers is being made after the numbers rather than
+before them - which is a weaker instrument than M15's own arm and is recorded here so the asymmetry
+is not read as an oversight later.
+
+**Both corpora.** The 901-document fixture corpus verifies the machinery, because its figures are
+pinned and a regression in them is a broken harness rather than a finding; the live database answers
+the question, because retention would act on it and it is fifty times the size. `TestPhase4Gate`
+already runs over both for the same reason.
+
+**Compaction is deferred, and the condition that ends the deferral is a file size.** Two gigabytes
+in the data directory. From the size M16 would leave and the soak's measured 0.40 MB/h that is
+roughly six months, and `doctor` already reports the file size, so nothing new has to watch for it.
+
+**Compaction can never run automatically, and that follows rather than being chosen.** The rule the
+owner set is that only a non-destructive action may be automatic. If M16 passes, `leaves` becomes a
+function of the payload - so truncating a payload value truncates what the index holds, and the text
+that was cut can no longer find its own document. A record that exists and cannot be found is not a
+preserved record. So the threshold reports and waits for a command; it does not act.
+
+**What is not measured here.** Whether this product needs consolidation of its own - the
+retrieval-side question, a class for decisions and their reasoning rather than for literals - is a
+separate measurement and is deferred behind this one. Every class P1 through P5 asks for a literal,
+and that asymmetry is the reason the owner's question could not be answered out of the gates that
+already exist.
+
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.
