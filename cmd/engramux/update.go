@@ -51,6 +51,19 @@ func update(args []string) int {
 		warn("update: %v", err)
 		return 1
 	}
+	// Resolved after the paths and not with the arguments, because the
+	// fallback source is one of them: the plugin cache moves with
+	// CLAUDE_CONFIG_DIR and only [resolvePaths] knows where it went.
+	from, note, found := updateFrom(from, opt.PluginCache)
+	if !found {
+		for _, line := range updateNoSourceHelp {
+			warn("%s", line)
+		}
+		return 1
+	}
+	if note != "" {
+		fmt.Println(note)
+	}
 	if code := updateRefusals(ctx, from, opt); code != 0 {
 		return code
 	}
@@ -129,9 +142,11 @@ const (
 
 // updateSource reads --from, and returns the arguments with it removed.
 //
-// There is no delivery channel yet, so `--from` is the only door and that is
-// stated rather than hidden (M-7). A bare `update` is not a failure of the
-// machine, but it did not update anything either, so it is not a success.
+// `--from` was the only door while there was no delivery channel. Since 0.1.0
+// the plugin is one, so a missing `--from` is no longer a refusal here: it means
+// "resolve a source", and [updateFrom] does that. What this still refuses is a
+// `--from` that names nothing, because that is a typo rather than an omission
+// and quietly reading the plugin cache instead would be the wrong repair.
 //
 // # Why it returns the rest, and what happened when it did not
 //
@@ -147,29 +162,76 @@ const (
 // arguments, and it belongs to whoever knows the flag.
 func updateSource(args []string) (from string, rest []string, ok bool) {
 	rest = make([]string, 0, len(args))
+	dangling := false
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "--from" && i+1 < len(args):
-			from, ok = args[i+1], true
+			// An empty value is the same mistake as no value: it
+			// must not read as the empty string, which would plan a
+			// copy out of this process's working directory.
+			if args[i+1] == "" {
+				dangling = true
+			}
+			from = args[i+1]
 			i++ // the value is the flag's, not a positional
 		case a == "--from":
-			// A dangling --from names no directory. It must not read
-			// as the empty string, which would plan a copy out of
-			// this process's working directory.
+			dangling = true
 		default:
 			if v, found := strings.CutPrefix(a, "--from="); found {
-				from, ok = v, true
+				if v == "" {
+					dangling = true
+				}
+				from = v
 				continue
 			}
 			rest = append(rest, a)
 		}
 	}
-	if !ok {
-		for _, line := range updateNoSourceHelp {
-			warn("%s", line)
-		}
+	if dangling {
+		warn("update: --from names no directory. Give it one, or leave it off " +
+			"and the plugin cache is read instead.")
+		return "", rest, false
 	}
-	return from, rest, ok
+	// No --from at all is not an error any more; it means "resolve one".
+	// The caller does that, because the plugin cache is a resolved path.
+	return from, rest, true
+}
+
+// updateFrom answers the directory to copy from, and the line to print about
+// how it was chosen.
+//
+// # Why a bare `update` now finds something
+//
+// The plugin is the delivery channel: Claude Code fetches the release archive,
+// checks it against the SHA-256 the marketplace entry names, and unpacks it
+// into its cache. Until this, `update` still had to be handed that directory by
+// hand - so `/plugin update` moved bytes into a place nothing read and the
+// service kept running the build it already had, which is a channel delivering
+// where nobody looks.
+//
+// # An explicit --from wins, and that is not a tie-break
+//
+// Building into `dist/` and updating from it is the development loop, and that
+// build is routinely newer than the released plugin. A resolver preferring the
+// cache would undo it every time.
+//
+// # No downgrade guard, deliberately
+//
+// [host.PlanCopies] compares bytes, so an unchanged version is already a no-op
+// that prints "nothing to replace". An older cache version is visible in the
+// note this returns, printed before anything is stopped or copied, and it is
+// undone by one explicit `--from`. Guarding it properly means asking the
+// running service its version over IPC before stopping it.
+// ponytail: no version comparison here, add the IPC one if a real downgrade bites.
+func updateFrom(explicit, cacheRoot string) (dir, note string, ok bool) {
+	if explicit != "" {
+		return explicit, "", true
+	}
+	found, version := newestPlugin(cacheRoot)
+	if found == "" {
+		return "", "", false
+	}
+	return found, fmt.Sprintf("no --from given; taking %s %s from Claude Code's plugin cache", pluginName, version), true
 }
 
 // updateNoSourceHelp is what a bare `update` says.
@@ -178,18 +240,22 @@ func updateSource(args []string) (from string, rest []string, ok bool) {
 // writes straight to os.Stderr with no seam, and adding one for a string is a
 // larger change than naming the string.
 //
-// # It said the opposite of its own first line, and that is what changed
+// # It has been wrong in both directions, and that is why it is tested
 //
-// The second line used to say "download the release archive, unpack it" - one
-// line after the first said there is no delivery channel to read instead. There
-// is no release: no tag, no archive, no marketplace entry. So the message
-// answered a reader by sending them after a file nobody has built, and it is
-// the first thing they meet after the README tells them `update` is not a first
-// step. What it names now is the only thing that exists, which is a directory
-// they already have.
+// It first said "download the release archive, unpack it" one line after saying
+// there was no delivery channel - sending a reader after a file nobody had
+// built. It was then narrowed to name only a directory the reader was supposed
+// to already have, which was true while there was no release. 0.1.0 was
+// published on 2026-09-09 and the plugin became a real channel, so this is now
+// reached only when that channel is *absent* - and what it has to name is how
+// to get it.
 var updateNoSourceHelp = []string{
-	"update: no --from, and there is no delivery channel to read instead.",
-	"point --from at a directory holding both binaries - there is nothing to fetch:",
+	"update: no --from, and Claude Code's plugin cache holds no copy to read.",
+	"the plugin is the delivery channel: it fetches the release archive, checks its",
+	"SHA-256 and unpacks it, and a bare `update` then reads that directory.",
+	"    /plugin marketplace add wotjr1649/engramux",
+	"    /plugin install engramux@engramux",
+	"or name a directory holding both binaries yourself:",
 	"    engramux update --from <directory>",
 }
 
