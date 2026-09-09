@@ -1833,8 +1833,8 @@ estimates are different evidence* records it. Neither result licenses turning th
 | **M12** | The signal is where the match fell | **Ran 2026-09-06, and the signal is real and not licensed.** M11 rejected a down-weight keyed on the *document*; this asked whether one keyed on **where in the document the match fell** is a different instrument at all. It is, on three of the five classes — over 534 command lines it recovers eleven of the sixteen M11 lost, and 310 of 530 of the documents lifted past them matched outside their own human text. It is not on the class that vetoes: `a touched path` loses the same document under both rules, and **0 of 130 of the human-text documents above it are machine-only** — a person really did type that file name. So M11's condition, unchanged and registered before the gate was built, is not met and the schema change is not licensed. What that removes from backlog 53 is one candidate rather than the row. Both anchors reproduced in all five classes; the section below carries both tables, the subset argument the arm rests on, and what the `machine-only` column leaves for the next candidate to beat |
 | **M13** | The query's share of the document | **Ran 2026-09-07, and it is the first of backlog 53's candidates to clear M11's condition — on the sample, and on no threshold over the full populations.** Coverage is a property of the *pair*, which is the shape neither M11 nor M12 has: the same path is a large share of a two-line prompt and a vanishing share of a 40 KB tool output. M11's five classes and populations for the third time, the weight fixed at 5 and the **threshold** swept, against **M11's own condition unchanged**. Three of five rungs clear it; at 5,000 ppm `a reply's own words` goes 76 to **92 of 139** — the **weakest** gain of the three, against M11's thirty-one and M12's thirty-three — and `a command line` **gains** one rather than holding level, which neither of the others managed. Both of those lost a touched path and this one loses none of the five, which is the whole distance between a number and a licence. The supplementary run over every harm candidate is where it stops being tidy: **not one rung regresses none of the three**, `an error message` losing five of 96 at the licensing threshold. The condition is not moved for that. What is licensed is a length column and a migration; **what is not is a shipped term**, which needs a sweep over the full populations first. The section below carries both tables |
 | **M14** | The threshold M13 left open | **Registered and ran 2026-09-07, and there is no threshold.** M13 licensed a length column and no shipped term, and its five rungs were never spaced to answer the question a sweep has to start from: whether a threshold **between 5,000 and 20,000 ppm** keeps the reply gain without the `an error message` loss. This asked it, under M13's rule and at M13's weight, over **every candidate of every class** rather than over `m4Sample`'s 25 — M11's own condition over the populations where M13's supplementary run said the harm already is, which makes it strictly harder to pass rather than differently scoped. Nine rungs: M13's five, retired into this gate, and the 2,500 ppm grid filling the interval M13's spacing left open. **The interval holds a better rung and no clean one.** At 7,500 ppm four of the five classes are at or above baseline — `a reply's own words` at **93 of 139**, and `a touched path` at **57 of 120**, the first document any of row 53's candidates has lifted on the class that vetoed the other two — and `an error message` is 74 of 96 against 79, short of its baseline at every rung in the ladder and best where the gain has already gone. All three anchors reproduced, the third of them sixty of M13's own counts. It is **test-only and licensed no term either way**: what the no says is that backlog 53's third candidate is measured out **at this weight**, and the length column stays licensed and unspent. The section below carries the table |
-| **M15** | Retention earns its place | **Registered 2026-09-09, un-run.** Of the bytes the database holds, how many a session-level eviction would remove, where a session is dropped only when *every* event in it is droppable and an event is droppable only when it is unreachable. **Below 30% the eviction code is not written and this branch closes.** A second, exploratory arm reports what value-truncation would recover at a ladder of thresholds and carries no bar. *What M15 measures, and the sentence it must not lose* below carries the criterion, the two arms, the corpus and the limit |
-| **M16** | The duplicate half of the file | **Registered 2026-09-09, un-run.** `events_fts` indexes one column, `leaves`, and nothing else reads it - `excerpt.go` recomputes the same walk from the payload at read time. So the stored column is a second copy of the payload's string text, measured at **36% of the file** by `00002`. This asks whether it can become a VIRTUAL generated column instead. **The condition is that the index content is exactly identical**: unchanged reachability, recall@10 and MRR in all five classes, a clean FTS integrity-check, row counts preserved, and the file actually smaller. A difference is a bug rather than a trade-off, because the same function is being computed over the same input |
+| **M15** | Retention earns its place | **Ran 2026-09-09, and the answer is 0.00% — not below the bar by a margin but at the floor, so the eviction code is not written and this branch closes.** Of the bytes the database holds, how many a session-level eviction would remove, where a session is dropped only when *every* event in it is droppable and an event is droppable only when it is unreachable. **Below 30% the eviction code is not written.** Over the installed database — 46,806 events, 162 sessions, 332.4 MB of payload and leaves — **every event is reachable and no session is droppable**, because the `a path basename` class derives a candidate from all 46,806 and reaches all 46,806. A second, exploratory arm reports what value-truncation would recover at a ladder of thresholds and carries no bar; **it is where the size actually is**. The section below carries both arms, and *What M15 measures, and the sentence it must not lose* carries the criterion and the limit |
+| **M16** | The duplicate half of the file | **Ran 2026-09-09, and the answer is no — refused by SQLite, not by FTS5, so the condition was never reached.** `events_fts` indexes one column, `leaves`, and nothing else reads it - `excerpt.go` recomputes the same walk from the payload at read time. So the stored column is a second copy of the payload's string text, measured at **36% of the file** by `00002`. This asked whether it can become a VIRTUAL generated column instead, on the condition that **the index content is exactly identical**: unchanged reachability, recall@10 and MRR in all five classes, a clean FTS integrity-check, row counts preserved, and the file actually smaller. None of that was measurable, because **the column cannot exist**: SQLite prohibits a subquery in a generated column, and the leaves walk cannot be written without one. The section below carries which half of the guess was wrong |
 
 
 ### What M15 measures, and the sentence it must not lose
@@ -1884,10 +1884,19 @@ in the data directory. From the size M16 would leave and the soak's measured 0.4
 roughly six months, and `doctor` already reports the file size, so nothing new has to watch for it.
 
 **Compaction can never run automatically, and that follows rather than being chosen.** The rule the
-owner set is that only a non-destructive action may be automatic. If M16 passes, `leaves` becomes a
-function of the payload - so truncating a payload value truncates what the index holds, and the text
-that was cut can no longer find its own document. A record that exists and cannot be found is not a
-preserved record. So the threshold reports and waits for a command; it does not act.
+owner set is that only a non-destructive action may be automatic. Truncating a payload value
+truncates what the index holds - and the text that was cut can no longer find its own document. A
+record that exists and cannot be found is not a preserved record. So the threshold reports and waits
+for a command; it does not act.
+
+The premise under that sentence was `leaves` becoming a function of the payload, which M16 has since
+refused, and the conclusion survives the change for a reason worth writing down rather than
+re-deriving. `leaves` stays a stored column, so a writer that truncated `payload` alone would leave
+the index faithfully holding text the payload no longer has, with `integrity-check` still passing
+because the index and the column it indexes would still agree - `store.Leaves`' own doc comment
+names that shape. A truncating writer therefore has to write both columns in one statement, and the
+moment it does, the cut text stops finding its document exactly as above. Both ways round it is
+destructive, so the rule reaches the same answer from either premise.
 
 **What is not measured here.** Whether this product needs consolidation of its own - the
 retrieval-side question, a class for decisions and their reasoning rather than for literals - is a
@@ -1895,6 +1904,122 @@ separate measurement and is deferred behind this one. Every class P1 through P5 
 and that asymmetry is the reason the owner's question could not be answered out of the gates that
 already exist.
 
+
+### What M15 answered, 2026-09-09
+
+**The corpus.** A copy of the installed database taken with the service stopped, the `.db` and
+`.db-wal` copied together: **46,806 events in 162 sessions, 174.7 MB of payload beside 157.7 MB of
+`leaves`, 492.8 MB on disk.** `TestGateM15SessionEvictionEarnsItsPlace` in `internal/search` is the
+harness; the sweep took **11m15s to 13m25s** over the whole corpus, which is the cost figure nobody
+had. Three runs over the one snapshot within an hour, every count and every byte total identical and
+only the clock moving, so it is a scale rather than a pin.
+
+**The one figure that is not reproducible on a second run, and why.** 492.8 MB is the pair as copied,
+512,516,096 B of `.db` beside 4,268,352 B of `.db-wal`. Opening it checkpoints the WAL into the `.db`
+and `journal_size_limit` truncates what is left, so the second run over the same snapshot reports
+**488.9 MB** for the same data. The as-copied figure is the one that says what the installed database
+occupies; anything computed against it should say which of the two it used.
+
+**The premise held, over fifty times the population that had ever checked it.** A query is derived
+from the Go walk and has to be found in an index built from the migration's SQL walk, so the two
+walks agreeing is what makes the measurement mean anything at all. They agree on **46,806 of 46,806**
+by byte total. `TestTheTwoWalksAgree` holds the same fact over 902 payloads and asserts more about
+each of them; this is the population argument it cannot make.
+
+**The answer is zero, and it is zero for one reason.** Every event of every session is reachable, so
+no session has no reachable event, so **0.00% of bytes, 0.00% of events, 0 of 162 sessions**. Per
+class, of the events that carry a candidate: two-character Korean 4,383 of 4,383, a content word
+carrying a particle 4,034 of 4,034, camelCase 7,520 of 7,520, two tokens 45,007 of 45,031, and **a
+path basename 46,806 of 46,806**. Two queries in the whole corpus were refused by the builder. The
+last class is the whole result: **every event this product stores carries a path with an extension**,
+which is what a hook payload is, and a query cut out of a document reaches that document by
+construction.
+
+**How much of that is the one class, bounded rather than guessed.** The registered criterion is all
+five and its answer is 0.00%; re-scoring it without the class that dominated it would be letting the
+result choose the instrument, which this gate's own registration forbids. But the ceiling can be read
+off the numbers already taken: `two tokens` alone reaches 45,007 events, so **even with the path class
+deleted outright at most 1,799 events — 3.8% — could be droppable**, against a bar of 30%. That is an
+event count and not a byte count, which was not computed for a criterion nobody registered. The
+conclusion does not depend on the class that produced it.
+
+**One half of *Both corpora* was met by an existing test and the other was not, which is recorded
+rather than glossed.** The criterion's machinery over the fixtures is
+`TestEveryCandidateDocumentIsReachable` — 2,262 of 2,262, pinned, over the same five classes and the
+same builder — so nothing was rebuilt for it. M15's own byte and session accounting has **no
+fixture-corpus run**: the harness reads a snapshot and there is no fixture snapshot to point it at.
+What stands in its place is an exact in-run identity the gate asserts in bytes rather than reports —
+every string value the second arm sums, plus one separator per gap, equals the `leaves` column the
+whole ladder is a fraction of — together with the walk agreement above. Those are cross-checks and
+not a pinned corpus, and the difference should be kept in view by whoever next changes the accounting.
+
+**What this says about the instrument, which is worth more than the number.** "Droppable means
+unreachable under queries cut from the documents themselves" is an upper bound that approaches zero
+whenever any one class fires on everything — the sweep's own doc comment has always said a query cut
+out of a document has to find it. So the criterion cannot separate a valuable event from a worthless
+one on this corpus, and a retention rule that wants to has to ask a question this family of classes
+does not contain. That is backlog 59's question and it is now the thing standing where M15 stood.
+
+**The session-size distribution, which the expectation got half right.** 162 sessions, mean 288.9
+events, **median 3**, p90 726, max 11,584. The reasoning registered beforehand was that an average
+session of ~300 events is unlikely to hold no reachable one, and that is true — but half the sessions
+hold three events or fewer, and those are not droppable either. The mean was the right number to
+doubt and the wrong one to reason from.
+
+**The second arm, which carries no bar and is where the size is.** The payloads hold **677,478 string
+values totalling 157.1 MB, which is 90.0% of the payload bytes** — the JSON structure is the other
+tenth. Value length is **p50 29 B, p90 112 B, p99 3,905 B, p99.9 30,514 B, max 618,336 B**, so the
+bytes are in a very thin tail. Truncating every value above a threshold recovers, of the 174.7 MB of
+payload: 4,096 B touches 6,515 values and recovers 76.8 MB (43.9%); 8,192 B touches 3,435 and
+recovers 58.5 MB (33.5%); 16,384 B touches 1,650 and recovers 39.8 MB (22.8%). **Double each figure
+for the file**, because M16 refused and `leaves` stays a stored second copy of exactly this text —
+157.1 MB of values and 157.7 MB of column, the 0.6 MB between them being one separator per gap — and
+that identity is asserted in bytes by the gate rather than compared by eye. So a 4,096 B cut is
+153.5 MB of the 492.8 MB as-copied file, **31.1%**, touching **1.0% of the values**. This arm carries no bar
+on purpose and none of it is licensed here; it is destructive, it is the reason *Compaction can never
+run automatically* exists, and what it establishes is only that the lever with the size behind it is
+truncation rather than eviction.
+
+### What M16 answered, and which half of the guess was wrong
+
+**Measured 2026-09-09 against SQLite 3.53.3 through modernc.org/sqlite v1.57.0**, and both halves are
+in `TestGateM16LeavesCannotBecomeAGeneratedColumn` and `TestGateM16OverTheInstalledSchema` rather
+than in this paragraph.
+
+**The risk this gate named was the wrong one.** What was written down as unverified was FTS5: whether
+an external-content index would accept a generated column as the column it indexes, given that
+`content='events'` reads the content table only on rebuild and integrity-check. **It does.** Measured:
+the index is created over a virtual generated column, `rebuild` reads the generated value out of it,
+and a MATCH through it returns the row. That argument was sound and it was never the constraint.
+
+**The constraint is one layer above, and it is absolute.** SQLite refuses the column itself:
+*subqueries prohibited in generated columns*. That is the first of three prohibitions the walk trips,
+and the documentation names all three in one sentence — a generated column's expression "may not use
+subqueries, aggregate functions, window functions, or table-valued functions" (sqlite.org/gencol.html,
+read 2026-09-09). The walk needs a subquery because `json_tree` is a **table-valued function** that
+has to stand in a FROM clause, and what it computes there is **`group_concat`**, an **aggregate**. So
+it is not one rule away from legal but three, and the measured refusal is the mechanism rather than
+something about this particular expression: a bare `(SELECT payload)` is refused with the identical
+message. There is no rewriting of the walk that reaches a legal form in stock SQLite. The same
+refusal was then asked of a copy of the installed database, over its real twelve-column table, its
+index and its triggers, against 46,806 events, so the finding does not rest on a two-column table a
+test built.
+
+**So the gate's own condition was never reached, and that is not the same as failing it.** Nothing
+was measured about reachability, recall@10, MRR, integrity-check or file size, because there is no
+schema to measure them against. The duplicate stays, and the 36% with it.
+
+**What is left, and what it costs.** An application-defined deterministic scalar function is the only
+shape the walk could take and still be a generated column, and it is not a fallback this measurement
+licenses. SQLite's own hardening advice is to switch that off: it recommends
+`SQLITE_DBCONFIG_TRUSTED_SCHEMA=0` on every connection as soon as it is opened, and lists "the
+definitions of generated columns" among the places that then stop accepting an application-defined
+function (sqlite.org/appfunc.html, read 2026-09-09). Taking the route means depending on a schema
+feature the vendor recommends disabling, and on every reader of the file having registered the same
+function first. The other route the gate named — indexing the payload directly rather than the
+leaves — is a different measurement and is still un-run; spec 5.7 holds why the leaves walk exists at
+all, and it is a precision result rather than a size one, so that route reopens a question this
+product already answered.
 
 **What M11 will measure, and why it is not simply done.** `[unverified]` throughout — this section
 is a design and nothing in it has been run.

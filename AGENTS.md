@@ -30,6 +30,8 @@ go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Ph
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
 go test -p 1 -count=1 -run TestPhase4GateM4 -v ./internal/search/   # memory spec §5's M4, and its own delete condition
 go test -p 1 -count=1 -run 'TestGate(InjectionOverTheCorpus|M6|M10)' -v ./internal/inject/  # memory spec §5's M5, M6, M9 and M10
+go test -p 1 -count=1 -run TestGateM16 -v ./internal/store/                  # memory spec §5's M16
+go test -p 1 -count=1 -timeout 3h -run TestGateM15 -v ./internal/search/     # memory spec §5's M15, over a database snapshot
 go test -p 1 -count=1 -run TestPhase6RedactionAudit -v ./internal/service/   # spec §8's Phase 6 gate,
 go test -p 1 -count=1 -run TestPhase6TheMasked -v ./internal/secret/         # both halves of it
 bash scripts/soak-sample.sh                                                  # spec §8's Phase 6 soak
@@ -57,6 +59,19 @@ three classes, recall@10 and MRR — and by its own terms, no improvement in any
 skips when `.capture/` is absent, like `TestPhase4Gate`'s corpus mode. Unlike that mode its output
 is safe to paste: it logs counts and figures and never a derived query, which matters more here than
 there, because every query it derives is a command line or a touched path.
+
+`TestGateM15` is the one gate whose corpus is the **installed database** rather than `.capture/`, and
+it needs a snapshot at `.capture/m15/m15.db` that nothing creates for you: stop the service, copy
+`engramux.db` **and** `engramux.db-wal` together, start it again in the same turn. The pair is the
+snapshot for the reason the `schtasks /end` row below gives, and it skips when the copy is absent.
+Measured 2026-09-09 over three runs of one snapshot: **11m15s to 13m25s** for 46,806 events, the
+spread being machine load and nothing else — so the `-timeout` in that line is load-bearing and the
+default 10m is not enough. **That cost lands on a whole-tree run too**, because the snapshot being
+present is the whole of what makes it run; deleting `.capture/m15/` is how you take the twelve
+minutes back. Its output is safe to paste — measured, 0 of the 39 `-v` lines carry a drive-letter
+path, unlike `TestPhase4Gate`'s corpus mode.
+`TestGateM16` needs no corpus, takes under a second, and asks a copy of that same snapshot one extra
+question when one is there.
 
 The injection gates are three commands and one corpus. `TestGateInjectionOverTheCorpus` measures M5,
 M6, M9 and M10 in one pass, because building the corpus four times would measure four corpora;
