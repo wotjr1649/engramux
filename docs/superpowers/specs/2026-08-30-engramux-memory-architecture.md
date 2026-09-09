@@ -1879,9 +1879,25 @@ pinned and a regression in them is a broken harness rather than a finding; the l
 the question, because retention would act on it and it is fifty times the size. `TestPhase4Gate`
 already runs over both for the same reason.
 
-**Compaction is deferred, and the condition that ends the deferral is a file size.** Two gigabytes
-in the data directory. **Every other sentence this paragraph carried was wrong, and it was checked
-on 2026-09-09 rather than re-read.**
+**Compaction is deferred, and the condition that ends it is the owner's judgement rather than a file
+size.** Two gigabytes in the data directory was that condition until 2026-09-09 and is no longer one:
+it comes off the promise and stays as a **leading indicator**, beside the **lagging signal that was
+already shipped**. Decided by the owner on 2026-09-09, after the paragraph below was checked rather
+than re-read and every sentence of it turned out to be wrong.
+
+**Which instrument says what.** The file size is the only indicator that moves *before* anything
+degrades, and nothing reports it — that gap is backlog 60 and it is not closed here. The signal that
+says *act now* exists and is already in front of the user: `status` prints `errors`, which is every
+record at ERROR or above the service has logged (`internal/ipc/status.go`, `internal/service/health.go`),
+and the read-deadline failures spec 7.1 tracks are exactly those records. **Its two limits are named
+rather than left to be discovered**: it is a counter since service start, so a restart clears it and
+the log is what survives — `doctor` prints the last log line and the file holds the rest; and it is a
+cliff rather than a slope, because a read that is slower and still succeeds raises nothing. So the
+pair is a leading number no one is shown and a lagging flag everyone is, and neither alone is the
+instrument.
+
+**Every other sentence this paragraph carried was wrong, and it was checked on 2026-09-09 rather than
+re-read.**
 
 *"From the size M16 would leave"* is void: M16 refused, so nothing is removed and the trigger is
 approached from the full file. *"The soak's measured 0.40 MB/h"* is a rate from a light window.
@@ -1894,12 +1910,13 @@ holds is a question about how hard this repository is being worked rather than a
 *"`doctor` already reports the file size, so nothing new has to watch for it"* is **false**. Neither
 `doctor` nor `status` prints a size — `status` prints the database's *path* — and no threshold of any
 kind is in the tree: `grep -rn "2147483648\|2 GB" internal/ cmd/` finds nothing, and the only
-`Size()` calls in `cmd/engramux/doctor.go` read the log tail. **So the deferral rests on a trigger
-that nothing watches, and that would have nothing to run if it fired**, since deletion, inventory and
-compaction are all unbuilt. Three gaps, not one, and the first is hours of work.
+`Size()` calls in `cmd/engramux/doctor.go` read the log tail. **The deferral rested on a trigger that
+nothing watched and that would have had nothing to run if it fired**, since deletion, inventory and
+compaction are all unbuilt — which is why the condition came off the promise above rather than being
+instrumented to keep it.
 
-**The threshold is a proxy and the thing it proxies for is read latency, which is what to watch
-instead.** 734 GB were free on the volume at 512 MB, so two gigabytes costs nothing as disk; what
+**Why the size was the wrong thing to promise on, and what the harm actually is.** 734 GB were free
+on the volume at 512 MB, so two gigabytes costs nothing as disk; what
 degrades with the file is the cold read, and spec 7.1's read-deadline row has that failing live at
 108, 164 and ~180 MB. Counted from the installed service's log on 2026-09-09, `context deadline
 exceeded` lines by day: 4 on 08-30, 2 on 08-31, 6 on 09-01, 9 on 09-04, and **0 across 09-05 to
