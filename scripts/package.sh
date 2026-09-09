@@ -95,6 +95,13 @@ echo "package.sh: the binary reports $linked" >&2
 mkdir -p "$stage/.claude-plugin"
 cp .claude-plugin/plugin.json "$stage/.claude-plugin/plugin.json"
 cp README.md LICENSE "$stage/"
+# `skills/` reaches the host through the archive and through nothing else.
+# Claude Code discovers a plugin's skills from this directory with no manifest
+# field declaring it - verified 2026-09-08 against the installed `codex` and
+# `superpowers` plugins, whose manifests declare none and whose skills the host
+# had loaded - so leaving it out of the staging list is how the search surface
+# stays unreachable without anything failing.
+cp -r skills "$stage/skills"
 
 sha="$(go run ./scripts/mkzip "$stage" "$archive")"
 echo "package.sh: $archive" >&2

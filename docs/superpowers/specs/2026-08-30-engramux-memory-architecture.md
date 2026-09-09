@@ -140,7 +140,7 @@ rather than to replace it with a description of it.
 | **M-1** | **No summarisation layer of our own.** Verbatim events stay the record. Nothing derives a natural-language summary, and no LLM is called at any point in this product | Decided |
 | **M-2** | **Index both hosts' native memory directories, read-only.** One query covers Claude Code sessions, Codex sessions, and both native memories. Never write to them | Decided |
 | **M-3** | **Derive search *fields*, never search *answers*.** Rule-based columns beside the payload — touched paths, commands and exit codes, error spans, tool name, success flag, session, timestamp. The payload is not rewritten (I-10) | Decided |
-| **M-4** | **Hook-time injection is built, and ships disabled.** It is turned on per user only after §5's gates pass. This is the row that contradicts rev.4 §2's pull-only decision, and it contradicts it for 1.0-and-after, not for 1.0 | Decided |
+| **M-4** | **Hook-time injection is built, and ships disabled.** It is turned on per user only after §5's gates pass. This is the row that contradicts rev.4 §2's pull-only decision, and it contradicts it for 1.0-and-after, not for 1.0. **Since 2026-09-08 it carries an abandonment condition as well as an activation gate**: one retry against owner-labelled M7, and a second miss deletes this row and the injection code. *What ends M-4, and not only what starts it* registers it | Decided |
 | **M-5** | **Installation moves into the Go binary.** `engramux install` replaces `scripts/install-hooks.mjs`, and the Node dependency goes with it | Decided |
 | **M-7** | **Replacing an installed build is its own command.** `engramux update` is `install --apply` minus everything that writes host configuration, and Engramux never fetches what it runs | Decided |
 | **M-6** | **`doctor` judges by stage.** "Not installed yet" and "installed and broken" become different answers with different next commands; MCP becomes optional rather than required for a green result; the eleven hook entries are checked; and the output is masked by default, with `--full` for the real values | Decided |
@@ -937,6 +937,30 @@ and M-3's derived columns are all written already, and a hook-time path needs no
 §6's fifth mitigation also asks for a switch and a way to see what was injected; both are
 configuration and a log, neither is schema.
 
+**What ends M-4, and not only what starts it. Decided 2026-09-08, and it is a design change rather
+than a correction.** Everything above this line describes an activation gate: §5's M5, M6, M7, M9 and
+M10 say what injection must clear before it may be turned on. **Nothing said what happens when it
+does not clear.** M4, M11, M13 and M14 each carry an explicit delete condition, and the row all four
+of them serve carried none — so every miss could be answered by narrowing the candidate again, and
+the work had no way to end other than succeeding. Closing that asymmetry is the owner's decision, not
+something a measurement forced.
+
+**The stop condition is one retry.** Owner-labelled M7 runs over its pre-registered 150 prompts. If
+the relevant-byte share does not clear the 0.50 bar, the candidate is narrowed **once** and M7 is
+re-run over the same 150. **A second miss deletes M-4 and the injection code**, the way M4's own
+condition would have deleted migration `00005`. Three things are fixed by this being pre-registered
+rather than decided afterwards: the candidate is not narrowed a third time, the bar is not moved, and
+a fresh prompt population is not drawn. The transfer holdout — split on 2026-09-08 by a rule fixed
+before execution, 108 prompts, and never opened; `docs/evidence/transfer-split-2026-09-08.md` records
+it — stays sealed for a check after the feature is on and is not a second attempt at this gate. And
+M7's bar was registered on 2026-09-04 before a label existed. Moving either is how a pre-registered
+gate stops being one.
+
+**What deletion removes** is `internal/inject`, the `inject.json` switch `cmd/engramux` reads, and
+this row. **What it does not remove is the pull path.** M-4 is the push path alone; M1, M2, M3, M4,
+M8 and M11 through M14 measure retrieval, which the CLI and MCP serve whether or not injection ever
+ships.
+
 ### What building it settled (M-4)
 
 **Built 2026-09-03**, on `step-5-injection`, and shipped **off**. Everything below is a decision the
@@ -1558,6 +1582,25 @@ Installed plugins are cached one directory per version, keyed by marketplace, pl
 with old versions kept about fourteen days for sessions still running against them. The host's own
 plugin update command is what fetches, and a plugin's own version field pins what a user receives
 until it is bumped.
+
+**[verified] 2026-09-09 against the installed binary rather than against the reference, and it
+answers a question the reference reading never raised.** The shipped Claude Code's accepted source
+set is `npm`, `url`, `github`, `git-subdir`, `archive`, `command` and `unsupported`, so `archive` is
+current rather than merely documented. Two of its constraints decide things here. The archive's
+**plugin root may be at the top of the zip or nested one directory deep — a single wrapping directory
+is stripped**, and `mkzip` writes it at the top, so what this repository already builds is accepted
+unchanged. And the URL is refined to **HTTPS**, which is why **there is no local rehearsal of this
+path**: an archive install cannot be exercised before the release exists at its URL, and a local
+install would have to use a different source type and would therefore test a different thing. The
+`sha256` field's own description is that every download is verified against it and the install is
+refused on mismatch, which is what makes the untested remainder — that the URL serves exactly those
+bytes — fail loudly rather than quietly.
+
+**And the route is unexercised on this machine, which is a reason to install immediately after
+publishing rather than to assume.** Measured the same day: of the plugins installed here, **none**
+uses an `archive` source, and of the 238 object-source entries in the official catalogue cache,
+**85 are `git-subdir`, 153 are `url`, and 0 are `archive`**. The schema accepts it and nothing local
+has ever run it.
 
 **The zip is the plugin, and that is forced rather than chosen.** An `archive` source's zip has to be
 a plugin directory, so it carries the manifest and the two binaries. The consequence is the part
@@ -2838,6 +2881,14 @@ Decided 2026-09-02. §1 already makes publication wait on the memory feature bei
 better; this list is what else it waits on, written here so that the conditions have one owner instead
 of living in a session brief.
 
+**That first coupling was released on 2026-09-08, and this is a design change rather than a
+correction.** Publication no longer waits on the memory feature. 0.1.0 ships with hook-time injection
+built and disabled, exactly as M-4 already says it ships, and the injector is 0.2.0's. What survives
+of §1's sentence is the *goal* — native-grade or better is still what M8's pair of numbers is read
+against — and what is gone is its use as a precondition for shipping anything at all. **The four
+conditions below are untouched by this**, and as of 2026-09-09 all four are closed: three on
+2026-09-04 and condition 3 on the day this was written. Nothing on either list now gates 0.1.0.
+
 1. **A first install on a clean profile. [verified] 2026-09-04, and this condition is closed.** The 1.0 spec's Windows argument has been measured on one
    profile only, and that profile has had every build of Engramux on it. What the argument needs is an
    install by the two shipped binaries alone onto a profile that has never run them. A *profile* is the
@@ -2905,7 +2956,9 @@ of living in a session brief.
    file carries the token. How many stood on the owner's machine before the bound is
    `[unverified]` and stays so: a credential-directory guard refused the listing in both sessions
    that tried, and neither worked around it. That refusal is what the `doctor` line answers.
-3. **A `README`.** There is none, and a public repository with no `README` and no licence granted
+3. **A `README`. [verified] 2026-09-09, and this condition is closed** — the exclusion procedure was
+   walked and recorded; *What closed condition 3* below carries it. There was none when this was
+   written, and a public repository with no `README` and no licence granted
    nobody anything. The licence half closed on 2026-09-02: `LICENSE` is Apache-2.0. **It gained a
    named requirement on 2026-09-03** when the false-positive submission was declined (M-7): condition
    4 below is an outcome with two halves, and with the submission off the table this document is the
@@ -3029,7 +3082,8 @@ second machine is a second data point on that row and does not replace the first
 
 **Condition 3 did not close, exactly as the section above said it would not.** The exclusion
 procedure is closed by somebody walking the Windows Security UI and writing down what it asked for,
-and nothing asked them to. It is satisfied by a recorded procedure and not by an absence.
+and nothing asked them to. It is satisfied by a recorded procedure and not by an absence. *What
+closed condition 3* below is that procedure, walked five days later and by the other route.
 
 **Two things only a second machine could show, and one of them was a defect.** The `claude code
 backups` line printed nothing at all, because Claude Code's own state file is one this product never
@@ -3044,3 +3098,27 @@ and masks it, so the sentence somebody adds next is covered too.
 either host. Capture itself is not in doubt - 2,310 events, no errors, nothing spooled, both hosts
 at eleven of eleven, and the native memory indexer had run - but a query answering over a database
 built from nothing on a machine that is not this one is a different claim and is still unmade.
+
+#### What closed condition 3
+
+**[verified] 2026-09-09, by the owner on their own machine, and the route is not the one this
+document predicted.** The condition asked for the exclusion steps, and every passage above assumed
+the Windows Security UI would be them, because `Add-MpPreference -ExclusionPath` had been refused
+once with HRESULT `0xc0000142`. **That refusal was elevation and not Tamper Protection.** The same
+cmdlet from an elevated PowerShell added both directories - `dist\` under the checkout and
+`%LOCALAPPDATA%\engramux\bin` - and `(Get-MpPreference).ExclusionPath` read them back. The `README`
+now carries the steps, the read-back, and the UI as the branch to take if elevation is not the cause
+on some other machine. With that, all four publication conditions are closed.
+
+**The inference that stood here for six days is worth naming, because it is the shape rather than
+the topic.** `0xc0000142` says a call never started. Two causes produce it and the document picked
+the one that made the harder procedure necessary, then wrote *"an exclusion therefore has to go
+through the Windows Security UI"* - a therefore with nothing behind it. Nobody tried the cheaper
+branch for six days because the document said it was closed.
+
+**What the closure does not establish.** One machine, one owner, one elevated session. Whether
+Tamper Protection refuses the cmdlet where it is the real cause is `[unverified]` and stays so - the
+UI branch in the `README` is written as untried rather than as an alternative anyone has walked.
+An independent read of the exclusion list from this session was refused twice, once by a shell guard
+and once by the registry's own ACL, so the evidence is the owner's report of what their elevated
+session printed.

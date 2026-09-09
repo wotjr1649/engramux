@@ -33,19 +33,22 @@ off Windows, and `github.com/Microsoft/go-winio`'s named-pipe symbols are behind
 constraint, so a build for another `GOOS` fails. `[unverified]`: nobody has run that build, and the
 exact message is unrecorded. One artefact, `windows/amd64`; `arm64` is unmeasured.
 
-## There is no release
+## The release
 
-There is no published release. Checked on 2026-09-08 with `gh release list --repo
-wotjr1649/engramux --limit 5` and `git tag --list`: no release was listed and the local repository
-had no tags. The marketplace still names placeholder version `0.0.0`; it is not an installable
-release. Packaging support exists, but publication prerequisites remain unresolved.
+**0.1.0 is the first one.** Until 2026-09-09 there was none at all: checked on 2026-09-08 with `gh
+release list --repo wotjr1649/engramux --limit 5` and `git tag --list`, nothing was listed and the
+repository had no tags, and the marketplace named the placeholder `0.0.0`. What held it was the four
+publication conditions below, the last of which closed the day this shipped.
 
-Hosted checks have now run: the [main checks run for 3e4b44c](https://github.com/wotjr1649/engramux/actions/runs/34190680850)
-completed successfully. Verified with `gh run view 34190680850 --repo wotjr1649/engramux --json
-headSha,status,conclusion,url`. This verifies that revision's hosted checks, not a release archive
-or the private-corpus gates that skip on CI. The available path remains **building from source,
-the developer path**: the spec rejects source as a primary path for end users, and the Defender
-section below explains the remaining first-install concern.
+The archive is the whole of the release — one zip, `windows/amd64` — and the marketplace entry in
+`.claude-plugin/` names its SHA-256, so the tag's own workflow rebuilds it and refuses the release
+when the two disagree. Building from source stays supported and stays **the developer path**: the
+spec rejects it as the primary route for end users, and the Defender section below is most of why.
+
+Hosted checks run on every push: the [main checks run for 3e4b44c](https://github.com/wotjr1649/engramux/actions/runs/34190680850)
+completed successfully, verified with `gh run view 34190680850 --repo wotjr1649/engramux --json
+headSha,status,conclusion,url`. That covers a revision's hosted checks and neither the release
+archive nor the private-corpus gates, which skip on a runner that has no captured corpus.
 
 The version is `0.x` and there is no compatibility promise. Nothing outside `internal/` and `cmd/`
 is exported — `pkg/` included — because a public API surface is a promise 1.0 has not earned. A
@@ -53,16 +56,17 @@ build that is not a release calls itself `0.0.0-dev`, with the first twelve char
 appended when the binary carries build information, and `.dirty` on top of that when the tree was
 modified.
 
-Four publication conditions are recorded in the memory spec. **Three are closed**, all on
-2026-09-04: the bearer token's file permissions, a first install on a profile that had never run
-these binaries, and a first run that antivirus did not touch. What that install measured is in the
-spec; the short version is that it worked, including the part no disposable environment can test —
-after a sign-out and a sign-in the service was already running, started by nothing but the logon
-task.
+Four publication conditions are recorded in the memory spec, and **all four are now closed**. Three
+closed on 2026-09-04: the bearer token's file permissions, a first install on a profile that had
+never run these binaries, and a first run that antivirus did not touch. What that install measured is
+in the spec; the short version is that it worked, including the part no disposable environment can
+test — after a sign-out and a sign-in the service was already running, started by nothing but the
+logon task.
 
-**One is open, and it is this file.** Condition 3 asks for the Defender exclusion steps, and those
-are still `[unverified]` below rather than given, because on the machine that closed the other two
-Defender never fired and so nobody had to walk that route.
+**The last to close was this file, on 2026-09-09.** Condition 3 asks for the Defender
+exclusion steps, and it is satisfied by a recorded procedure rather than by an absence — so it stayed
+open through a machine on which Defender never fired. The steps are below, walked rather than
+guessed.
 
 Two things about the closed pair are worth knowing before they read as more than they are. That
 install was onto a second machine belonging to the same person, not a stranger's. And the binary
@@ -144,12 +148,27 @@ is, it cannot be signed, and a pre-release existing only to clear that bar would
 bar does not already force. If you meet an unsigned binary from this project, you were told here
 first, which is the standard the fourth publication condition sets.
 
-**The exclusion procedure is `[unverified]`, and that is not a formality.**
-`Add-MpPreference -ExclusionPath` was attempted and refused with HRESULT `0xc0000142` — unelevated,
-or Tamper Protection, which is what that feature is for. An exclusion therefore has to go through
-the Windows Security UI by hand, for **both** the build output directory and the install directory.
-Nobody has walked that route and recorded the result, so no steps are given here rather than guessed
-at. The two directories are `dist\` under your checkout and `%LOCALAPPDATA%\engramux\bin`.
+**The exclusion procedure, and the elevation is the whole of it. [verified] 2026-09-09.**
+`Add-MpPreference -ExclusionPath` had been attempted once from an ordinary session and refused with
+HRESULT `0xc0000142`, which says the call never started and does not say why: the session was not
+elevated, or Tamper Protection was on, which is what that feature is for. **It was elevation.** The
+same cmdlet run from an elevated PowerShell added the paths and `(Get-MpPreference).ExclusionPath`
+read them back. An earlier revision of this paragraph told you the Windows Security UI was the only
+route, which was an inference from that refusal rather than something anyone had tried.
+
+**Exclude both directories**, because this detection has taken the CLI from each of them: `dist\`
+under your checkout, and `%LOCALAPPDATA%\engramux\bin`. From an elevated PowerShell,
+`Add-MpPreference -ExclusionPath` accepts them as one comma-separated list, and
+`(Get-MpPreference).ExclusionPath` is how you confirm it rather than trusting a silent success.
+
+**If it is still refused after you elevate, Tamper Protection is what is left**, and then the route
+is the Windows Security UI by hand — Virus & threat protection, Manage settings, Exclusions, Add an
+exclusion, Folder — once per directory. That branch is `[unverified]`: nobody here has reached it,
+because elevation was the answer here.
+
+Two things the exclusion does not do. It is a **path**, so moving your checkout leaves it pointing
+at nothing and the next build is unprotected. And it is not retroactive: a binary already quarantined
+comes back through Protection History, not through this.
 
 ## Building it
 

@@ -12,10 +12,11 @@
       "description": "Delivers the two Engramux binaries. It configures nothing: hooks and the MCP endpoint stay `engramux install`'s to write, so disabling this plugin cannot stop capture.",
       "category": "productivity",
       "homepage": "https://github.com/wotjr1649/engramux",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "source": {
         "source": "archive",
-        "url": "https://github.com/wotjr1649/engramux/releases/download/v0.0.0/engramux-0.0.0-windows-amd64.zip"
+        "url": "https://github.com/wotjr1649/engramux/releases/download/v0.1.0/engramux-0.1.0-windows-amd64.zip",
+        "sha256": "e8552394e4de6bc663398cdba8e04ac4cad6e9120eac6af5a643a43300e59901"
       }
     }
   ]
