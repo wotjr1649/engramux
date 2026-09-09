@@ -1880,8 +1880,33 @@ the question, because retention would act on it and it is fifty times the size. 
 already runs over both for the same reason.
 
 **Compaction is deferred, and the condition that ends the deferral is a file size.** Two gigabytes
-in the data directory. From the size M16 would leave and the soak's measured 0.40 MB/h that is
-roughly six months, and `doctor` already reports the file size, so nothing new has to watch for it.
+in the data directory. **Every other sentence this paragraph carried was wrong, and it was checked
+on 2026-09-09 rather than re-read.**
+
+*"From the size M16 would leave"* is void: M16 refused, so nothing is removed and the trigger is
+approached from the full file. *"The soak's measured 0.40 MB/h"* is a rate from a light window.
+Between the soak's last row and the M15 snapshot — 2026-09-02T04:23Z at 182,829,056 B and 17,043
+events, 2026-09-09T07:56Z at 512,516,096 B and 46,806 events, 171.5 h apart — the file grew at
+**1.83 MiB/h**, 4.6 times that, at 11,077 B per event and no migration step inside the window. So
+*"roughly six months"* is **35 days at the recent rate and 162 days at the soak's**, and which one
+holds is a question about how hard this repository is being worked rather than about the product.
+
+*"`doctor` already reports the file size, so nothing new has to watch for it"* is **false**. Neither
+`doctor` nor `status` prints a size — `status` prints the database's *path* — and no threshold of any
+kind is in the tree: `grep -rn "2147483648\|2 GB" internal/ cmd/` finds nothing, and the only
+`Size()` calls in `cmd/engramux/doctor.go` read the log tail. **So the deferral rests on a trigger
+that nothing watches, and that would have nothing to run if it fired**, since deletion, inventory and
+compaction are all unbuilt. Three gaps, not one, and the first is hours of work.
+
+**The threshold is a proxy and the thing it proxies for is read latency, which is what to watch
+instead.** 734 GB were free on the volume at 512 MB, so two gigabytes costs nothing as disk; what
+degrades with the file is the cold read, and spec 7.1's read-deadline row has that failing live at
+108, 164 and ~180 MB. Counted from the installed service's log on 2026-09-09, `context deadline
+exceeded` lines by day: 4 on 08-30, 2 on 08-31, 6 on 09-01, 9 on 09-04, and **0 across 09-05 to
+09-09** while the file went from ~180 MB to 512 MB. Migration `00003`'s covering index held through a
+near-tripling. That is a log count under ordinary development and not a controlled soak — the service
+had been restarted and no series was running — so it is evidence that the urgency is not present
+rather than a measurement that it cannot return.
 
 **Compaction can never run automatically, and that follows rather than being chosen.** The rule the
 owner set is that only a non-destructive action may be automatic. Truncating a payload value

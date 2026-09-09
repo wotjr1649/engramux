@@ -136,7 +136,13 @@ const m16Refusal = "subqueries prohibited in generated columns"
 // the data, but the table it was asked over is not the installed one - so
 // [TestGateM16OverTheInstalledSchema] asks it again over the real schema, with
 // its twelve columns, its index and its triggers.
-var m16Snapshot = filepath.Join("..", "..", ".capture", "m15", "m16.db")
+//
+// It is gate M15's snapshot and not one of its own. Two 500 MB copies were taken
+// on 2026-09-09 and the second was deleted once M16 had answered; pointing this
+// at the survivor is what keeps the arm alive rather than skipping forever. The
+// ALTER it runs is refused and writes nothing, and `-p 1` keeps the two packages
+// from opening the file at once.
+var m16Snapshot = filepath.Join("..", "..", ".capture", "m15", "m15.db")
 
 // TestGateM16OverTheInstalledSchema repeats M16's refusal against a copy of the
 // installed database, so the finding does not rest on a two-column table a test
