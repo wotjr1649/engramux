@@ -24,7 +24,7 @@ CGO_ENABLED=0 go build -ldflags "-s -w"               -o dist/engramux.exe      
 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o dist/engramux-service.exe ./cmd/engramux-service
 go test -p 1 ./...
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run
-./scripts/race.sh            # test suite under the race detector; about 60 min, 58 of it internal/search
+./scripts/race.sh            # test suite under the race detector; about 70 min, 63 of it internal/search
 go test -p 1 -count=1 -run TestPhase1Gate -v ./internal/spool/   # spec §8's Phase 1 gate
 go test -p 1 -count=1 -run TestPhase4Gate -v ./internal/search/  # spec §8's Phase 4 gate
 go test -p 1 -count=1 -run TestEveryCandidateDocumentIsReachable -v ./internal/search/
@@ -68,8 +68,12 @@ Measured 2026-09-09 over three runs of one snapshot: **11m15s to 13m25s** for 46
 spread being machine load and nothing else — so the `-timeout` in that line is load-bearing and the
 default 10m is not enough. **That cost lands on a whole-tree run too**, because the snapshot being
 present is the whole of what makes it run; deleting `.capture/m15/` is how you take the twelve
-minutes back. Its output is safe to paste — measured, 0 of the 39 `-v` lines carry a drive-letter
-path, unlike `TestPhase4Gate`'s corpus mode.
+minutes back. **It does not land on `scripts/race.sh`**, and that is the one gate carrying
+`//go:build !race`: priced at the multiplier that script says to use it would be about 250 minutes
+against a 90-minute guard, and nothing in the file is concurrent, so the detector has nothing there
+to find. That script's comment block carries the measurement and is where the exception is argued —
+a gate with a goroutine in it does not get the line. Its output is safe to paste — measured, 0 of the
+39 `-v` lines carry a drive-letter path, unlike `TestPhase4Gate`'s corpus mode.
 `TestGateM16` needs no corpus, takes under a second, and asks a copy of that same snapshot one extra
 question when one is there.
 

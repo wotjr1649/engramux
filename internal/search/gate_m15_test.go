@@ -1,3 +1,16 @@
+// Not built under the race detector, and scripts/race.sh's own comment block
+// carries the measurement and the reasoning. The short of it: nothing in this
+// file is concurrent, so -race has nothing here to find, and at the highest
+// multiplier that script has observed it would cost about 250 minutes against a
+// 90-minute guard.
+//
+// This is the one exception to that script's "raise it here rather than
+// skipping the gate", and it is an exception because the rule is about not
+// quietly dropping coverage - there is none to drop. A gate with a goroutine in
+// it does not get this line.
+
+//go:build !race
+
 package search_test
 
 import (
