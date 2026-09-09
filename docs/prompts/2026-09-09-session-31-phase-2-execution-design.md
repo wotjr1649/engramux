@@ -25,7 +25,7 @@ pass and M7 clears its threshold; the first four passed 2026-09-03.
 
 ## Verified repository state, 2026-09-09
 
-`git rev-parse HEAD` was `1944ef3` before this brief's own commit and the two that follow it; the
+`git rev-parse HEAD` was `1944ef3` before `d23387c`, which is this brief's own commit; the
 branch was `main`; `git status --porcelain` was empty apart from this file. Recheck before acting on
 any of it. Session 30 pushed, so `origin/main` and `main` should agree — if they do not, find out why
 before writing anything.
