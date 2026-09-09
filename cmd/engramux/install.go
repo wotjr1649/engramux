@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/wotjr1649/engramux/internal/claudehome"
 	"github.com/wotjr1649/engramux/internal/host"
 	"github.com/wotjr1649/engramux/internal/schedule"
 )
@@ -118,13 +119,19 @@ func resolvePaths(local, home string, args []string) (host.Options, error) {
 	}
 	data := filepath.Join(local, "engramux")
 
+	// The three Claude Code paths go through [claudehome] rather than being
+	// spelled here, because `CLAUDE_CONFIG_DIR` moves all three and this
+	// function is not the only place that has to agree about where they went
+	// - `internal/memory` reads the same home to find the native memory
+	// directory. Backlog 54 was the two spellings disagreeing. Codex is a
+	// different host with a different variable and does not follow this one.
 	return host.Options{
 		BinDir:      filepath.Join(data, "bin"),
-		ClaudePath:  envOr("ENGRAMUX_CLAUDE_SETTINGS", filepath.Join(home, ".claude", "settings.json")),
+		ClaudePath:  envOr("ENGRAMUX_CLAUDE_SETTINGS", claudehome.Settings(home)),
 		CodexHooks:  envOr("ENGRAMUX_CODEX_HOOKS", filepath.Join(home, ".codex", "hooks.json")),
 		CodexConfig: envOr("ENGRAMUX_CODEX_CONFIG", filepath.Join(home, ".codex", "config.toml")),
-		ClaudeMCP:   envOr("ENGRAMUX_CLAUDE_MCP", filepath.Join(home, ".claude.json")),
-		PluginCache: envOr("ENGRAMUX_CLAUDE_PLUGINS", filepath.Join(home, ".claude", "plugins", "cache")),
+		ClaudeMCP:   envOr("ENGRAMUX_CLAUDE_MCP", claudehome.AppState(home)),
+		PluginCache: envOr("ENGRAMUX_CLAUDE_PLUGINS", claudehome.PluginCache(home)),
 		MCPJSON:     filepath.Join(data, "mcp.json"),
 		TaskName:    taskName(withoutFlags(args)),
 	}, nil

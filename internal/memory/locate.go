@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/wotjr1649/engramux/internal/claudehome"
 )
 
 // ClaudeHome is where Claude Code keeps its configuration, and therefore where
@@ -19,15 +21,20 @@ import (
 // CLAUDE_CONFIG_DIR, whose documented default is ~/.claude. Memory spec rev.2's
 // M-2 reading is where that was measured, and it corrected an earlier line in
 // that same section which said the location came from settings.
+// The resolution itself moved to [claudehome] on 2026-09-09 and this is now
+// one caller of it rather than one of two spellings. Backlog 54 was the other
+// spelling - `cmd/engramux` deriving the same home by hand and not honouring
+// the variable - and a shared leaf is what stops that from recurring, because
+// there is no longer a second place to forget.
 func ClaudeHome() string {
-	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return dir
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		// Not fatal on its own: with the override set the home
+		// directory is not consulted, and [claudehome.Dir] answers ""
+		// when it is needed and missing.
+		home = ""
 	}
-	return filepath.Join(home, ".claude")
+	return claudehome.Dir(home)
 }
 
 // CodexHome is where Codex keeps its configuration, and its memory directory is

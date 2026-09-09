@@ -35,3 +35,39 @@ Implementation remains pending the exact global-state rule and supported environ
 semantics. No host files, installer registration, dependency graph or product behavior changed.
 The diagnostic only calls resolvePaths and uses t.Setenv/t.TempDir; it never calls install,
 doctor, register or unregister. Do not close backlog 54 based on this test's exit code.
+
+## Closed 2026-09-09, and the open fact was settled by the host rather than by a document
+
+**The global application-state file moves with the variable, and it moves *inside* the directory
+the variable names.** That was the one thing this diagnosis could not settle, and neither
+documentation page answered it — both fetches came back truncated before the entry. The installed
+host answered it in two commands. With `CLAUDE_CONFIG_DIR` pointed at an empty temporary directory,
+`claude mcp list` printed *"No MCP servers configured. Use `claude mcp add` to add a server."*; the
+same command without the override printed this product's endpoint and `✔ Connected`. The host then
+wrote its own copy of that file, and a `backups/` directory beside it, into the directory the
+variable named.
+
+**So the rule has two shapes rather than one, which is why a single join would have been wrong.**
+Unset, the file is a *sibling* of the configuration home. Set, it is a *child* of it. Settings and
+the plugin cache are children in both arms.
+
+**What was implemented.** `internal/claudehome`, a leaf importing `os`, `path/filepath` and
+`strings` and nothing else, so that `cmd/engramux` can reach it without reaching `database/sql` —
+`TestTheRelayDoesNotLinkTheSQLiteDriver` ran and still passes. `resolvePaths` and
+`internal/memory.ClaudeHome` are now both callers of it rather than two spellings, which is the
+consistency risk this document identified: `ClaudeMCP` feeds `PointsAtEndpoint`, so the wrong path
+there defeats the already-registered check rather than only printing a wrong line.
+
+**What holds it.** `cmd/engramux/config_home_test.go` replaces the diagnostic this document
+describes, and asserts both arms of all three paths plus the precedence of the `ENGRAMUX_*`
+overrides, and that the Codex paths do not follow a Claude Code variable. Two mutations were
+applied and both were caught: joining the application-state file onto the configuration home in the
+default arm fails the defaults test, and inverting the override test in `Dir` fails both. The pinned
+linter reports 0 issues at exit 0.
+
+**Still unverified, deliberately.** Nobody has run an install on a machine that actually sets the
+variable; what is measured is the resolver and the host's own behaviour, not an end-to-end install
+under the override. And the credential-path guard refused the command that would have confirmed the
+default location by stat — the default is taken from the shape this repository already shipped and
+from `doctor` reporting both hosts correctly wired on a machine with the variable unset. No guard
+was worked around in either session.
