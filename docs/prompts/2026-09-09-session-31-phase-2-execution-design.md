@@ -7,21 +7,51 @@ Korean; repository documents stay English.
 ## What this session is
 
 **Phase 2's execution design, and M7.** It is item **B** in the priority order the owner set on
-2026-09-09, and A is finished. Read the memory spec's *What M7 will measure, pre-registered before a
-label exists* and the sections around it — that is the design, and this brief deliberately does not
-restate it, because the spec owns decisions and a brief is never updated.
+2026-09-09, and A is finished.
 
-**M7 costs the owner's own time and that is the scarce input.** 150 blind judgements, and the
-stratified sample, the two labels and the non-vacuity arms were all registered before a label
-existed. Do not redesign what is registered because it is expensive; the expense is the point of a
-blind judgement. What is open is the **execution design** — how the 150 are put to a person, in what
-order, with what shown and what withheld — and that is what this session is for.
+**"Phase 2" is not a term the spec or the plan defines** — checked, `grep -rn "Phase 2" docs/` finds
+it only in briefs — so read **session 29's brief**, `docs/prompts/2026-09-08-session-29-the-release-before-the-injector.md`,
+for what it contains. Its *Out of scope* section is the closest thing to a scope statement anyone has
+written: **productionising the continuation candidate out of `internal/inject/continuation_test.go`
+into a product path, the labelling CLI, any M7 run, and the 108-prompt holdout and its manifest.**
+That is the only reason to open an old brief here; everything else in it is a record of that session.
 
-The thing standing behind it is backlog 57: **injection ships disabled, and the owner reports never
-having called `search`, `get_session_resume` or the CLI once.** M8 P1 puts verbatim recall at 1.000
-in all three classes over a corpus nobody queries. So the gap is delivery, and M7 is the gate
-between here and turning delivery on. Nothing about M-4 turns on for anyone until M5, M6, M9 and M10
-pass and M7 clears its threshold; the first four passed 2026-09-03.
+Then read the memory spec's *What M7 will measure, pre-registered before a label exists* and
+*What ends M-4, and not only what starts it*. This brief does not restate either, because the
+spec owns decisions and a brief is never updated.
+
+**Read that second section before you plan anything, because it changes what this work is.** M7 is
+not only an activation gate. Since 2026-09-08 M-4 carries an abandonment condition: owner-labelled M7
+runs over its pre-registered 150 prompts, and if the relevant-byte share does not clear the **0.50**
+bar, the candidate is narrowed **once** and M7 re-runs over the same 150. **A second miss deletes
+M-4 and the injection code** — `internal/inject`, the `inject.json` switch `cmd/engramux` reads, and
+the row. Backlog 55 and 56 are pre-registered as that one retry rather than as work to do before it.
+Three things are fixed by this having been registered in advance and each is a way to break it: **the
+candidate is not narrowed a third time, the bar is not moved, and a fresh prompt population is not
+drawn.** The 108-prompt transfer holdout stays **sealed** — `docs/evidence/transfer-split-2026-09-08.md`
+records the split — and is a check for after the feature is on, never a second attempt at this gate.
+
+**What deletion would not remove is the pull path.** M-4 is the push path alone; the CLI and MCP
+serve retrieval whether or not injection ever ships.
+
+**M7 costs the owner's own time and that is the scarce input.** Pass 1 is **150 blind prompt
+judgements**; pass 2 is roughly **14 block judgements**. The stratified sample, the two labels and
+the non-vacuity arms were all registered before a label existed. Do not redesign what is registered
+because it is expensive; the expense is the point of a blind judgement. What is open is the
+**execution design** — how those judgements are put to a person, in what order, with what shown and
+what withheld — and that is what this session is for.
+
+**The figures that already exist are agent estimates and must never be relabelled.** The continuation
+candidate measured 75.10% known-relevant bytes, zero bytes on prompts labelled as not wanting
+context, and 14 emitted blocks over the 150-prompt temporal replay — **agent judgements over exposed
+development data, not an owner verdict and not an M7 pass.** The full-snapshot agent M7 failed at
+**0.032** against a bar above 0.50. The spec's *Owner judgements and agent estimates are different
+evidence* is the section on this. Quoting either set as a result is the specific mistake to avoid.
+
+The thing standing behind all of it is backlog 57: **injection ships disabled, and the owner reports
+never having called `search`, `get_session_resume` or the CLI once.** M8 P1 puts verbatim recall at
+1.000 in all three classes over a corpus nobody queries. So the gap is delivery. M5, M6, M9 and M10
+passed 2026-09-03; M7 is what is left, in both directions.
 
 ## Verified repository state, 2026-09-09
 
@@ -72,8 +102,27 @@ said; if it does not, say that it was not run rather than inheriting the old num
 
 The order the owner set is **A** the M15/M16 measurement (done), **B** this, **C** the deletion and
 inventory CLI, **D** the long-term selection rules, **E** backlog 59, **F** a viewer, **G** the exit
-condition. Backlog 55, 56, 58, 59 and 60 are all deferred deliberately and each row says by whom and
-when.
+condition. Backlog 58, 59 and 60 are deferred deliberately and each row says by whom and when.
+**Backlog 55 and 56 are not in that list**: they are inside the injector and are pre-registered as
+this work's one retry, so they are read when the first M7 misses and not before.
+
+## Out of scope, named so it is not drifted into
+
+**The 108-prompt transfer holdout.** It is sealed and it is not a second attempt at this gate.
+
+**Narrowing the candidate before M7 has missed**, moving the 0.50 bar, and drawing a fresh prompt
+population. All three are the pre-registration, and each is a way to turn a registered gate into an
+unregistered one.
+
+**Deleting `internal/inject`** even if the second miss condition is met in this session. That is a
+destructive change to a shipped component and it is the owner's to authorise; measure, report, stop.
+
+Items C through G of the owner's order, and the eviction code M15 closed. Compaction and value
+truncation, which the memory spec defers and which cannot be automatic for the reason recorded there.
+Backlog 60's size reporting, which is a candidate to fold into C rather than a detour before B.
+
+No raw capture, private history or `.capture/` content goes into a commit, a document, a report or a
+delegate.
 
 ## Authority
 
