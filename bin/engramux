@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Resolves the *installed* engramux for a Claude Code session, and says what to
+# run when there is not one yet.
+#
+# Claude Code adds every enabled plugin's `<root>/bin` to the Bash tool's PATH,
+# measured 2026-09-09 against the installed host and true whether or not the
+# directory exists. So this file makes `engramux` a bare command inside a
+# Claude Code session - and only there. A user's own PowerShell never sees it,
+# which is why the README still has to say where the binaries land.
+#
+# It is a shim rather than a copy of the CLI, and that is the whole design. The
+# archive already carries `engramux.exe`; a second one reachable by name would
+# be a plugin pinned at one version answering for a service running another,
+# which is what `doctor`'s "installed and running agree" line exists to make
+# impossible. One real binary, however the name is reached.
+#
+# No extension, and that is not style either. Measured 2026-09-09: `mkzip`
+# writes no mode bits, so the extracted file's executable bit is inferred from
+# its *content* - a shebang or a PE header. A `.cmd` came out `-rw-r--r--` and
+# could not be found by its bare name; this file comes out `-rwxr-xr-x` and can.
+set -u
+
+installed="${LOCALAPPDATA:-${USERPROFILE:-$HOME}/AppData/Local}/engramux/bin/engramux.exe"
+if [ -x "$installed" ]; then
+    exec "$installed" "$@"
+fi
+
+# Not installed. The copy in this archive is the one to install *from*, which is
+# what the release notes tell a person who unpacked it by hand; the difference
+# here is that they did not unpack it, so they have no idea where it is.
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cat >&2 <<MSG
+engramux: the plugin is installed and the product is not.
+
+The plugin only delivers the binaries; hooks, the MCP endpoint and the service
+are 'engramux install' to write, so that disabling the plugin cannot silently
+stop capture. Run it once, from the copy this plugin unpacked:
+
+  "$root/engramux.exe" install
+  "$root/engramux.exe" install --apply
+
+The first reports the plan and writes nothing. The second writes: two binaries
+into %LOCALAPPDATA%\\engramux\\bin, eleven hook entries per host, a logon task
+and a data directory. It records raw prompts, file contents, tool output and
+the paths you work in - read the plugin's README before the second command.
+MSG
+exit 1

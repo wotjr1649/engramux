@@ -238,6 +238,19 @@ writes nothing. `--apply` is what writes, and it is not a small action:
 It also **finds the `claude` CLI on your `PATH` and runs it**, because registering the MCP endpoint
 with Claude Code goes through that binary rather than through a file this product writes.
 
+**What it does not do is put itself on your `PATH`**, and that surprises people — the first person
+it caught was the author, one command after installing. `install --apply` writes no environment
+variable and touches no shell profile, so in your own terminal `engramux` is *not* a command until
+you make it one. Until you do, spell the path: `%LOCALAPPDATA%\engramux\bin\engramux.exe`. Adding
+that directory to your user `PATH` is yours to do, and **`setx` is the wrong tool for it** — it
+truncates the value at 1024 characters and writes the truncation without failing.
+
+**Inside Claude Code it is already a bare command.** The plugin ships `bin/engramux`, and Claude
+Code puts every enabled plugin's `bin/` on the Bash tool's `PATH`. That file is a shim onto the
+binary `install --apply` put in place rather than a second copy of it, so there is one build
+answering the name however it is reached; run it before installing and it prints what to run
+instead. None of that reaches your own shell, which is why the paragraph above exists.
+
 Undoing it is partial, and the part that is not undone is the part that matters.
 `engramux install --remove` takes the hook entries and the MCP registration out of both hosts and
 removes the logon task. `engramux unregister` removes **only** the logon task. Neither removes the

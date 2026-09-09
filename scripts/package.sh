@@ -102,6 +102,12 @@ cp README.md LICENSE "$stage/"
 # had loaded - so leaving it out of the staging list is how the search surface
 # stays unreachable without anything failing.
 cp -r skills "$stage/skills"
+# `bin/` is Claude Code's own convention rather than a declared field: it adds
+# every enabled plugin's `<root>/bin` to the Bash tool's PATH, measured
+# 2026-09-09 and true whether or not the directory exists. The file staged here
+# is a shim onto the installed CLI and deliberately not a second copy of it -
+# `bin/engramux` says why, and `internal/host`'s shim tests hold both arms.
+cp -r bin "$stage/bin"
 
 sha="$(go run ./scripts/mkzip "$stage" "$archive")"
 echo "package.sh: $archive" >&2
