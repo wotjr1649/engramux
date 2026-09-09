@@ -264,9 +264,12 @@ delete `%LOCALAPPDATA%\engramux` yourself.
 is registered, before it touches a file or stops the service, and tells you to run `install --apply`
 instead. It is how an *existing* installation is replaced: it stops the service, waits for it,
 copies the binaries, and starts it again. `scripts/reinstall.sh` wraps it and has the same
-precondition. Running `update` with no `--from` at all says there is no delivery channel and points
-at a directory you already have — it used to tell you to download a release archive, one line after
-saying there is nothing to read from.
+precondition. **Since 0.1.2, `engramux update` with no arguments reads Claude Code's plugin cache.** That is
+what makes updating the plugin mean something: the host fetches the release archive, checks its
+SHA-256 and unpacks it, and this command then takes the newest complete version it finds there. It
+names the version before it stops anything, an explicit `--from` still outranks it — which is what
+keeps a `dist/` build from being undone by the released one — and with no plugin installed it says
+how to install one instead of failing at you.
 
 ## Delivery, in the future tense
 
